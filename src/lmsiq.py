@@ -9,7 +9,7 @@ import numpy as np
 
 print('LMS IQ - started')
 
-reanalyse = False
+reanalyse = True
 print("Re-analysing from scratch = {:s}".format(str(reanalyse)))
 add_ipc = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 nom_ipc = 0.013
