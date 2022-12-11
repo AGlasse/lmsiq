@@ -14,42 +14,6 @@ class LMSIQAnalyse:
         return
 
     @staticmethod
-    def load_observations(path, file_list, run_test):
-        """ Load image and parameter information as a list of observation objects from a list of files, sorting them
-        in order 'perfect, design then obs_id = 00, 01 etc.
-        :param path:
-        :param file_list:
-        :param run_test: Boolean.  True = Replace image data with a single bright detector pixel at the image centre.
-        :return:
-        """
-        n_obs = len(file_list)
-        observations = [None]*n_obs
-        for file in file_list:
-            file_id = file[0:-5].split('_')[4]
-            if file_id == 'perfect':
-                j = 0
-            else:
-                if file_id == 'design':
-                    j = 1
-                else:
-                    j = int(file_id) + 2
-            image, header = filer.read_zemax_fits(path, file)
-            mm_fitspix = 1000.0 * header['CDELT1']
-            if run_test:
-                oversampling = int((Globals.mm_lmspix / mm_fitspix) + 0.5)
-                image[:, :] = 0.0
-                nr, nc = image.shape
-                r1, c1 = int((nr - oversampling) / 2.0), int((nc - oversampling) / 2.0)
-                r2, c2 = r1 + oversampling, c1 + oversampling
-                image[r1:r2, c1:c2] = 1.0
-
-
-
-            params = file_id, mm_fitspix
-            observations[j] = image, params
-        return observations
-
-    @staticmethod
     def find_mean_centroid(observations):
         """ Find the mean centroid position for all images in a list.
         """

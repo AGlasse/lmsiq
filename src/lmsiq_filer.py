@@ -1,45 +1,34 @@
+import os
 import numpy as np
 import time
-from os import listdir
-from os.path import isfile, join
-from astropy.io import fits
 
 class LMSIQFiler:
 
+    res_path, profiles_path = None, None
 
-    def __init__(self):
-        LMSIQFiler.res_path = '../results/'
-        LMSIQFiler.data_path = '../data/'
+    def __init__(self, dataset):
+        res_path = '../results/' + dataset + '/'
+        profiles_path = res_path + 'profiles/'
+        if not os.path.exists(res_path):
+            os.mkdir(res_path)
+            os.mkdir(profiles_path)
+        LMSIQFiler.res_path, LMSIQFiler.profiles_path = res_path, profiles_path
         return
 
     @staticmethod
-    def read_file_list(rundate, folder):
-        parent_folder = LMSIQFiler.data_path + 'psf_model_' + rundate + '_multi_wavelength/'     # 20201113
-        path = parent_folder + folder
-        file_list = [f for f in listdir(path) if isfile(join(path, f)) and f.split('.')[1] == 'fits']
-        return path, file_list
-
-    @staticmethod
-    def read_param_file(rundate, folder):
-        parent_folder = LMSIQFiler.data_path + 'psf_model_' + rundate + '_multi_wavelength/'  # 20201113
-        path = parent_folder + folder + '/' + folder + '.txt'
-        pf = open(path, 'r')
-        lines = pf.read().splitlines()
-        pf.close()
-        slice = int(lines[1].split(':')[1])
-        wave = float(lines[3].split(':')[1])
-        prism_angle = float(lines[4].split(':')[1])
-        grating_angle = float(lines[5].split(':')[1])
-        order = -1 * int(lines[6].split(':')[1])
-        pix_size = float(lines[24].split(':')[1])
-        return slice, wave, prism_angle, grating_angle, order, pix_size
-
-    @staticmethod
-    def read_zemax_fits(path, f):
-        file_path = join(path, f)
-        hdu_list = fits.open(file_path, mode='readonly')
-        hdu = hdu_list[0]
-        return hdu.data, hdu.header
+    def create_summary_header(axes):
+        """ Create the header rows for the results summary file (wavelength v parameter) as a string list.
+        """
+        fmt = "{:>10s},{:>8s},{:>8s},{:>10s},{:>10s},{:>12s},{:>12s},"
+        hdr1 = fmt.format('Wave', 'Order', 'IPC', 'SRP', 'SRP_err', 'Strehl', 'Strehl_err')
+        hdr2 = fmt.format('(um)', '-', '-', '-', '-', '-', '-')
+        fmt = "{:>10s},{:>12s},{:>12s},{:>12s},{:>15s},{:>15s},"
+        for axis in axes:
+            ee_tag = 'EE' + axis[0:4]
+            fwhm_tag = 'FWHM' + axis[0:4]
+            hdr1 += fmt.format('X_' + ee_tag, ee_tag, ee_tag, ee_tag, fwhm_tag, fwhm_tag + 'err',)
+            hdr2 += fmt.format('pix.', 'perfect', 'design', '<model>', 'pix.', 'pix.')
+        return [hdr1, hdr2]
 
     @staticmethod
     def write_summary(dataset, rows, id):
@@ -60,7 +49,6 @@ class LMSIQFiler:
         with open(path, 'r') as text_file:
             records = text_file.read().splitlines()
             for record in records[2:]:
-#                print(record)
                 tokens = record.split(',')
                 waves.append(float(tokens[0]))
                 ipcs.append(float(tokens[2]))
@@ -81,17 +69,15 @@ class LMSIQFiler:
         return profile
 
     @staticmethod
-    def write_profiles(folder, type, axis, xy_data, strehl_data, ipc_factor):
+    def write_profiles(data_id, xy_data, strehl_data, ipc_factor):
         """ Write EE or LSF results to a csv file.
-        :param folder:
-        :param type:
-        :param axis:
-        :param xs:
-        :param y_mean:
-        :param y_rms:
-        :param y_all:
+        :param data_id:
+        :param xy_data:
+        :param strehl_data:
+        :param ipc_factor:
         :return:
         """
+        dataset, tag, axis = data_id
         x, y_mean, y_rms, y_all = xy_data
         n_points, n_files = y_all.shape
         x_max = y_mean[-1]
@@ -103,7 +89,8 @@ class LMSIQFiler:
         rows.append(row)
 
         fmt = "type,{:s},n_points,{:d},n_files,{:d},Run,{:s},x_max=,{:16.3f}"
-        hdr1 = fmt.format(type, n_points, n_files, folder, x_max)
+        run = "{:s}_{:s}".format(dataset, tag)
+        hdr1 = fmt.format(axis, n_points, n_files, run, x_max)
         rows.append(hdr1)
         fmt = "{:>16s},{:>16s},{:>16s},"
         row = fmt.format('X/pix.','Mean','RMS')
@@ -124,18 +111,23 @@ class LMSIQFiler:
         gmt = time.gmtime()
         fmt = '{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}'
         timestamp = fmt.format(gmt[0], gmt[1], gmt[2], gmt[3], gmt[4], gmt[5])
-        res_file_name = folder + '_' + axis + '_'
-        path = LMSIQFiler.res_path + '/' + res_file_name + type + '.csv'
+        res_file_name = dataset + '_' + tag + '_' + axis + '_'
+        path = LMSIQFiler.profiles_path + res_file_name + axis + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
                 print(row, file=text_file)
         return
 
     @staticmethod
-    def read_profiles(folder, type, axis):
+    def read_profiles(data_id, type):
         # Read data from file
-        res_file_name = folder + '_' + axis + '_'
-        path = LMSIQFiler.res_path + '/' + res_file_name + type + '.csv'
+        dataset, tag, axis = data_id
+        res_file_name = dataset + '_' + tag + '_' + axis + '_' + type
+        path = LMSIQFiler.profiles_path + res_file_name + '.csv'
+
+
+#        res_file_name = folder + '_' + axis + '_'
+#        path = LMSIQFiler.res_path + '/' + res_file_name + type + '.csv'
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 
@@ -163,6 +155,6 @@ class LMSIQFiler:
             for j in range(0, n_files):
                 y_all[i,j] = float(tokens[j+3])
 
-        xy_data = folder, axis, x, y_mean, y_rms, y_all
+        xy_data = dataset, axis, x, y_mean, y_rms, y_all
         strehl_data = strehl, strehl_err
         return xy_data, strehl_data, ipc_factor
