@@ -10,38 +10,32 @@ import numpy as np
 import math
 
 
-class Ipg:
+class Detector:
 
-    factor = 0.0
 
-    def __init__(self, im_oversampling, xs, xh, ys, yh):
-        """ Generate an Intra Pixel Gain kernel which samples the detector pixel with 4 x the image sampling or TBD..
+    def __init__(self):
+        """ Detector object, mainly used to sample/measure Zemax observations
         """
-        gain_kernel_size = 4 * im_oversampling
-        gain_kernel = np.zeros((gain_kernel_size, gain_kernel_size))
-        dxy = 1.0 / (gain_kernel_size - 1)
-        x_coords = np.arange(-0.5, +0.5 + dxy, dxy)
-        y_coords = np.arange(-0.5, +0.5 + dxy, dxy)
-        for c in range(0, gain_kernel_size):
-            x = x_coords[c]
-            gx = Ipg._gain_profile(x, xs, xh)
-            for r in range(0, gain_kernel_size):
-                y = y_coords[r]
-                gy = Ipg._gain_profile(y, ys, yh)
-                gain_kernel[r, c] = gx * gy
-        Ipg.kernel = gain_kernel, gain_kernel_size, xs, xh, ys, yh
         return
 
     @staticmethod
-    def _gain_profile(u, s, h):
-        """ Calculate Fermi-like profile.
-        -0.5 < u < +0.5 - pixel coordinate
-        c - gain profile edge steepness (~10 - 20 looks ok)
-        h - value of u for which gain is 0.5
+    def measure(observation):
+        """ Measure an observation by rebinning onto the pixel scale
         """
-        factor = 0.5 * s * (math.fabs(u) / h - 1.0)
-        gain = 1.0 / (math.exp(factor) + 1)
-        return gain
+        image_in, params = observation
+        sampling = 4            # Pixels per detector pixel
+        nr, nc = image_in.shape
+        n_frame_rows, n_frame_cols = int(nr/sampling), int(nc/sampling)
+        frame = np.zeros((n_frame_rows, n_frame_cols))
+        for r in range(0, n_frame_rows):
+            r1 = r * sampling
+            r2 = r1 + sampling
+            for c in range(0, n_frame_cols):
+                c1 = c * sampling
+                c2 = c1 + sampling
+                frame[r, c] = np.mean(image_in[r1:r2, c1:c2])
+
+        return frame, params
 
     @staticmethod
     def imprint(obs):

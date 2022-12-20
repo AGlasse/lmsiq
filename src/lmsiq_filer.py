@@ -2,17 +2,24 @@ import os
 import numpy as np
 import time
 
+
 class LMSIQFiler:
 
-    res_path, profiles_path = None, None
+    res_path, profiles_path, centroids_path = None, None, None
 
     def __init__(self, dataset):
         res_path = '../results/' + dataset + '/'
         profiles_path = res_path + 'profiles/'
+        centroids_path = res_path + 'centroids/'
         if not os.path.exists(res_path):
             os.mkdir(res_path)
+        if not os.path.exists(profiles_path):
             os.mkdir(profiles_path)
-        LMSIQFiler.res_path, LMSIQFiler.profiles_path = res_path, profiles_path
+        if not os.path.exists(centroids_path):
+            os.mkdir(centroids_path)
+        LMSIQFiler.res_path = res_path
+        LMSIQFiler.profiles_path = profiles_path
+        LMSIQFiler.centroids_path = centroids_path
         return
 
     @staticmethod
@@ -46,6 +53,10 @@ class LMSIQFiler:
         waves, ipcs, srps, srps_err = [], [], [], []
         fwhmspecs, fwhmspec_errs, fwhmspats, fwhmspat_errs = [], [], [], []
         strehls, strehl_errs = [], []
+        if not os.path.exists(path):
+            print("!! File {:s} not found".format(path))
+            print("   - run lmsiq with IPC = x.xxx and 'reanalyse = True'")
+            return None
         with open(path, 'r') as text_file:
             records = text_file.read().splitlines()
             for record in records[2:]:
@@ -69,7 +80,24 @@ class LMSIQFiler:
         return profile
 
     @staticmethod
-    def write_profiles(data_id, xy_data, strehl_data, ipc_factor):
+    def write_centroids(data_id, centroids):
+        dataset, tag, _ = data_id
+        rows = []
+        fmt = "{:>16s},{:>16s},{:>16s},{:>24s},{:>16s},{:>16s},"
+        row = fmt.format('spec_off','spec_X','spec_Y', 'spat_off','spat_X','spat_Y')
+        for centroid in centroids:
+            spec_off, spec_x, spec_y, spat_off, spat_x, spat_y = centroid
+            row += fmt.format(spec_off, spec_x, spec_y, spat_off, spat_x, spat_y)
+        rows.append(row)
+        res_file_name = dataset + '_' + tag + '_' + '_centroids'
+        path = LMSIQFiler.centroids_path + res_file_name + '.csv'
+        with open(path, 'w', newline='') as text_file:
+            for row in rows:
+                print(row, file=text_file)
+        return
+
+    @staticmethod
+    def write_profiles(data_id, xy_data, strehl_data, ipc_factor, profile_type):
         """ Write EE or LSF results to a csv file.
         :param data_id:
         :param xy_data:
@@ -111,23 +139,19 @@ class LMSIQFiler:
         gmt = time.gmtime()
         fmt = '{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}'
         timestamp = fmt.format(gmt[0], gmt[1], gmt[2], gmt[3], gmt[4], gmt[5])
-        res_file_name = dataset + '_' + tag + '_' + axis + '_'
-        path = LMSIQFiler.profiles_path + res_file_name + axis + '.csv'
+        res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
+        path = LMSIQFiler.profiles_path + res_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
                 print(row, file=text_file)
         return
 
     @staticmethod
-    def read_profiles(data_id, type):
+    def read_profiles(data_id, profile_type):
         # Read data from file
         dataset, tag, axis = data_id
-        res_file_name = dataset + '_' + tag + '_' + axis + '_' + type
+        res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
         path = LMSIQFiler.profiles_path + res_file_name + '.csv'
-
-
-#        res_file_name = folder + '_' + axis + '_'
-#        path = LMSIQFiler.res_path + '/' + res_file_name + type + '.csv'
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 

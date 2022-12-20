@@ -9,7 +9,9 @@ import numpy as np
 
 class Ipc:
 
+    kernel = None
     factor = 0.0
+
     def __init__(self, factor, oversampling):
         """ Generate an IPC kernel (nominally 1.6 % in detector pixel space)
         """
@@ -34,7 +36,7 @@ class Ipc:
         return
 
     @staticmethod
-    def add_ipc(obs):
+    def convolve(obs):
         """ Convolve the IPC kernel with an image (im1). Returned as im2.  A bit clumsy.
         """
         im1, params = obs

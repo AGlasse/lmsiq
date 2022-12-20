@@ -14,7 +14,7 @@ class LMSIQAnalyse:
         return
 
     @staticmethod
-    def find_mean_centroid(observations):
+    def _find_mean_centroid(observations):
         """ Find the mean centroid position for all images in a list.
         """
         images = []
@@ -122,7 +122,7 @@ class LMSIQAnalyse:
         """
         debug = kwargs.get('debug', False)
 
-        centroid = LMSIQAnalyse.find_mean_centroid(observations)
+        centroid = LMSIQAnalyse._find_mean_centroid(observations)
 
         v_coadd = 12.0       # Number of image pixels to coadd orthogonal to profile
         n_files = len(observations)

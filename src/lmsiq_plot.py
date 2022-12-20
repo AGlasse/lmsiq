@@ -15,12 +15,14 @@ class LMSIQPlot:
         """
         nrowcol = kwargs.get('nrowcol', (3, 5))
         title = kwargs.get('title', '')
+        pane_titles = kwargs.get('pane_titles', None)
+        plotregion = kwargs.get('plotregion', 'all')
         n_rows, n_cols = nrowcol
         fig, ax_list = plt.subplots(n_rows, n_cols, figsize=(10, 8))
         ax_list = np.atleast_2d(ax_list)
+
         fig.suptitle(title)
-        row, col = 0, 0
-        r1, r2, c1, c2 = None, None, None, None
+        pane, row, col = 0, 0, 0
         vmin, vmax, lvmin, lvmax = None, None, None, None
         do_log = True
         do_half = False
@@ -30,12 +32,16 @@ class LMSIQPlot:
             image, params = observation
             file_id, _ = params
             ax = ax_list[row, col]
-            ax.set_title(file_id)
+            if pane_titles is not None:
+                pane_title = file_id if pane_titles == 'file_id' else pane_titles[pane]
+                ax.set_title(pane_title)
             if first_image:
-                # Only plot the central part of the image
                 ny, nx = image.shape
-                r_cen, c_cen = int(ny/2), int(nx/2)
-                r1, r2, c1, c2 = r_cen - box_rad, r_cen + box_rad, c_cen - box_rad, c_cen + box_rad
+                r1, r2, c1, c2 = 0, ny-1, 0, nx-1
+                # Only plot the central part of the image
+                if plotregion == 'centre':
+                    r_cen, c_cen = int(ny/2), int(nx/2)
+                    r1, r2, c1, c2 = r_cen - box_rad, r_cen + box_rad, c_cen - box_rad, c_cen + box_rad
                 vmin, vmax = np.amin(image), np.amax(image)
                 if do_log:
                     lvmax = math.log10(vmax)
@@ -50,11 +56,14 @@ class LMSIQPlot:
                 vmax = np.amax(image)
                 vmin = vmax / 2.0
                 ax.imshow(image[r1:r2, c1:c2], vmin=vmin, vmax=vmax)
-            col += 1
-            if col == n_cols:
-                col = 0
-                row += 1
-
+            pane += 1
+            if n_rows > 1 and n_cols > 1:
+                col += 1
+                if col == n_cols:
+                    col = 0
+                    row += 1
+            else:
+                col = pane
         plt.show()
         return
 
