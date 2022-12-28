@@ -1,5 +1,5 @@
-from lmsiq_analyse import LMSIQAnalyse
-from lmsiq_filer import LMSIQFiler
+from lmsiq_analyse import Analyse
+from lmsiq_filer import Filer
 from lmsiq_zemaxio import LMSIQZemaxio
 from lmsiq_plot import LMSIQPlot
 from lms_util import Util
@@ -15,9 +15,9 @@ det_pix_size = Globals.mm_lmspix * 1000.
 run_dict = {'20221014': 11, '20221026': 21}
 dataset = '20221026'            # 'psf_model_20221014_multi_wavelength'
 
-filer = LMSIQFiler(dataset)
+filer = Filer(dataset)
 zemaxio = LMSIQZemaxio()
-analyse = LMSIQAnalyse()
+analyse = Analyse()
 plot = LMSIQPlot()
 util = Util()
 wcal = Wcal()
@@ -38,7 +38,7 @@ add_ipg = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - R
 ipg = None
 print("Intra Pixel Gain modelling included = {:s}".format(str(add_ipg)))
 
-plot_images, plot_profiles = False, True
+plot_images, plot_profiles = True, True
 print("Plotting images =   {:s}".format(str(plot_images)))
 print("Plotting profiles = {:s}".format(str(plot_profiles)))
 
@@ -107,7 +107,7 @@ if reanalyse:
                             title=title, pane_titles='file_id')
             ees_data = analyse.eed(observations, axis,
                                    log10sampling=True, normalise='to_average')
-            lsf_data = analyse.lsf(observations, axis)
+            lsf_data = analyse.lsf(observations, axis, v_coadd=12.0, u_radius=20.0)
             strehl_data = analyse.strehl(observations)
             filer.write_profiles((dataset, tag, axis), ees_data, strehl_data, ipc_factor, 'ee')
             filer.write_profiles((dataset, tag, axis), lsf_data, strehl_data, ipc_factor, 'lsf')

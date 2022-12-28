@@ -4,14 +4,63 @@ import math
 
 from photutils import centroid_com
 from photutils.aperture import RectangularAperture
-from lmsiq_filer import LMSIQFiler as filer
+from scipy.optimize import curve_fit
 from lms_globals import Globals
 
 
-class LMSIQAnalyse:
+class Analyse:
 
     def __init__(self):
+        Analyse.fwhm_sigma = 2 * math.sqrt(2.0 * math.log(2.0))
         return
+
+    @staticmethod
+    def _Gauss(x, amp, fwhm, xpk):
+        sigma = fwhm / Analyse.fwhm_sigma
+        k = (x - xpk) / sigma
+        y = amp * np.exp((-k ** 2) / 2.0)
+        return y
+
+    @staticmethod
+    def fit_gaussian(image, row_lo, row_hi, **kwargs):
+        debug = kwargs.get('debug', False)
+
+        nrows, ncols = image.shape
+        profile = np.mean(image[row_lo:row_hi], axis=0)
+        u_vals = np.arange(0.0, float(ncols))
+        imax = np.argmax(profile)
+        guess_amp, guess_fwhm, guess_xpk = profile[imax], 2.0, u_vals[imax]
+        guess = [guess_amp, guess_fwhm, guess_xpk]
+        fit, covar = curve_fit(Analyse._Gauss, u_vals, profile, p0=guess, method='lm', xtol=1E-10)
+        if debug:
+            fmt = "{:<8s} - amp={:8.6f} fwhm={:5.2f} xpk={:9.6f}"
+            print(fmt.format('Guess', guess_amp, guess_fwhm, guess_xpk))
+            print(fmt.format('Fit  ', fit[0], fit[1], fit[2]))
+            print()
+        return fit, covar
+
+    @staticmethod
+    def find_stats(data_list):
+        n_configs = len(data_list)
+        stats = np.zeros((n_configs, 2))
+        for i, data in enumerate(data_list):
+            data_id, config, centroids = data
+            wave = config[2]
+            phase_error = np.std(centroids[:, 3])
+            stats[i, :] = [wave, phase_error]
+        return stats
+
+    @staticmethod
+    def fix_offset(centroids):
+
+        mean_offset = np.mean(centroids[3:20, 3]) - np.mean(centroids[23:40, 3])
+        centroids[3:20, 3] -= mean_offset
+        return centroids
+
+    @staticmethod
+    def find_centroid(image):
+        centroid = centroid_com(image)
+        return centroid
 
     @staticmethod
     def _find_mean_centroid(observations):
@@ -71,7 +120,7 @@ class LMSIQAnalyse:
                     aperture = RectangularAperture(centroid, w=2.*r, h=2.*r_max)     # Spectral
                 if axis == 'spatial':
                     aperture = RectangularAperture(centroid, w=2.*r_max, h=2.*r)     # Spatial
-                ees_all[i, j] = LMSIQAnalyse.exact_rectangular(image, aperture)
+                ees_all[i, j] = Analyse.exact_rectangular(image, aperture)
 
             im_sums[j] = ees_all[n_points-1, j]
             im_peaks[j] = imax
@@ -121,24 +170,36 @@ class LMSIQAnalyse:
                  - lsf, array of line spread functions for each image
         """
         debug = kwargs.get('debug', False)
-
-        centroid = LMSIQAnalyse._find_mean_centroid(observations)
-
-        v_coadd = 12.0       # Number of image pixels to coadd orthogonal to profile
-        n_files = len(observations)
-
+        centroid_relative = kwargs.get('centroid_relative', True)
+        v_coadd = kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
+        u_radius = kwargs.get('u_radius', 'all')    # Maximum radial size of aperture (a bit less than 1/2 image size)
         u_sample = 1.0      # Sample psf once per pixel to avoid steps
         u_start = 0.0       # Offset from centroid
-        u_radius = 20.0     # Maximum radial size of aperture (a bit less than 1/2 image size)
+
+        image, params = observations[0]
+        n_rows, n_cols = image.shape
+
+        v_coadd = n_cols - 1 if v_coadd == 'all' else v_coadd
+        u_radius = (n_rows / 2.0) - 1 if u_radius == 'all' else u_radius
+        if axis == 'spectral':
+            v_coadd = n_rows if v_coadd == 'all' else v_coadd
+            u_radius = n_rows / 2.0 if u_radius == 'all' else u_radius
 
         uvals = np.arange(u_start - u_radius, u_start + u_radius, u_sample)
         n_points = uvals.shape[0]
+
+        n_files = len(observations)
         lsf_all = np.zeros((n_points, n_files))
         lsf_mean = np.zeros(n_points)
         lsf_rms = np.zeros(n_points)
 
+        centroid = np.zeros((2,))
+        if centroid_relative:
+            centroid = Analyse._find_mean_centroid(observations)
+
         for j, obs in enumerate(observations):
             image, params = obs
+
             file_id, mm_fitspix = params
             if debug:
                 print('Processing file {:s} into column {:d}'.format(file_id, j))
@@ -149,13 +210,14 @@ class LMSIQAnalyse:
                 u = us[i]
                 if axis == 'spectral':
                     ap_pos[0] = u
+                    print(u)
                     aperture = RectangularAperture(ap_pos, w=u_sample, h=v_coadd)  # Spectral
-                    lsf_all[i, j] = LMSIQAnalyse.exact_rectangular(image, aperture)
-
+                    lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
                 if axis == 'spatial':
                     ap_pos[1] = u
+                    v_coadd = n_cols if v_coadd == 'all' else v_coadd
                     aperture = RectangularAperture(ap_pos, w=v_coadd, h=u_sample)  # Spatial
-                    lsf_all[i, j] = LMSIQAnalyse.exact_rectangular(image, aperture)
+                    lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
         for i in range(0, n_points):    # Find mean of Monte-Carlo spectra
             lsf_mean[i] = np.mean(lsf_all[i, 2:])
             lsf_rms[i] = np.std(lsf_all[i, 2:])

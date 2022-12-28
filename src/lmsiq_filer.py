@@ -3,7 +3,7 @@ import numpy as np
 import time
 
 
-class LMSIQFiler:
+class Filer:
 
     res_path, profiles_path, centroids_path = None, None, None
 
@@ -17,9 +17,9 @@ class LMSIQFiler:
             os.mkdir(profiles_path)
         if not os.path.exists(centroids_path):
             os.mkdir(centroids_path)
-        LMSIQFiler.res_path = res_path
-        LMSIQFiler.profiles_path = profiles_path
-        LMSIQFiler.centroids_path = centroids_path
+        Filer.res_path = res_path
+        Filer.profiles_path = profiles_path
+        Filer.centroids_path = centroids_path
         return
 
     @staticmethod
@@ -40,7 +40,7 @@ class LMSIQFiler:
     @staticmethod
     def write_summary(dataset, rows, id):
         summary_file_name = dataset + '_summary' + id
-        path = LMSIQFiler.res_path + '/' + summary_file_name + '.csv'
+        path = Filer.res_path + '/' + summary_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
                 print(row, file=text_file)
@@ -49,7 +49,7 @@ class LMSIQFiler:
     @staticmethod
     def read_summary(dataset, id):
         summary_file_name = dataset + '_summary' + id
-        path = LMSIQFiler.res_path + '/' + summary_file_name + '.csv'
+        path = Filer.res_path + '/' + summary_file_name + '.csv'
         waves, ipcs, srps, srps_err = [], [], [], []
         fwhmspecs, fwhmspec_errs, fwhmspats, fwhmspat_errs = [], [], [], []
         strehls, strehl_errs = [], []
@@ -80,21 +80,56 @@ class LMSIQFiler:
         return profile
 
     @staticmethod
-    def write_centroids(data_id, centroids):
-        dataset, tag, _ = data_id
-        rows = []
-        fmt = "{:>16s},{:>16s},{:>16s},{:>24s},{:>16s},{:>16s},"
-        row = fmt.format('spec_off','spec_X','spec_Y', 'spat_off','spat_X','spat_Y')
-        for centroid in centroids:
-            spec_off, spec_x, spec_y, spat_off, spat_x, spat_y = centroid
-            row += fmt.format(spec_off, spec_x, spec_y, spat_off, spat_x, spat_y)
-        rows.append(row)
-        res_file_name = dataset + '_' + tag + '_' + '_centroids'
-        path = LMSIQFiler.centroids_path + res_file_name + '.csv'
+    def write_centroids(data_id, det_shifts, xcen_block, fwhm_block):
+
+        dataset, config_tag, axis = data_id
+        fmt = "{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},"
+        rec = fmt.format('dataset=', dataset, 'config=', config_tag, 'axis=', axis)
+        rec_list = [rec]
+
+        n_shifts, n_runs = xcen_block.shape
+        # Write header line to text block
+        fmt = "{:>10s},"
+        rec = fmt.format('Shift', )
+        for run_number in range(0, n_runs):
+            fmt = "{:>10s}_{:04d},{:>10s}_{:04d},"
+            rec += fmt.format('Xcen', run_number, 'FWHM', run_number)
+        rec_list.append(rec)
+
+        for res_row, det_shift in enumerate(det_shifts):
+            rec = "{:10.6f},".format(det_shift)
+            for res_col in range(0, n_runs):
+                xcen = xcen_block[res_row, res_col]
+                fwhm = fwhm_block[res_row, res_col]
+                rec += "{:16.6f},{:16.6f},".format(xcen, fwhm)
+            rec_list.append(rec)
+
+        res_file_name = dataset + '_' + config_tag + '_' + axis + '_centroids'
+        path = Filer.centroids_path + res_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
-            for row in rows:
-                print(row, file=text_file)
+            for rec in rec_list:
+                print(rec, file=text_file)
         return
+
+    @staticmethod
+    def read_centroids(data_id):
+        # Read data from file
+        dataset, config_tag, axis = data_id
+        res_file_name = dataset + '_' + config_tag + '_' + axis + '_centroids'
+        path = Filer.centroids_path + res_file_name + '.csv'
+        with open(path, 'r') as text_file:
+            text_block = text_file.read()
+
+        line_list = text_block.split('\n')
+        centroids = []
+        for line in line_list[2:]:
+            tokens = line.split(',')
+            if len(tokens) > 2:
+                det_shift, xcen, fwhm = float(tokens[0]), float(tokens[1]), float(tokens[2])
+                phase_error = xcen - det_shift
+                centroid = det_shift, xcen, fwhm, phase_error
+                centroids.append(centroid)
+        return np.array(centroids)
 
     @staticmethod
     def write_profiles(data_id, xy_data, strehl_data, ipc_factor, profile_type):
@@ -140,7 +175,7 @@ class LMSIQFiler:
         fmt = '{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}'
         timestamp = fmt.format(gmt[0], gmt[1], gmt[2], gmt[3], gmt[4], gmt[5])
         res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
-        path = LMSIQFiler.profiles_path + res_file_name + '.csv'
+        path = Filer.profiles_path + res_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
                 print(row, file=text_file)
@@ -151,7 +186,7 @@ class LMSIQFiler:
         # Read data from file
         dataset, tag, axis = data_id
         res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
-        path = LMSIQFiler.profiles_path + res_file_name + '.csv'
+        path = Filer.profiles_path + res_file_name + '.csv'
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 

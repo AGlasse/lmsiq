@@ -245,6 +245,41 @@ class LMSIQPlot:
         return
 
     @staticmethod
+    def stats(stats):
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        ax.set_xlabel('Wavelength [$\mu$m]', fontsize=16.0)
+        ax.set_ylabel('Phase shift error (stdev) [pix.]', fontsize=16.0)
+        waves, pses = stats[:, 0], stats[:, 1]
+        ax.plot(waves, pses, marker='+', mew=2.0, color='blue')
+        plt.show()
+        return
+
+    @staticmethod
+    def centroids(data):
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        xlabel = 'Image Shift [pix.]'
+        ylabel = 'Phase error [pix.]'
+        ax.set_xlabel(xlabel, fontsize=16.0)
+        ax.set_ylabel(ylabel, fontsize=16.0)
+        data_id = data[0]
+        dataset, run, axis = data_id
+        title = "{:s}_{:s}_{:s}".format(dataset, run, axis)
+        ax.set_title(title)
+        for tick in ax.yaxis.get_major_ticks():
+            tick.label.set_fontsize(16.0)
+        for tick in ax.xaxis.get_major_ticks():
+            tick.label.set_fontsize(16.0)
+
+
+        data_id, configuration, centroids = data
+        for centroid in centroids:
+            det_shift, xcen, fwhm, phase_error = centroid
+            ax.plot([det_shift], [phase_error], marker='+', mew=2.0, color='blue')
+#        plt.legend()
+        plt.show()
+        return
+
+    @staticmethod
     def profiles(profiles_list, **kwargs):
         config = kwargs.get('config', None)
         config_idxs = {'srp': 3, 'strehl': 4, 'fwhmspec': 5, 'fwhmspat': 6}
