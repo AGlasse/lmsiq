@@ -42,19 +42,28 @@ class Analyse:
     @staticmethod
     def find_stats(data_list):
         n_configs = len(data_list)
-        stats = np.zeros((n_configs, 2))
+        stats = np.zeros((n_configs, 3))
         for i, data in enumerate(data_list):
-            data_id, config, centroids = data
+            data_id, config, phase_shifts = data
             wave = config[2]
-            phase_error = np.std(centroids[:, 3])
-            stats[i, :] = [wave, phase_error]
+            _, n_cols = phase_shifts.shape
+            n_runs = n_cols - 1
+            run_phase_errors = np.zeros(n_runs)
+            for run in range(1, n_cols):
+                run_phase_error = np.std(phase_shifts[:, run])
+                run_phase_errors[run-1] = run_phase_error
+            config_phase_error_mean, config_phase_error_std = np.mean(run_phase_errors), np.std(run_phase_errors)
+            stats[i, :] = [wave, config_phase_error_mean, config_phase_error_std]
         return stats
 
     @staticmethod
     def fix_offset(centroids):
-
-        mean_offset = np.mean(centroids[3:20, 3]) - np.mean(centroids[23:40, 3])
-        centroids[3:20, 3] -= mean_offset
+#        xcen_col = 2
+        _, n_cols = centroids.shape
+#        mean_offsets = []
+        for run in range(1, n_cols):
+            mean_offset = np.mean(centroids[3:20, run]) - np.mean(centroids[23:40, run])
+            centroids[3:20, run] -= mean_offset
         return centroids
 
     @staticmethod

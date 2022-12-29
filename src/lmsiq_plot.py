@@ -245,36 +245,43 @@ class LMSIQPlot:
         return
 
     @staticmethod
-    def stats(stats):
+    def stats(stats_list):
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         ax.set_xlabel('Wavelength [$\mu$m]', fontsize=16.0)
         ax.set_ylabel('Phase shift error (stdev) [pix.]', fontsize=16.0)
-        waves, pses = stats[:, 0], stats[:, 1]
-        ax.plot(waves, pses, marker='+', mew=2.0, color='blue')
+        for ipg_tag, stats in stats_list:
+            waves, phase_err, phase_err_std = stats[:, 0], stats[:, 1], stats[:, 2]
+            ax.errorbar(waves, phase_err, yerr=phase_err_std,  marker='+', mew=2.0, label=ipg_tag)
+        plt.legend()
         plt.show()
         return
 
     @staticmethod
     def centroids(data):
+        data_id, configuration, data_block = data
+
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         xlabel = 'Image Shift [pix.]'
         ylabel = 'Phase error [pix.]'
         ax.set_xlabel(xlabel, fontsize=16.0)
         ax.set_ylabel(ylabel, fontsize=16.0)
         data_id = data[0]
-        dataset, run, axis = data_id
-        title = "{:s}_{:s}_{:s}".format(dataset, run, axis)
+        dataset, config_tag, ipg_tag, axis = data_id
+        wave = configuration[1]
+        title = "{:s}_{:s}_{:s}_{:s}, {:10.3f} micron".format(dataset, config_tag, ipg_tag, axis, wave)
         ax.set_title(title)
         for tick in ax.yaxis.get_major_ticks():
             tick.label.set_fontsize(16.0)
         for tick in ax.xaxis.get_major_ticks():
             tick.label.set_fontsize(16.0)
 
-
-        data_id, configuration, centroids = data
-        for centroid in centroids:
-            det_shift, xcen, fwhm, phase_error = centroid
-            ax.plot([det_shift], [phase_error], marker='+', mew=2.0, color='blue')
+        det_shift = data_block[:, 0]
+        _, n_cols = data_block.shape
+        for col in range(1, n_cols):
+            y = data_block[:, col]
+            y_mean = np.mean(y)
+            y -= y_mean
+            ax.plot(det_shift, y, lw=0.5, marker='+', mew=2.0)
 #        plt.legend()
         plt.show()
         return

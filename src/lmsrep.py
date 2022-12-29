@@ -9,7 +9,6 @@ from lms_globals import Globals
 from lms_ipc import Ipc
 from lms_ipg import Ipg
 from lms_detector import Detector
-import math
 import numpy as np
 
 print('LMS Repeatability (lmsrep.py) - started')
@@ -20,6 +19,7 @@ dataset = '20221026'            # 'psf_model_20221014_multi_wavelength'
 tol_number = 0
 
 reanalyse = False
+print("Reanalysing LSF centroid shifts = {:s}".format(str(reanalyse)))
 
 filer = Filer(dataset)
 zemaxio = LMSIQZemaxio()
@@ -42,6 +42,7 @@ if add_ipc:
 
 add_ipg = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 ipg = None
+ipg_tag = 'ipg_on' if add_ipg else 'ipg_off'
 print("Intra Pixel Gain modelling included = {:s}".format(str(add_ipg)))
 
 plot_images, plot_profiles = False, False
@@ -61,6 +62,8 @@ poly, ech_bounds = util.read_polyfits_file(poly_file)   # Use distortion map for
 d_tel = 39.0E9          # ELT diameter in microns
 
 n_configs, n_runs = nconfigs_dict[dataset]
+#n_configs = 2
+#n_runs = 4
 
 # Spectral shift in detector pixels
 det_shift_start, det_shift_end, det_shift_increment = -2.0, +2.0, 0.1
@@ -68,14 +71,12 @@ det_shifts = np.arange(det_shift_start, det_shift_end, det_shift_increment)
 n_shifts = len(det_shifts)
 
 if reanalyse:
+    print("Analysing repeatability impact for dataset {:s}".format(dataset))
 
     for config_number in range(0, n_configs):
 
         block_shape = n_shifts, n_runs
         xcen_block, fwhm_block = np.zeros(block_shape), np.zeros(block_shape)
-
-        fmt = "Analysing repeatability impact of run dataset {:s}, Tol= {:02d}"
-        print(fmt.format(dataset, config_number))
 
         config_tag = "{:02d}".format(config_number)
         zemax_folder = dataset + '_current_tol_' + config_tag
@@ -98,10 +99,13 @@ if reanalyse:
         # Calculate dispersion and centre wavelength for each order.
         transform = util.get_polyfit_transform(poly, ech_bounds, configuration)
         dw_lmspix = util.find_dispersion(transform, configuration)
-
         # Select file to analyse
         for run_number in range(0, n_runs):
             run_tag = "{:04d}".format(run_number)
+
+            fmt = "\r- Config {:02d} of {:d}, Instance {:s} of {:d}"
+            print(fmt.format(config_number, n_configs, run_tag, n_runs), end="", flush=True)
+
             filter_tags = [run_tag, 'fits']      # Use the first M-C instance in each folder
             path, file_list = zemaxio.read_file_list(dataset, zemax_folder, filter_tags=filter_tags)
             file_name = file_list[0]
@@ -121,8 +125,10 @@ if reanalyse:
                 title = zemax_folder
                 obs_ratio = 100 * obs_3[0] / obs_2[0], obs_2[1]
                 post_label = "Post-shift by {:4.1f} pix.".format(det_shift)
-
-                obs_4 = ipg.imprint(obs_3)      # Imprint IPG and detect (rebin to detector pixel scale).
+                if add_ipg:
+                    obs_4 = ipg.imprint(obs_3)      # Imprint IPG and detect (rebin to detector pixel scale).
+                else:
+                    obs_4 = obs_3
                 obs_5 = detector.measure(obs_4)
 
                 if plot_images:
@@ -145,25 +151,30 @@ if reanalyse:
                 fwhm_block[res_row, run_number] = fwhm
 
                 det_shift += det_shift_increment
-        data_id = dataset, config_tag, axis
+        data_id = dataset, config_tag, ipg_tag, axis
 
-        filer.write_centroids(data_id, det_shifts, xcen_block, fwhm_block)
+        filer.write_centroids(data_id, det_shifts, xcen_block)
 
 # Read in dataset centroids for plotting.
-data_list = []
-for run in range(0, n_configs):
-    config_tag = "{:02d}".format(run)
-    folder = dataset + '_current_tol_' + config_tag
-    configuration = zemaxio.read_param_file(dataset, folder)
-    data_id = dataset, config_tag, axis
-    centroids = filer.read_centroids(data_id)
-    centroids = analyse.fix_offset(centroids)
-    data_list.append((data_id, configuration, centroids))
+stats_list = []
+for ipg_tag in ['ipg_off', 'ipg_on']:
+    data_list = []
+    for config_number in range(0, n_configs):
+        config_tag = "{:02d}".format(config_number)
+        folder = dataset + '_current_tol_' + config_tag
+        configuration = zemaxio.read_param_file(dataset, folder)
+        data_id = dataset, config_tag, ipg_tag, axis
+        centroids = filer.read_centroids(data_id, n_runs)
+        centroids = analyse.fix_offset(centroids)
+        data = data_id, configuration, centroids
+        data_list.append(data)
+    stats = analyse.find_stats(data_list)
+    stats_list.append((ipg_tag, stats))
 
-stats = analyse.find_stats(data_list)
-plot.stats(stats)
+if plot_profiles:
+    plot.stats(stats_list)
 
 for data in data_list:
     plot.centroids(data)
 
-print('LMS Repeatability - done')
+print('LMS Repeatability (lmsrep.py) - done')
