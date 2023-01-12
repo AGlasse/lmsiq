@@ -15,13 +15,12 @@ class Globals:
     rule_spacing = 18.2			# Echelle rule spacing [um]
     n_slices = 28
     n_mats_transform = 4        # Four matrices per transform (A, B, AI, BI)
-    mm_lmspix = 0.018
-#    mm_fitspix = -1.0           # Size of 'Proper' image pixel, read from fits file header in lmsiq_analyse.lsf
+    nom_pix_pitch = 18.0        # LMS pixel pitch in microns
     spatial_scale = 0.0082      # Along slice arcsec / pixel
     pix_edge = 2048             # H2RG format
     det_gap = 3.0				# Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		# Unilluminated margin around all detector (pixels)
-    margin = pix_margin[0] * mm_lmspix
+    margin = pix_margin[0] * nom_pix_pitch / 1000.0     # Convert to mm
     n_configs = -1              # Number of configurations, calculated when lms_dist_buffer is read.
     # File locations and names
     zem_folder = '../input_zemax/'

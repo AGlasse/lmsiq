@@ -4,16 +4,22 @@ from lmsiq_zemaxio import LMSIQZemaxio
 from lmsiq_plot import LMSIQPlot
 from lms_util import Util
 from lms_wcal import Wcal
-from lms_globals import Globals
 from lms_ipc import Ipc
 from lms_ipg import Ipg
+from lms_detector import Detector
 import numpy as np
 
-print('LMS IQ - started')
+print('LMS Image Quality (lmsiq.py) - started')
 
-det_pix_size = Globals.mm_lmspix * 1000.
-run_dict = {'20221014': 11, '20221026': 21}
+detector = Detector()
+#det_pix_size = Globals.mm_lmspix * 1000.
+nconfigs_dict = {'20221014': (11, 10), '20221026': (21, 100)}
 dataset = '20221026'            # 'psf_model_20221014_multi_wavelength'
+
+n_configs, n_mcruns = nconfigs_dict[dataset]
+# n_configs = 2
+# n_mcruns = 4
+n_mcruns_tag = "{:04d}".format(n_mcruns)
 
 filer = Filer(dataset)
 zemaxio = LMSIQZemaxio()
@@ -23,27 +29,30 @@ util = Util()
 wcal = Wcal()
 wcal.read_poly()
 
+ipg, ipc, folder_tag = None, None, ''
+
 reanalyse = True
 print("Re-analysing from scratch = {:s}".format(str(reanalyse)))
 add_ipc = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 ipc_factor_nominal = 0.013
-ipc_factor = 0.000
+ipc_factor = 0.013
 
 print("IPC modelling included = {:s}".format(str(add_ipc)))
 if add_ipc:
     fmt = " - using IPC factor = {:10.3f} (Note nominal value is {:10.3f}"
     print(fmt.format(ipc_factor, ipc_factor_nominal))
 
-add_ipg = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
-ipg = None
+add_ipg = False         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 print("Intra Pixel Gain modelling included = {:s}".format(str(add_ipg)))
 
-plot_images, plot_profiles = True, True
+plot_images, plot_profiles = False, False
 print("Plotting images =   {:s}".format(str(plot_images)))
 print("Plotting profiles = {:s}".format(str(plot_profiles)))
 
 run_test = False         # Generate test case with 50 % IPC and an image with one bright pixel.
 print("Running test case = {:s}".format(str(run_test)))
+
+flat_test = False            # Write a unity flat field into the Zemax data
 
 ifu_slice = 1
 location = 'middle'
@@ -54,33 +63,39 @@ poly, ech_bounds = util.read_polyfits_file(poly_file)   # Use distortion map for
 d_tel = 39.0E9          # ELT diameter in microns
 
 if reanalyse:
-    print("Re-analysing dataset {:s}".format(dataset))
-
-    folder_tag = 0
-    n_runs = run_dict[dataset]
+    print("Analysing image quality for dataset {:s}".format(dataset))
+    first_config = True
     configuration, ipc = None, None
-    for folder_tag in range(0, n_runs):
-        tag = "{:02d}".format(folder_tag)
+    for config_number in range(0, n_configs):
+        tag = "{:02d}".format(config_number)
         zemax_folder = dataset + '_current_tol_' + tag
-        print("Re-analysing all fits images in folder {:s}".format(zemax_folder))
-        if folder_tag == 0:
+        fmt = "\r- Config {:02d} of {:d}"
+        print(fmt.format(config_number, n_configs), end="", flush=True)
+
+        if first_config:
             # For first dataset, read in parameters from text file and generate IPC and IPG kernels.
             configuration = zemaxio.read_param_file(dataset, zemax_folder)
             _, wave, _, _, order, im_pix_size = configuration
-            im_oversampling = int(det_pix_size / im_pix_size)
+            im_oversampling = int(Detector.det_pix_size / im_pix_size)
             ipc = Ipc(ipc_factor, im_oversampling)
-            if plot_images:
-                title = zemax_folder + ' Kernel'
-                params = title, None
-                im_kernel, im_oversampling, det_kernel_size = Ipc.kernel
-                plot.images([(im_kernel, params)], nrowcol=(1, 1), title=title)
+            if add_ipc:
+                ipc = Ipc(ipc_factor, im_oversampling)
+                folder_tag += ipc.get_tag(ipc_factor)
             if add_ipg:
                 ipg = Ipg(im_oversampling, 14, 0.44, 14, 0.44)  # Gain profiles, same in x and y
-                ipg_image, _, _, _, _, _ = Ipg.kernel
-                params = 'Intra-pixel gain kernel', 1.0
-                plot.images([(ipg_image, params)], nrowcol=(1, 1))
-
-        folder_tag += 1
+                folder_tag += '_ipg'
+            if plot_images:
+                if add_ipc:
+                    plot_title = zemax_folder + ' Kernel'
+                    params = plot_title, None
+                    im_kernel, im_oversampling, det_kernel_size = Ipc.kernel
+                    title = "Diffusion + IPC ({:6.3f} %) kernel".format(ipc_factor)
+                    plot.images([(im_kernel, params)], nrowcol=(1, 1), title=title)
+                if add_ipg:
+                    ipg_image, _, _, _, _, _ = Ipg.kernel
+                    params = 'Intra-pixel gain kernel', 1.0
+                    plot.images([(ipg_image, params)], nrowcol=(1, 1))
+            first_config = False
 
         # Calculate dispersion and centre wavelength for each order.
         transform = util.get_polyfit_transform(poly, ech_bounds, configuration)
@@ -91,11 +106,15 @@ if reanalyse:
             path, file_list = zemaxio.read_file_list(dataset, zemax_folder, filter_tags=['fits'])
             col_perfect, col_design = 0, 1
             observations = zemaxio.load_dataset(path, file_list)
+
             if plot_images:
                 title = zemax_folder + ' Pre-IPC'
-                plot.images(observations[0:6], nrowcol=(2, 3), title=title, plotregion='centre')
+                plot.images(observations[0:6], nrowcol=(2, 3), plotregion='centre',
+                            title=title, pane_titles='file_id')
             if add_ipc:
                 for i, obs in enumerate(observations):
+                    if flat_test:
+                        obs = detector.set_flat(obs)
                     observations[i] = ipc.convolve(obs)
             if add_ipg:
                 for i, obs in enumerate(observations):
@@ -115,10 +134,10 @@ if reanalyse:
     # Generate wavelength dependent summary file from profiles.
     summary = filer.create_summary_header(axes)
     print(summary)
-    folder_tag = 0
-    n_runs = run_dict[dataset]
-    for run in range(0, n_runs):
-        tag = "{:02d}".format(run)
+#    config_number = 0
+#    n_runs = nconfigs_dict[dataset]
+    for config_number in range(0, n_configs):
+        tag = "{:02d}".format(config_number)
         folder = dataset + '_current_tol_' + tag
         configuration = zemaxio.read_param_file(dataset, folder)
         _, wave, _, _, order, im_pix_size = configuration
@@ -141,9 +160,9 @@ if reanalyse:
 
             folder, axis, xlms, lsf_mean, lsf_rms, lsf_all = ees_data
 
-            im_oversampling = int(det_pix_size / im_pix_size)
+            im_oversampling = Detector.det_pix_size / im_pix_size
             # Calculate dispersion and centre wavelength for each order.
-            transform = util.get_polyfit_transform(poly, ech_bounds, configuration)
+#            transform = util.get_polyfit_transform(poly, ech_bounds, configuration)
             dw_lmspix = util.find_dispersion(transform, configuration)
 
             x_ref, ee_axis_refs = analyse.find_ee_axis_references(wave, axis, xlms, lsf_mean, lsf_all)
@@ -180,11 +199,8 @@ if reanalyse:
         result = pre_result + result
         print(result)
         summary.append(result)
-    ipc_pc = 100. * ipc_factor
-    ipc_int = int(ipc_pc)
-    ipc_dec = int(1000. * (ipc_pc - ipc_int) + 0.5)
-    summary_id = "_ipc_{:02d}_{:03d}".format(ipc_int, ipc_dec)
-    filer.write_summary(dataset, summary, summary_id)
+    summary_tag = ipc.get_tag(ipc_factor)
+    filer.write_summary(dataset, summary, summary_tag)
 
 id_plot_list = ['_ipc_13_000', '_ipc_03_900', '_ipc_01_300', '_ipc_00_000']
 profile_list = []

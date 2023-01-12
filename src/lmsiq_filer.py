@@ -15,10 +15,10 @@ class Filer:
             os.mkdir(res_path)
         if not os.path.exists(profiles_path):
             os.mkdir(profiles_path)
-        for ipg_tag in ['_ipg_on', '_ipg_off']:
-            centroids_path = centroids_folder + ipg_tag + '/'
-            if not os.path.exists(centroids_path):
-                os.mkdir(centroids_path)
+#        for ipg_tag in ['_ipg_on', '_ipg_off']:
+#            centroids_path = centroids_folder + ipg_tag + '/'
+#            if not os.path.exists(centroids_path):
+#                os.mkdir(centroids_path)
         Filer.res_path = res_path
         Filer.profiles_path = profiles_path
         Filer.centroids_folder = centroids_folder
@@ -84,9 +84,9 @@ class Filer:
     @staticmethod
     def write_centroids(data_id, det_shifts, xcen_block):
 
-        dataset, config_tag, ipg_tag, axis = data_id
-        fmt = "{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},"
-        xcen_rec = fmt.format('dataset=', dataset, 'config=', config_tag, 'ipg_tag=', ipg_tag, 'axis=', axis)
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+        fmt = "{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},"
+        xcen_rec = fmt.format('dataset=', dataset, 'n_mcruns=', n_mcruns_tag, 'axis=', axis)
         xcen_rec_list = [xcen_rec]
 
         n_shifts, n_runs = xcen_block.shape
@@ -94,8 +94,8 @@ class Filer:
         fmt = "{:>10s},"
         xcen_rec = fmt.format('Shift',)
         for run_number in range(0, n_runs):
-            fmt = "{:>10s}_{:04d},"
-            xcen_rec += fmt.format('Xcen', run_number)
+            fmt = "{:>12s}{:04d},"
+            xcen_rec += fmt.format('Xcen_', run_number)
         xcen_rec_list.append(xcen_rec)
 
         for res_row, det_shift in enumerate(det_shifts):
@@ -105,9 +105,7 @@ class Filer:
                 xcen_rec += "{:16.6f},".format(xcen)
             xcen_rec_list.append(xcen_rec)
 
-        xcen_file_name = dataset + '_' + config_tag + '_' + axis + '_centroids_' + ipg_tag
-        centroids_path = Filer.centroids_folder + '_' + ipg_tag + '/'
-        path = centroids_path + xcen_file_name + '.csv'
+        path = Filer._get_xcen_path(data_id)
         with open(path, 'w', newline='') as text_file:
             for xcen_rec in xcen_rec_list:
                 print(xcen_rec, file=text_file)
@@ -116,10 +114,7 @@ class Filer:
     @staticmethod
     def read_centroids(data_id, n_runs):
         # Read data from file
-        dataset, config_tag, ipg_tag, axis = data_id
-        res_file_name = dataset + '_' + config_tag + '_' + axis + '_centroids_' + ipg_tag
-        centroids_path = Filer.centroids_folder + '_' + ipg_tag + '/'
-        path = centroids_path + res_file_name + '.csv'
+        path = Filer._get_xcen_path(data_id)
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 
@@ -224,3 +219,13 @@ class Filer:
         xy_data = dataset, axis, x, y_mean, y_rms, y_all
         strehl_data = strehl, strehl_err
         return xy_data, strehl_data, ipc_factor
+
+    @staticmethod
+    def _get_xcen_path(data_id):
+        dataset, folder_tag, config_tag, mcrun_tag, axis = data_id
+        xcen_file_name = dataset + '_' + config_tag + '.csv'
+        centroids_path = Filer.centroids_folder + folder_tag + '/'
+        path = centroids_path + xcen_file_name
+        if not os.path.exists(centroids_path):
+            os.mkdir(centroids_path)
+        return path

@@ -6,9 +6,11 @@ from photutils import centroid_com
 from photutils.aperture import RectangularAperture
 from scipy.optimize import curve_fit
 from lms_globals import Globals
+from lms_detector import Detector
 
 
 class Analyse:
+
 
     def __init__(self):
         Analyse.fwhm_sigma = 2 * math.sqrt(2.0 * math.log(2.0))
@@ -44,13 +46,14 @@ class Analyse:
         n_configs = len(data_list)
         stats = np.zeros((n_configs, 3))
         for i, data in enumerate(data_list):
-            data_id, config, phase_shifts = data
+            data_id, config, centroids, phase_shift_rates = data
             wave = config[2]
-            _, n_cols = phase_shifts.shape
+            _, n_cols = phase_shift_rates.shape
             n_runs = n_cols - 1
             run_phase_errors = np.zeros(n_runs)
             for run in range(1, n_cols):
-                run_phase_error = np.std(phase_shifts[:, run])
+
+                run_phase_error = np.std(phase_shift_rates[:, run])
                 run_phase_errors[run-1] = run_phase_error
             config_phase_error_mean, config_phase_error_std = np.mean(run_phase_errors), np.std(run_phase_errors)
             stats[i, :] = [wave, config_phase_error_mean, config_phase_error_std]
@@ -58,9 +61,7 @@ class Analyse:
 
     @staticmethod
     def fix_offset(centroids):
-#        xcen_col = 2
         _, n_cols = centroids.shape
-#        mean_offsets = []
         for run in range(1, n_cols):
             mean_offset = np.mean(centroids[3:20, run]) - np.mean(centroids[23:40, run])
             centroids[3:20, run] -= mean_offset
@@ -83,6 +84,17 @@ class Analyse:
         image_ave = np.average(cube, axis=0)
         centroid = centroid_com(image_ave)
         return centroid
+
+    @staticmethod
+    def find_phase_shift_rates(centroids):
+        nrows, ncols = centroids.shape
+        phase_shift_rates = np.zeros(centroids.shape)
+        phase_shift_rates[:, 0] = centroids[:, 0]
+        for i in range(1, nrows):
+            for j in range(1, ncols):
+                psr = (centroids[i, j] - centroids[i-1, j]) / (centroids[i, 0] - centroids[i-1, 0])
+                phase_shift_rates[i, j] = psr
+        return phase_shift_rates
 
     @staticmethod
     def eed(observations, axis, **kwargs):
@@ -143,8 +155,8 @@ class Analyse:
             ees_mean[i] = np.mean(ees_all[i, :])
             ees_rms[i] = np.std(ees_all[i, :])
         # Rescale x axis from image scale to LMS pixels
-        lmspix_fitspix = mm_fitspix / Globals.mm_lmspix
-        xlms = np.multiply(radii, lmspix_fitspix)
+        sampling = int(0.001 * Detector.det_pix_size / mm_fitspix)        # Image pixels per detector pixel
+        xlms = np.divide(radii, sampling)
         ees_data = xlms, ees_mean, ees_rms, ees_all
         return ees_data
 
@@ -219,7 +231,6 @@ class Analyse:
                 u = us[i]
                 if axis == 'spectral':
                     ap_pos[0] = u
-                    print(u)
                     aperture = RectangularAperture(ap_pos, w=u_sample, h=v_coadd)  # Spectral
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
                 if axis == 'spatial':
@@ -231,8 +242,8 @@ class Analyse:
             lsf_mean[i] = np.mean(lsf_all[i, 2:])
             lsf_rms[i] = np.std(lsf_all[i, 2:])
         # Convert x scale to LMS pixels
-        lmspix_fitspix = mm_fitspix / Globals.mm_lmspix
-        xlms = np.multiply(uvals, lmspix_fitspix)           # Convert scale to LMS pixels
+        sampling = int(0.001 * Detector.det_pix_size / mm_fitspix)        # Image pixels per detector pixel
+        xlms = np.divide(uvals, sampling)
         return xlms, lsf_mean, lsf_rms, lsf_all
 
     @staticmethod

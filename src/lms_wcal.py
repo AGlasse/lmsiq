@@ -11,6 +11,7 @@ from lms_globals import Globals
 class Wcal:
 
     fit_order = 1
+    p_atow, p_wtoa = None, None
 
     def __init__(self):
         return

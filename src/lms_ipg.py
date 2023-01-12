@@ -13,6 +13,7 @@ import math
 class Ipg:
 
     factor = 0.0
+    kernel = None
 
     def __init__(self, im_oversampling, xs, xh, ys, yh):
         """ Generate an Intra Pixel Gain kernel which samples the detector pixel with 4 x the image sampling or TBD..

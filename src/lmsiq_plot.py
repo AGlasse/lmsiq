@@ -22,8 +22,10 @@ class LMSIQPlot:
         ax_list = np.atleast_2d(ax_list)
 
         fig.suptitle(title)
+        # Initialise variables
         pane, row, col = 0, 0, 0
         vmin, vmax, lvmin, lvmax = None, None, None, None
+        r1, r2, c1, c2 = 0, 1, 0, 1
         do_log = True
         do_half = False
         box_rad = 20 if do_log else 8
@@ -37,7 +39,7 @@ class LMSIQPlot:
                 ax.set_title(pane_title)
             if first_image:
                 ny, nx = image.shape
-                r1, r2, c1, c2 = 0, ny-1, 0, nx-1
+                r1, r2, c1, c2 = 0, ny, 0, nx
                 # Only plot the central part of the image
                 if plotregion == 'centre':
                     r_cen, c_cen = int(ny/2), int(nx/2)
@@ -245,40 +247,47 @@ class LMSIQPlot:
         return
 
     @staticmethod
-    def stats(stats_list):
+    def stats(stats_list, **kwargs):
+        data = kwargs.get('data', 'shifts')
+        data_columns = {'shifts':1, 'shift_rates':3}
+
+
+        title = 'Phase shift rate error - stdev (LSF centroid shift / Spectrum positioning error)'
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         ax.set_xlabel('Wavelength [$\mu$m]', fontsize=16.0)
-        ax.set_ylabel('Phase shift error (stdev) [pix.]', fontsize=16.0)
-        for ipg_tag, stats in stats_list:
+        ax.set_ylabel('RMS (LSF shift / PSF movement)', fontsize=16.0)
+        ax.set_title(title, fontsize=18.0)
+        for config_tag, stats in stats_list:
             waves, phase_err, phase_err_std = stats[:, 0], stats[:, 1], stats[:, 2]
-            ax.errorbar(waves, phase_err, yerr=phase_err_std,  marker='+', mew=2.0, label=ipg_tag)
+            label = config_tag[1:]
+            ax.errorbar(waves, phase_err, yerr=phase_err_std,  marker='+', mew=2.0, label=label)
         plt.legend()
         plt.show()
         return
 
     @staticmethod
     def centroids(data):
-        data_id, configuration, data_block = data
+        data_id, zemax_configuration, centroids, phase_shift_rates = data
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         xlabel = 'Image Shift [pix.]'
         ylabel = 'Phase error [pix.]'
         ax.set_xlabel(xlabel, fontsize=16.0)
         ax.set_ylabel(ylabel, fontsize=16.0)
-        data_id = data[0]
-        dataset, config_tag, ipg_tag, axis = data_id
-        wave = configuration[1]
-        title = "{:s}_{:s}_{:s}_{:s}, {:10.3f} micron".format(dataset, config_tag, ipg_tag, axis, wave)
+#        data_id = data[0]
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+        wave = zemax_configuration[1]
+        title = "{:s}_{:s}_{:s}_{:s}, {:10.3f} micron".format(dataset, folder_tag, config_tag, axis, wave)
         ax.set_title(title)
         for tick in ax.yaxis.get_major_ticks():
             tick.label.set_fontsize(16.0)
         for tick in ax.xaxis.get_major_ticks():
             tick.label.set_fontsize(16.0)
 
-        det_shift = data_block[:, 0]
-        _, n_cols = data_block.shape
+        det_shift = centroids[:, 0]
+        _, n_cols = centroids.shape
         for col in range(1, n_cols):
-            y = data_block[:, col]
+            y = centroids[:, col]
             y_mean = np.mean(y)
             y -= y_mean
             ax.plot(det_shift, y, lw=0.5, marker='+', mew=2.0)

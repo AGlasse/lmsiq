@@ -28,7 +28,7 @@ class Util:
         det_x, det_y = Util.apply_distortion(phases, alphas, a, b)  # Detector coordinate in mm
         dx = det_x[1] - det_x[0]
         dw_dx = dw / dx  # micron per mm
-        dw_lmspix = dw_dx * Globals.mm_lmspix  # micron per pixel
+        dw_lmspix = dw_dx * Globals.nom_pix_pitch / 1000.0  # micron per (nominal) pixel
         return dw_lmspix
 
     @staticmethod

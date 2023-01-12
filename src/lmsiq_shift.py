@@ -20,13 +20,13 @@ class LMSIQShift:
         nrows, ncols = image_in.shape
         ncols_ss = resolution * ncols
         image_ss = np.zeros((nrows, ncols_ss))        # Create super-sampled image
-        col_shift = int(sp_shift * resolution)
+        col_shift = round(sp_shift * resolution)
         if debug:
             fmt = "Shifting {:s} axis image, ({:d}x) oversampled by {:d} columns"
             print(fmt.format(axis, resolution, col_shift))
         for col in range(0, ncols):     # Map shifted image data into super-sampled image
             c1 = col * resolution + col_shift
-            c2 = c1+resolution
+            c2 = c1 + resolution
             c1 = c1 if c1 > 0 else 0
             c2 = c2 if c2 < ncols_ss else ncols_ss - 1
             for c_ss in range(c1, c2):
@@ -36,6 +36,6 @@ class LMSIQShift:
             col_ss = col * resolution
             strip = np.mean(image_ss[:, col_ss:col_ss + resolution], axis=1)
             image_out[:, col] = strip
-        if axis == 'spectral':                      # Rotate input image
+        if axis == 'spectral':                      # Rotate input image back to original orentation
             np.moveaxis(image_out, 0, 1)
         return image_out, params
