@@ -19,7 +19,7 @@ nconfigs_dict = {'20221014': (11, 10), '20221026': (21, 100)}
 dataset = '20221026'            # 'psf_model_20221014_multi_wavelength'
 tol_number = 0
 
-reanalyse = True
+reanalyse = False
 print("Reanalysing LSF centroid shifts = {:s}".format(str(reanalyse)))
 
 filer = Filer(dataset)
@@ -32,7 +32,7 @@ wcal = Wcal()
 
 wcal.read_poly()
 
-add_ipc = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
+add_ipc = False         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 ipc = None
 ipc_factor_nominal = 0.013
 ipc_factor = 0.013
@@ -45,6 +45,7 @@ if add_ipc:         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Raus
 add_ipg = False
 ipg, ipc, folder_tag = None, None, ''
 im_oversampling = None
+ndet_rows, ndet_cols = None, None
 print("Intra Pixel Gain modelling included = {:s}".format(str(add_ipg)))
 
 plot_images, plot_profiles = False, True
@@ -64,12 +65,12 @@ poly, ech_bounds = util.read_polyfits_file(poly_file)   # Use distortion map for
 d_tel = 39.0E9          # ELT diameter in microns
 
 n_configs, n_mcruns = nconfigs_dict[dataset]
-# n_configs = 2
-# n_mcruns = 4
+#n_configs = 2
+#n_mcruns = 4
 n_mcruns_tag = "{:04d}".format(n_mcruns)
 
 # Spectral shift in detector pixels
-det_shift_start, det_shift_end, det_shift_increment = -2.0, +2.0, 0.1          # -2.0, +2.0, 0.1
+det_shift_start, det_shift_end, det_shift_increment = -0.3, +1.3, 0.1          # -2.0, +2.0, 0.1
 det_shifts = np.arange(det_shift_start, det_shift_end, det_shift_increment)
 n_shifts = len(det_shifts)
 
@@ -126,33 +127,24 @@ if reanalyse:
             col_perfect, col_design = 0, 1
             file_id = file_name[0:-5].split('_')[4]
             obs_1 = zemaxio.load_observation(path, file_name, '')
-            obs_2 = ipc.convolve(obs_1) if add_ipc else obs_1
-#            if plot_images:
-#                title = file_name
-#                plot.images([obs_1, obs_2], nrowcol=(1, 2),
-#                            title=title, pane_titles=['Pre-IPC', 'Post-IPC'], plotregion='centre')
 
             for res_row, det_shift in enumerate(det_shifts):
                 im_shift = det_shift * im_oversampling
-                obs_3 = shift.sub_pixel_shift(obs_2, 'spectral', im_shift, debug=False)
+                obs_2 = shift.sub_pixel_shift(obs_1, 'spectral', im_shift, debug=False)
+                obs_3 = ipc.convolve(obs_2) if add_ipc else obs_2
                 title = zemax_folder
                 obs_4 = ipg.imprint(obs_3) if add_ipg else obs_3                # Imprint IPG
                 obs_5 = detector.measure(obs_4)
 
                 if plot_images:
-#                    obs_ratio = 100 * obs_3[0] / obs_2[0], obs_2[1]
-#                    plot.images([obs_2, obs_3], nrowcol=(2, 1), plotregion='centre',
-#                                title=title, pane_titles=['Pre-Shift', post_label])
-#                    plot.images([obs_ratio], nrowcol=(1, 1), plotregion='centre',
-#                                title=title, pane_titles=[post_label])
-                    post_label = "Post-shift by {:4.1f} pix.".format(det_shift)
-                    plot.images([obs_1, obs_3, obs_4, obs_5], nrowcol=(2, 2), plotregion='all',
-                                title=title, pane_titles=['Input', post_label, 'Post-IPG', 'Frame'])
+                    post_label = "Shifted by {:4.1f} pix.".format(det_shift)
+                    plot.images([obs_1, obs_3, obs_2, obs_5], nrowcol=(2, 2), plotregion='centre',
+                                title=title, pane_titles=['Input', 'Diffusion+IPC', post_label, 'Detector sampled'])
 
                 img_5, par_5 = obs_5
-                nr5, nc5 = img_5.shape
+                ndet_rows, ndet_cols = img_5.shape
                 row_half_aperture = 2
-                row_lo = int(nc5 / 2) - row_half_aperture
+                row_lo = int(ndet_rows / 2) - row_half_aperture
                 row_hi = row_lo + 2 * row_half_aperture + 1
                 fit, covar = analyse.fit_gaussian(img_5, row_lo, row_hi, debug=False)
                 amp, fwhm, xcen = fit
@@ -161,32 +153,28 @@ if reanalyse:
                 fwhm_block[res_row, mcrun] = fwhm
                 det_shift += det_shift_increment
 
-        data_id = dataset, folder_tag, config_tag, n_mcruns_tag, axis
+        data_id = dataset, folder_tag, config_tag, n_mcruns_tag, axis, ndet_cols
         filer.write_centroids(data_id, det_shifts, xcen_block)
 
 # Read in dataset centroids for plotting.
 stats_list = []
-for folder_tag in ['_ipc_01_3_pix_18_00', '_ipc_01_3_pix_04_50']:
+for folder_tag in ['_pix_18_00', '_ipc_01_3_pix_18_00']:
     data_list = []
     for config_number in range(0, n_configs):
         config_tag = "{:02d}".format(config_number)
         zemax_folder = dataset + '_current_tol_' + config_tag
         zemax_configuration = zemaxio.read_param_file(dataset, zemax_folder)
-        data_id = dataset, folder_tag, config_tag, n_mcruns_tag, axis
-        centroids = filer.read_centroids(data_id, n_mcruns)
-        centroids = analyse.fix_offset(centroids)
-        phase_shift_rates = analyse.find_phase_shift_rates(centroids)
-
-        data = data_id, zemax_configuration, centroids, phase_shift_rates
+        data_id, centroids = filer.read_centroids(dataset, folder_tag, config_tag)
+        phases, phase_diffs = analyse.find_phases(data_id, centroids)
+        data = data_id, zemax_configuration, phases, phase_diffs
         data_list.append(data)
     stats = analyse.find_stats(data_list)
     stats_list.append((folder_tag, stats))
 
 if plot_profiles:
-    plot.stats(stats_list, data='shifts')
-    plot.stats(stats_list, data='shift_rates')
-
-#    for data in data_list:
-#        plot.centroids(data)
+    plot.stats(stats_list)
+    det_pix_pitch = Detector.det_pix_size
+    for data in data_list:
+        plot.centroids(data, det_pix_pitch)
 
 print('LMS Repeatability (lmsrep.py) - done')

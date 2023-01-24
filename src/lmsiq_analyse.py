@@ -42,21 +42,29 @@ class Analyse:
         return fit, covar
 
     @staticmethod
+    def find_phases(data_id, centroids):
+        _, _, _, _, _, ndet_cols = data_id
+        phase_ref = ndet_cols / 2.0
+        _, n_mcruns = centroids.shape
+
+        phases, phase_diffs = np.zeros(centroids.shape), np.zeros(centroids.shape)
+        for col in range(1, n_mcruns):
+            phases[:, col] = centroids[:, col] - centroids[:, 0] - phase_ref
+        phase_diffs[:-1, 1:] = phases[1:, 1:] - phases[:-1, 1:]
+        phase_diffs[:, 0], phases[:, 0] = centroids[:, 0], centroids[:, 0]
+        return phases, np.abs(phase_diffs)
+
+    @staticmethod
     def find_stats(data_list):
         n_configs = len(data_list)
         stats = np.zeros((n_configs, 3))
         for i, data in enumerate(data_list):
-            data_id, config, centroids, phase_shift_rates = data
-            wave = config[2]
-            _, n_cols = phase_shift_rates.shape
-            n_runs = n_cols - 1
-            run_phase_errors = np.zeros(n_runs)
-            for run in range(1, n_cols):
-
-                run_phase_error = np.std(phase_shift_rates[:, run])
-                run_phase_errors[run-1] = run_phase_error
-            config_phase_error_mean, config_phase_error_std = np.mean(run_phase_errors), np.std(run_phase_errors)
-            stats[i, :] = [wave, config_phase_error_mean, config_phase_error_std]
+            data_id, zemax_configuration, centroids, centroid_abs_diffs = data
+            wave = zemax_configuration[1]
+            abs_diffs = centroid_abs_diffs[1:12, 1:]
+            mean_abs_diff = np.mean(abs_diffs)
+            mean_abs_diff_err = np.std(abs_diffs)
+            stats[i, :] = [wave, mean_abs_diff, mean_abs_diff_err]
         return stats
 
     @staticmethod

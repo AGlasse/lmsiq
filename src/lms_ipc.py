@@ -48,7 +48,7 @@ class Ipc:
                 im_kernel[imr1:imr2, imc1:imc2] += det_kernel[r, c]
 
         # Finally, re-normalise the kernel to unity (no signal lost from image)
-        renorm = np.sum(im_kernel)
+        renorm = np.sum(im_kernel) / (det_kernel_size * det_kernel_size)
         im_kernel /= renorm
 
         Ipc.factor = factor
@@ -94,5 +94,4 @@ class Ipc:
                     for cp in range(0, ncc, oversampling):
                         im2_pix += im2_sub[rp:rp + oversampling, cp:cp + oversampling]
                 im2[r:r+oversampling, c:c+oversampling] += im2_pix
-#        print("{:8.3e} -> {:8.3e}".format(im1[0, 0], im2[0, 0]))
         return im2, params

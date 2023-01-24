@@ -84,10 +84,15 @@ class Filer:
     @staticmethod
     def write_centroids(data_id, det_shifts, xcen_block):
 
-        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+        rec_list = []
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis, ndet_cols = data_id
         fmt = "{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},"
-        xcen_rec = fmt.format('dataset=', dataset, 'n_mcruns=', n_mcruns_tag, 'axis=', axis)
-        xcen_rec_list = [xcen_rec]
+        rec = fmt.format('dataset', 'folder', 'config', 'n_mcruns', 'axis=', 'ndet_cols')
+        rec_list.append(rec)
+
+        ndet_cols_tag = "{:03d}".format(ndet_cols)
+        rec = fmt.format(dataset, folder_tag, config_tag, n_mcruns_tag, axis, ndet_cols_tag)
+        rec_list.append(rec)
 
         n_shifts, n_runs = xcen_block.shape
         # Write header line to text block
@@ -96,42 +101,48 @@ class Filer:
         for run_number in range(0, n_runs):
             fmt = "{:>12s}{:04d},"
             xcen_rec += fmt.format('Xcen_', run_number)
-        xcen_rec_list.append(xcen_rec)
+        rec_list.append(xcen_rec)
 
         for res_row, det_shift in enumerate(det_shifts):
             xcen_rec = "{:10.6f},".format(det_shift)
             for res_col in range(0, n_runs):
                 xcen = xcen_block[res_row, res_col]
                 xcen_rec += "{:16.6f},".format(xcen)
-            xcen_rec_list.append(xcen_rec)
+            rec_list.append(xcen_rec)
 
-        path = Filer._get_xcen_path(data_id)
+        path = Filer._get_xcen_path(dataset, folder_tag, config_tag)
         with open(path, 'w', newline='') as text_file:
-            for xcen_rec in xcen_rec_list:
+            for xcen_rec in rec_list:
                 print(xcen_rec, file=text_file)
         return
 
     @staticmethod
-    def read_centroids(data_id, n_runs):
+    def read_centroids(dataset, folder_tag, config_tag):
         # Read data from file
-        path = Filer._get_xcen_path(data_id)
+        path = Filer._get_xcen_path(dataset, folder_tag, config_tag)
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 
         line_list = text_block.split('\n')
+        line = line_list[1]
+        tokens = line.split(',')
+        dataset = tokens[0]
+        folder_tag = tokens[1]
+        config_tag = tokens[2]
+        n_mcruns = int(tokens[3])
+        axis = tokens[4]
+        ndet_cols = int(tokens[5])
+        data_id = dataset, folder_tag, config_tag, n_mcruns, axis, ndet_cols
+
         centroids = []
-        for line in line_list[2:]:
+        for line in line_list[3:]:
             tokens = line.split(',')
             cen_row = []
             if len(tokens) > 2:
-                for col in range(0, n_runs + 1):
+                for col in range(0, n_mcruns + 1):
                     cen_row.append(float(tokens[col]))
                 centroids.append(cen_row)
-        phase_shifts = np.array(centroids)
-        _, n_runs = phase_shifts.shape
-        for col in range(1, n_runs):
-            phase_shifts[:, col] = phase_shifts[:, col] - phase_shifts[:, 0]
-        return phase_shifts
+        return data_id, np.array(centroids)
 
     @staticmethod
     def write_profiles(data_id, xy_data, strehl_data, ipc_factor, profile_type):
@@ -221,8 +232,8 @@ class Filer:
         return xy_data, strehl_data, ipc_factor
 
     @staticmethod
-    def _get_xcen_path(data_id):
-        dataset, folder_tag, config_tag, mcrun_tag, axis = data_id
+    def _get_xcen_path(dataset, folder_tag, config_tag):
+#        dataset, folder_tag, config_tag, mcrun_tag, axis = data_id
         xcen_file_name = dataset + '_' + config_tag + '.csv'
         centroids_path = Filer.centroids_folder + folder_tag + '/'
         path = centroids_path + xcen_file_name

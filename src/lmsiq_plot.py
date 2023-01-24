@@ -28,8 +28,6 @@ class LMSIQPlot:
         r1, r2, c1, c2 = 0, 1, 0, 1
         do_log = True
         do_half = False
-        box_rad = 20 if do_log else 8
-        first_image = True
         for observation in observations:
             image, params = observation
             file_id, _ = params
@@ -37,21 +35,23 @@ class LMSIQPlot:
             if pane_titles is not None:
                 pane_title = file_id if pane_titles == 'file_id' else pane_titles[pane]
                 ax.set_title(pane_title)
-            if first_image:
-                ny, nx = image.shape
-                r1, r2, c1, c2 = 0, ny, 0, nx
-                # Only plot the central part of the image
-                if plotregion == 'centre':
-                    r_cen, c_cen = int(ny/2), int(nx/2)
-                    r1, r2, c1, c2 = r_cen - box_rad, r_cen + box_rad, c_cen - box_rad, c_cen + box_rad
-                vmin, vmax = np.amin(image), np.amax(image)
-                if do_log:
-                    lvmax = math.log10(vmax)
-                    vmin = vmax / 1000.0
-                    lvmin = math.log10(vmin)
-                first_image = False
+            ny, nx = image.shape
+            r1, r2, c1, c2 = 0, ny, 0, nx
+            # Only plot the central part of the image
+            if plotregion == 'centre':
+                box_rad = int(nx/4)
+                r_cen, c_cen = int(ny/2), int(nx/2)
+                r1, r2, c1, c2 = r_cen - box_rad, r_cen + box_rad, c_cen - box_rad, c_cen + box_rad
+            vmin, vmax = np.amin(image), np.amax(image)
+            if do_log:
+                lvmax = math.log10(vmax)
+                vmin = vmax / 1000.0
+                lvmin = math.log10(vmin)
             if do_log:
                 clipped_image = np.where(image < vmin, vmin, image)
+                idx = np.where(clipped_image == 0.0)
+                if len(idx[0]) > 0:
+                    print(idx[0])
                 log_image = np.log10(clipped_image)
                 ax.imshow(log_image[r1:r2, c1:c2], vmin=lvmin, vmax=lvmax)
             if do_half:
@@ -247,36 +247,40 @@ class LMSIQPlot:
         return
 
     @staticmethod
-    def stats(stats_list, **kwargs):
-        data = kwargs.get('data', 'shifts')
-        data_columns = {'shifts':1, 'shift_rates':3}
-
-
-        title = 'Phase shift rate error - stdev (LSF centroid shift / Spectrum positioning error)'
+    def stats(stats_list):
+        title = 'Mean absolute centroid shift (pixels) for a 0.1 pixel image motion'
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         ax.set_xlabel('Wavelength [$\mu$m]', fontsize=16.0)
-        ax.set_ylabel('RMS (LSF shift / PSF movement)', fontsize=16.0)
+        ax.set_ylabel('Centroid shift [det. pixels]', fontsize=16.0)
         ax.set_title(title, fontsize=18.0)
+        ax.tick_params(labelright=True)
+        for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] +
+                     ax.get_xticklabels() + ax.get_yticklabels()):
+            item.set_fontsize(16)
+
         for config_tag, stats in stats_list:
-            waves, phase_err, phase_err_std = stats[:, 0], stats[:, 1], stats[:, 2]
+            waves, y, y_err = stats[:, 0], stats[:, 1], stats[:, 2]
             label = config_tag[1:]
-            ax.errorbar(waves, phase_err, yerr=phase_err_std,  marker='+', mew=2.0, label=label)
+            ax.errorbar(waves, y, yerr=y_err,  marker='o', ms=15.0, mew=2.0, label=label, capsize=10.0)
         plt.legend()
         plt.show()
         return
 
     @staticmethod
-    def centroids(data):
+    def centroids(data, det_pix_pitch):
         data_id, zemax_configuration, centroids, phase_shift_rates = data
 
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        xlabel = 'Image Shift [pix.]'
-        ylabel = 'Phase error [pix.]'
+        xlabel = 'Image shift [pix.]'
+        ylabel = 'Centroid phase shift [pix.]'
         ax.set_xlabel(xlabel, fontsize=16.0)
         ax.set_ylabel(ylabel, fontsize=16.0)
-#        data_id = data[0]
-        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis, ndet_cols = data_id
         wave = zemax_configuration[1]
+        im_pix_pitch = zemax_configuration[4]
+        pix_scale = det_pix_pitch / im_pix_pitch
+
         title = "{:s}_{:s}_{:s}_{:s}, {:10.3f} micron".format(dataset, folder_tag, config_tag, axis, wave)
         ax.set_title(title)
         for tick in ax.yaxis.get_major_ticks():
@@ -284,13 +288,13 @@ class LMSIQPlot:
         for tick in ax.xaxis.get_major_ticks():
             tick.label.set_fontsize(16.0)
 
-        det_shift = centroids[:, 0]
+        x = centroids[:, 0]
         _, n_cols = centroids.shape
         for col in range(1, n_cols):
             y = centroids[:, col]
             y_mean = np.mean(y)
             y -= y_mean
-            ax.plot(det_shift, y, lw=0.5, marker='+', mew=2.0)
+            ax.plot(x, y, lw=0.5, marker='+', mew=2.0)
 #        plt.legend()
         plt.show()
         return
