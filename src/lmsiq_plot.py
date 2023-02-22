@@ -8,6 +8,50 @@ class LMSIQPlot:
     def __init__(self):
         return
 
+    def set_plot_area(self, title, **kwargs):
+        figsize = kwargs.get('figsize', [12, 9])
+        xlim = kwargs.get('xlim', None)            # Common limits for all plots
+        ylim = kwargs.get('ylim', None)            # Common limits for all plots
+        xlabel = kwargs.get('xlabel', '')          # Common axis labels
+        ylabel = kwargs.get('ylabel', '')
+        ncols = kwargs.get('ncols', 1)             # Number of plot columns
+        nrows = kwargs.get('nrows', 1)
+        remplots = kwargs.get('remplots', None)
+        aspect = kwargs.get('aspect', 'auto')      # 'equal' for aspect = 1.0
+        fontsize = kwargs.get('fontsize', 16)
+
+        plt.rcParams.update({'font.size': fontsize})
+
+        sharex = xlim is not None
+        sharey = ylim is not None
+        fig, ax_list = plt.subplots(nrows, ncols, figsize=figsize,
+                                        sharex=sharex, sharey=sharey,
+                                        squeeze=False)
+        fig.patch.set_facecolor('white')
+        fig.suptitle(title)
+
+        for i in range(0, nrows):
+            for j in range(0, ncols):
+                ax = ax_list[i,j]
+                ax.set_aspect(aspect)       # Set equal axes
+                if xlim is not None:
+                    ax.set_xlim(xlim)
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+                if (i == nrows-1 and j == 0):
+                    ax.set_xlabel(xlabel)
+                    ax.set_ylabel(ylabel)
+        if remplots is not None:
+            rps = np.atleast_2d(remplots)
+            for i in range(0, len(rps)):
+                ax_list[rps[i,0], rps[i,1]].remove()
+        return ax_list
+
+    def show(self):
+        """ Wrapper for matplotlib show function. """
+        import matplotlib.pyplot as plt
+        plt.show()
+
     @staticmethod
     def images(observations, **kwargs):
         """ Plot images from the first four observations (perfect, design and as many additional individual
@@ -26,7 +70,7 @@ class LMSIQPlot:
         pane, row, col = 0, 0, 0
         vmin, vmax, lvmin, lvmax = None, None, None, None
         r1, r2, c1, c2 = 0, 1, 0, 1
-        do_log = True
+        do_log = kwargs.get('do_log', True)
         do_half = False
         box_rad = 20 if do_log else 8
         first_image = True
@@ -54,10 +98,12 @@ class LMSIQPlot:
                 clipped_image = np.where(image < vmin, vmin, image)
                 log_image = np.log10(clipped_image)
                 ax.imshow(log_image[r1:r2, c1:c2], vmin=lvmin, vmax=lvmax)
-            if do_half:
-                vmax = np.amax(image)
-                vmin = vmax / 2.0
+            else:
+                if do_half:
+                    vmax = np.amax(image)
+                    vmin = vmax / 2.0
                 ax.imshow(image[r1:r2, c1:c2], vmin=vmin, vmax=vmax)
+
             pane += 1
             if n_rows > 1 and n_cols > 1:
                 col += 1
@@ -251,7 +297,6 @@ class LMSIQPlot:
         data = kwargs.get('data', 'shifts')
         data_columns = {'shifts':1, 'shift_rates':3}
 
-
         title = 'Phase shift rate error - stdev (LSF centroid shift / Spectrum positioning error)'
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         ax.set_xlabel('Wavelength [$\mu$m]', fontsize=16.0)
@@ -274,7 +319,6 @@ class LMSIQPlot:
         ylabel = 'Phase error [pix.]'
         ax.set_xlabel(xlabel, fontsize=16.0)
         ax.set_ylabel(ylabel, fontsize=16.0)
-#        data_id = data[0]
         dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
         wave = zemax_configuration[1]
         title = "{:s}_{:s}_{:s}_{:s}, {:10.3f} micron".format(dataset, folder_tag, config_tag, axis, wave)
@@ -291,17 +335,16 @@ class LMSIQPlot:
             y_mean = np.mean(y)
             y -= y_mean
             ax.plot(det_shift, y, lw=0.5, marker='+', mew=2.0)
-#        plt.legend()
         plt.show()
         return
 
     @staticmethod
-    def profiles(profiles_list, **kwargs):
+    def profiles(profiles_list, config_dict, **kwargs):
         config = kwargs.get('config', None)
         config_idxs = {'srp': 3, 'strehl': 4, 'fwhmspec': 5, 'fwhmspat': 6}
         idx = config_idxs[config]
-        colours = ['green', 'red', 'blue', 'black']
-        xlabel = "Wavelength [$\mu$m]"
+        colours = ['green', 'olive', 'red', 'salmon', 'blue', 'cyan']
+        xlabel = 'Wavelength [$\mu$m]'
         ylabel = kwargs.get('ylabel', 'Value')
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         ax.set_xlabel(xlabel, fontsize=16.0)
@@ -314,9 +357,12 @@ class LMSIQPlot:
         marker = '+'
         for i, profiles in enumerate(profiles_list):
             colour = colours[i]
+            dataset, data_id = profiles[0]
+            _, _, _, plot_label = config_dict[dataset]
+            label = plot_label + data_id
             w = profiles[1]
             ipc = profiles[2][1]
-            label = "IPC = {:10.3f}".format(ipc)
+#            label = "{:s}, {:s}".format(dataset, data_id)
             y, yerr = profiles[idx]
             ax.plot(w, y, lw=1.0, marker=marker, mew=2.0, label=label, color=colour)
             if ipc == 0.0:

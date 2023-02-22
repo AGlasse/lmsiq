@@ -13,7 +13,7 @@ from lms_globals import Globals
 class Detector:
 
     nom_pix_pitch = Globals.nom_pix_pitch
-    det_pix_size = nom_pix_pitch   # / 4.0
+    det_pix_size = nom_pix_pitch        # / 4.0
 
     def __init__(self):
         """ Detector object, mainly used to sample/measure Zemax observations

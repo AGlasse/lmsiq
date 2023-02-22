@@ -1,10 +1,12 @@
 from os import listdir
-from os.path import isfile, join
+from os.path import join
 from astropy.io import fits
 from lms_globals import Globals
 
+
 class LMSIQZemaxio:
 
+    data_path = ''
 
     def __init__(self):
         LMSIQZemaxio.data_path = '../data/'
@@ -27,13 +29,13 @@ class LMSIQZemaxio:
         pf = open(path, 'r')
         lines = pf.read().splitlines()
         pf.close()
-        slice = int(lines[1].split(':')[1])
+        slice_no = int(lines[1].split(':')[1])
         wave = float(lines[3].split(':')[1])
         prism_angle = float(lines[4].split(':')[1])
         grating_angle = float(lines[5].split(':')[1])
         order = -1 * int(lines[6].split(':')[1])
         pix_size = float(lines[24].split(':')[1])
-        return slice, wave, prism_angle, grating_angle, order, pix_size
+        return slice_no, wave, prism_angle, grating_angle, order, pix_size
 
     @staticmethod
     def load_observation(path, file_name, file_id):

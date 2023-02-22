@@ -15,8 +15,15 @@ print()
 
 detector = Detector()
 
-nconfigs_dict = {'20221014': (11, 10), '20221026': (21, 100)}
-dataset = '20221026'            # 'psf_model_20221014_multi_wavelength'
+nconfigs_dict = {'20221014': (11, 10, '_current_tol_'),
+                 '20221026': (21, 100, '_current_tol_'),
+                 '20230207': (11, 100, '_with_toroidalM12_')}
+dataset = '20230207'            # 'psf_model_20221014_multi_wavelength'
+n_configs, n_mcruns, folder_name = nconfigs_dict[dataset]
+# n_configs = 2
+# n_mcruns = 4
+n_mcruns_tag = "{:04d}".format(n_mcruns)
+
 tol_number = 0
 
 reanalyse = True
@@ -31,7 +38,6 @@ util = Util()
 wcal = Wcal()
 
 wcal.read_poly()
-
 add_ipc = True         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Rauscher ref.)
 ipc = None
 ipc_factor_nominal = 0.013
@@ -43,11 +49,11 @@ if add_ipc:         # True = Add Inter Pixel Capacitance crosstalk (1.3 % - Raus
     print(fmt.format(ipc_factor, ipc_factor_nominal))
 
 add_ipg = False
-ipg, ipc, folder_tag = None, None, ''
+ipg, folder_tag = None, ''
 im_oversampling = None
 print("Intra Pixel Gain modelling included = {:s}".format(str(add_ipg)))
 
-plot_images, plot_profiles = False, True
+plot_images, plot_profiles = False, False
 print("Plotting images =   {:s}".format(str(plot_images)))
 print("Plotting profiles = {:s}".format(str(plot_profiles)))
 
@@ -63,13 +69,9 @@ poly_file = '../output/lms_dist_poly_old.txt'           # Distortion polynomial
 poly, ech_bounds = util.read_polyfits_file(poly_file)   # Use distortion map for finding dispersion
 d_tel = 39.0E9          # ELT diameter in microns
 
-n_configs, n_mcruns = nconfigs_dict[dataset]
-# n_configs = 2
-# n_mcruns = 4
-n_mcruns_tag = "{:04d}".format(n_mcruns)
 
 # Spectral shift in detector pixels
-det_shift_start, det_shift_end, det_shift_increment = -2.0, +2.0, 0.1          # -2.0, +2.0, 0.1
+det_shift_start, det_shift_end, det_shift_increment = -4.0, +4.0, 0.1          # -2.0, +2.0, 0.1
 det_shifts = np.arange(det_shift_start, det_shift_end, det_shift_increment)
 n_shifts = len(det_shifts)
 
@@ -83,7 +85,7 @@ if reanalyse:
         block_shape = n_shifts, n_mcruns
         xcen_block, fwhm_block = np.zeros(block_shape), np.zeros(block_shape)
 
-        zemax_folder = dataset + '_current_tol_' + config_tag
+        zemax_folder = dataset + folder_name + config_tag
         # For first dataset, read in parameters from text file and generate IPC and IPG kernels.
         zemax_configuration = zemaxio.read_param_file(dataset, zemax_folder)
         _, wave, _, _, order, im_pix_size = zemax_configuration
@@ -140,11 +142,11 @@ if reanalyse:
                 obs_5 = detector.measure(obs_4)
 
                 if plot_images:
-#                    obs_ratio = 100 * obs_3[0] / obs_2[0], obs_2[1]
-#                    plot.images([obs_2, obs_3], nrowcol=(2, 1), plotregion='centre',
-#                                title=title, pane_titles=['Pre-Shift', post_label])
-#                    plot.images([obs_ratio], nrowcol=(1, 1), plotregion='centre',
-#                                title=title, pane_titles=[post_label])
+                    #                    obs_ratio = 100 * obs_3[0] / obs_2[0], obs_2[1]
+                    #                    plot.images([obs_2, obs_3], nrowcol=(2, 1), plotregion='centre',
+                    #                                title=title, pane_titles=['Pre-Shift', post_label])
+                    #                    plot.images([obs_ratio], nrowcol=(1, 1), plotregion='centre',
+                    #                                title=title, pane_titles=[post_label])
                     post_label = "Post-shift by {:4.1f} pix.".format(det_shift)
                     plot.images([obs_1, obs_3, obs_4, obs_5], nrowcol=(2, 2), plotregion='all',
                                 title=title, pane_titles=['Input', post_label, 'Post-IPG', 'Frame'])
@@ -156,7 +158,6 @@ if reanalyse:
                 row_hi = row_lo + 2 * row_half_aperture + 1
                 fit, covar = analyse.fit_gaussian(img_5, row_lo, row_hi, debug=False)
                 amp, fwhm, xcen = fit
-#                print("det_shift={:10.3f}, xcen={:10.3f}, amp={:10.3f}, fwhm={:10.3f}".format(det_shift, xcen, amp, fwhm))
                 xcen_block[res_row, mcrun] = xcen
                 fwhm_block[res_row, mcrun] = fwhm
                 det_shift += det_shift_increment
@@ -170,7 +171,7 @@ for folder_tag in ['_ipc_01_3_pix_18_00', '_ipc_01_3_pix_04_50']:
     data_list = []
     for config_number in range(0, n_configs):
         config_tag = "{:02d}".format(config_number)
-        zemax_folder = dataset + '_current_tol_' + config_tag
+        zemax_folder = dataset + folder_name + config_tag
         zemax_configuration = zemaxio.read_param_file(dataset, zemax_folder)
         data_id = dataset, folder_tag, config_tag, n_mcruns_tag, axis
         centroids = filer.read_centroids(data_id, n_mcruns)

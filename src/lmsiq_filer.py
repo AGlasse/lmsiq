@@ -9,19 +9,9 @@ class Filer:
 
     def __init__(self, dataset):
         res_path = '../results/' + dataset + '/'
-        profiles_path = res_path + 'profiles/'
-        centroids_folder = res_path + 'centroids'       # Note backslash is added later
         if not os.path.exists(res_path):
             os.mkdir(res_path)
-        if not os.path.exists(profiles_path):
-            os.mkdir(profiles_path)
-#        for ipg_tag in ['_ipg_on', '_ipg_off']:
-#            centroids_path = centroids_folder + ipg_tag + '/'
-#            if not os.path.exists(centroids_path):
-#                os.mkdir(centroids_path)
         Filer.res_path = res_path
-        Filer.profiles_path = profiles_path
-        Filer.centroids_folder = centroids_folder
         return
 
     @staticmethod
@@ -40,8 +30,8 @@ class Filer:
         return [hdr1, hdr2]
 
     @staticmethod
-    def write_summary(dataset, rows, id):
-        summary_file_name = dataset + '_summary' + id
+    def write_summary(dataset, rows, data_id):
+        summary_file_name = dataset + '_summary' + data_id
         path = Filer.res_path + '/' + summary_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
@@ -49,9 +39,9 @@ class Filer:
         return
 
     @staticmethod
-    def read_summary(dataset, id):
-        summary_file_name = dataset + '_summary' + id
-        path = Filer.res_path + '/' + summary_file_name + '.csv'
+    def read_summary(dataset, data_id):
+        summary_file_name = dataset + '_summary' + data_id
+        path = '../results/' + dataset + '/' + summary_file_name + '.csv'
         waves, ipcs, srps, srps_err = [], [], [], []
         fwhmspecs, fwhmspec_errs, fwhmspats, fwhmspat_errs = [], [], [], []
         strehls, strehl_errs = [], []
@@ -73,12 +63,13 @@ class Filer:
                 fwhmspec_errs.append(float(tokens[12]))
                 fwhmspats.append(float(tokens[17]))
                 fwhmspat_errs.append(float(tokens[18]))
+        p_id = dataset, data_id
         p_waves, p_ipcs = np.array(waves), np.array(ipcs)
         p_srps = np.array(srps), np.array(srps_err)
         p_strehls = np.array(strehls), np.array(strehl_errs)
         p_fwhmspecs = np.array(fwhmspecs), np.array(fwhmspec_errs)
         p_fwhmspats = np.array(fwhmspats), np.array(fwhmspat_errs)
-        profile = id, p_waves, p_ipcs, p_srps, p_strehls, p_fwhmspecs, p_fwhmspats
+        profile = p_id, p_waves, p_ipcs, p_srps, p_strehls, p_fwhmspecs, p_fwhmspats
         return profile
 
     @staticmethod
@@ -105,7 +96,9 @@ class Filer:
                 xcen_rec += "{:16.6f},".format(xcen)
             xcen_rec_list.append(xcen_rec)
 
-        path = Filer._get_xcen_path(data_id)
+        tag = '_cen'
+        path = Filer._get_results_path(data_id, 'centroids', tag)
+#        print("Writing centroids to {:s}".format(path))
         with open(path, 'w', newline='') as text_file:
             for xcen_rec in xcen_rec_list:
                 print(xcen_rec, file=text_file)
@@ -114,7 +107,10 @@ class Filer:
     @staticmethod
     def read_centroids(data_id, n_runs):
         # Read data from file
-        path = Filer._get_xcen_path(data_id)
+        tag = '_cen'
+        path = Filer._get_results_path(data_id, 'centroids', tag)
+#        print("Reading centroids from {:s}".format(path))
+
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 
@@ -142,7 +138,8 @@ class Filer:
         :param ipc_factor:
         :return:
         """
-        dataset, tag, axis = data_id
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+
         x, y_mean, y_rms, y_all = xy_data
         n_points, n_files = y_all.shape
         x_max = y_mean[-1]
@@ -154,7 +151,7 @@ class Filer:
         rows.append(row)
 
         fmt = "type,{:s},n_points,{:d},n_files,{:d},Run,{:s},x_max=,{:16.3f}"
-        run = "{:s}_{:s}".format(dataset, tag)
+        run = "{:s}_{:s}".format(dataset, config_tag)
         hdr1 = fmt.format(axis, n_points, n_files, run, x_max)
         rows.append(hdr1)
         fmt = "{:>16s},{:>16s},{:>16s},"
@@ -173,11 +170,10 @@ class Filer:
             for j in range(0, n_files):
                 row += "{:16.8e},".format(y_all[i, j])
             rows.append(row)
-        gmt = time.gmtime()
-        fmt = '{:04d}{:02d}{:02d}_{:02d}{:02d}{:02d}'
-        timestamp = fmt.format(gmt[0], gmt[1], gmt[2], gmt[3], gmt[4], gmt[5])
-        res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
-        path = Filer.profiles_path + res_file_name + '.csv'
+        tag = "_{:s}_{:s}".format(profile_type, axis)
+        path = Filer._get_results_path(data_id, 'profiles', tag)
+#        print("Writing profiles to {:s}".format(path))
+
         with open(path, 'w', newline='') as text_file:
             for row in rows:
                 print(row, file=text_file)
@@ -186,9 +182,11 @@ class Filer:
     @staticmethod
     def read_profiles(data_id, profile_type):
         # Read data from file
-        dataset, tag, axis = data_id
-        res_file_name = dataset + '_' + tag + '_' + axis + '_' + profile_type
-        path = Filer.profiles_path + res_file_name + '.csv'
+        dataset, folder_tag, config_tag, n_mcruns_tag, axis = data_id
+        tag = "_{:s}_{:s}".format(profile_type, axis)
+        path = Filer._get_results_path(data_id, 'profiles', tag)
+#        print("Reading profiles from {:s}".format(path))
+
         with open(path, 'r') as text_file:
             text_block = text_file.read()
 
@@ -221,11 +219,13 @@ class Filer:
         return xy_data, strehl_data, ipc_factor
 
     @staticmethod
-    def _get_xcen_path(data_id):
+    def _get_results_path(data_id, data_type, tag):
         dataset, folder_tag, config_tag, mcrun_tag, axis = data_id
-        xcen_file_name = dataset + '_' + config_tag + '.csv'
-        centroids_path = Filer.centroids_folder + folder_tag + '/'
-        path = centroids_path + xcen_file_name
-        if not os.path.exists(centroids_path):
-            os.mkdir(centroids_path)
+
+        file_name = dataset + '_' + config_tag + tag + '.csv'
+        type_tag = Filer.res_path + data_type
+        folder = type_tag + folder_tag + '/'
+        path = folder + file_name
+        if not os.path.exists(folder):
+            os.mkdir(folder)
         return path

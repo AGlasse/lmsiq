@@ -14,7 +14,7 @@ import numpy as np
 print('lms_distort - Starting')
 
 # Set up run control flags.
-generate_transforms = True         # ..for all Zemax ray trace files and write to lms_dist_buffer.txt
+generate_transforms = True          # ..for all Zemax ray trace files and write to lms_dist_buffer.txt
 derive_wcal = True                  # Find echelle_order(wavelength) and echell_angle(wavelength)
 generate_polynomials = True         # ..which interpolate transforms to any echelle angle / order
 evaluate_transforms = True          # ..performance statistics, for optimising code parameters.

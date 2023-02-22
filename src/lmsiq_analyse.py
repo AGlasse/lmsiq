@@ -1,8 +1,7 @@
 import numpy as np
 import math
 
-
-from photutils import centroid_com
+from photutils.centroids import centroid_com
 from photutils.aperture import RectangularAperture
 from scipy.optimize import curve_fit
 from lms_globals import Globals

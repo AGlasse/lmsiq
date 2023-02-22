@@ -4,6 +4,7 @@
 @author: achg
 """
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 class Plot:
@@ -12,9 +13,6 @@ class Plot:
         return
 
     def set_plot_area(self, title, **kwargs):
-
-        import matplotlib.pyplot as plt
-
         figsize = kwargs.get('figsize', [12, 9])
         xlim = kwargs.get('xlim', None)            # Common limits for all plots
         ylim = kwargs.get('ylim', None)            # Common limits for all plots
