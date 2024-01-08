@@ -5,6 +5,7 @@
 """
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 
 class Plot:
@@ -12,8 +13,9 @@ class Plot:
     def __init__(self):
         return
 
-    def set_plot_area(self, title, **kwargs):
-        figsize = kwargs.get('figsize', [12, 9])
+    @staticmethod
+    def set_plot_area(title, **kwargs):
+        figsize = kwargs.get('figsize', [9, 6])
         xlim = kwargs.get('xlim', None)            # Common limits for all plots
         ylim = kwargs.get('ylim', None)            # Common limits for all plots
         xlabel = kwargs.get('xlabel', '')          # Common axis labels
@@ -22,15 +24,15 @@ class Plot:
         nrows = kwargs.get('nrows', 1)
         remplots = kwargs.get('remplots', None)
         aspect = kwargs.get('aspect', 'auto')      # 'equal' for aspect = 1.0
-        fontsize = kwargs.get('fontsize', 16)
+        fontsize = kwargs.get('fontsize', 12)
 
         plt.rcParams.update({'font.size': fontsize})
 
-        sharex = xlim is not None
-        sharey = ylim is not None
+        sharex = kwargs.get('sharex', False)
+        sharey = kwargs.get('sharey', False)
         fig, ax_list = plt.subplots(nrows, ncols, figsize=figsize,
-                                        sharex=sharex, sharey=sharey,
-                                        squeeze=False)
+                                    sharex=sharex, sharey=sharey,
+                                    squeeze=False)
         fig.patch.set_facecolor('white')
         fig.suptitle(title)
 
@@ -48,7 +50,7 @@ class Plot:
         if remplots is not None:
             rps = np.atleast_2d(remplots)
             for i in range(0, len(rps)):
-                ax_list[rps[i,0], rps[i,1]].remove()
+                ax_list[rps[i,0], rps[i, 1]].remove()
         return ax_list
 
     def pixel_v_mech_rot(self, coverage, **kwargs):
@@ -81,28 +83,6 @@ class Plot:
             self.plot_points(ax, x, y)
         self.show()
 
-    def wavelengths_v_ech_ang(self, configs, **kwargs):
-
-        suppress = kwargs.get('suppress', False)
-        if suppress:
-            return
-
-        (eas, eos, pas, w1s, w2s, w3s, w4s) = configs
-
-        n_configs = len(eas)
-        xlim = [2.5, 5.5]
-        ylim = [5.0, 7.5]
-        ax_list = self.set_plot_area('Zemax vXX.YY',
-                                     xlim=xlim, xlabel='Wavelength [um]',
-                                     ylim=ylim, ylabel='Prism angle + 0.02 x Ech. angle')
-        ax = ax_list[0, 0]
-        y = pas + 0.02 * eas
-        for i in range(0, n_configs):
-            self.plot_line(ax, [w1s[i], w4s[i]], [y[i],  y[i]], fs='full', ms=2.0)
-
-        self.show()
-        return
-
     def efficiency_v_wavelength(self, weoas, **kwargs):
 
         waves, effs, orders, angles = weoas
@@ -130,7 +110,7 @@ class Plot:
             x = waves[:, i]
             y = effs[:, i]
             col = colours[i]
-            ax.plot(x, y, clip_on=True, ls='-', lw=5.0, color=col)
+            ax.plot_focal_planes(x, y, clip_on=True, ls='-', lw=5.0, color=col)
             jmid = int(n_angs / 2)
             xt, yt = x[jmid], y[jmid]
             ax.text(xt, yt, "{:3d}".format(order), color=col, ha='left', va='bottom')
@@ -145,44 +125,6 @@ class Plot:
         amargin = margin * arange
         lim = [amin - amargin, amax + amargin]
         return lim
-
-    def config_v_coeffs(self, eo, sno, mat, x, coeffs, polys, **kwargs):
-        suppress = kwargs.get('suppress', False)
-        if suppress:
-            return
-        cs = coeffs.shape
-        n_terms = cs[0]
-        remplots = []
-        for i in range(1, n_terms):
-            for j in range(n_terms-i, n_terms):
-                remplots.append([i, j])
-        xmin = min(x)
-        xmax = max(x)
-        xlim = self._auto_lim(x, 0.1)
-        ylim = [0.0, 2.0]
-        xt, yt = self._get_text_position(xlim, ylim, pos='tl', inset=[0.03, 0.17])
-        n_fit_points = 20
-        xfit = xmin + np.asarray(range(0, n_fit_points+1)) * (xmax - xmin) / float(n_fit_points)
-
-        matlabels = ["A", "B", "AI", "BI"]
-        fmt = "Echelle order {:d}, Slice {:d}, {:s}[i,j]"
-        title = fmt.format(eo, sno, matlabels[mat])
-        ax_list = self.set_plot_area(title,
-                                     xlim=xlim, xlabel="Ech angle / deg.",
-                                     ylim=ylim, ylabel="Normalised coeff.",
-                                     ncols=n_terms, nrows=n_terms, remplots=remplots)
-        for i in range(0, n_terms):
-            for j in range(0, n_terms-i):
-                ax = ax_list[i, j]
-                y = coeffs[i, j]
-                ymean = np.nanmean(y)
-                ynorm = np.divide(y, ymean)
-                label = "[{:d},{:d}] {:7.1e}".format(i, j, ymean)
-                ax.text(xt, yt, label)
-                self.plot_points(ax, x, ynorm, fs='full', ms=3.0)
-                yfit = np.polyval(polys[i,j], xfit) / ymean
-                self.plot_line(ax, xfit, yfit, colour='red')
-        self.show()
 
     @staticmethod
     def _make_colours(n_colours):
@@ -212,8 +154,82 @@ class Plot:
 
         return xt, yt
 
-#    @staticmethod
-    def plot_points(self, ax, x, y, **kwargs):
+    @staticmethod
+    def matrix_fit(x, matrices, fit_matrices):
+        n_mat, n_terms, _ = matrices.shape
+        ax_list = Plot.set_plot_area('title',
+                                     xlabel='Prism angle [deg]',
+                                     ylabel="Matrix term",
+                                     ncols=n_terms, nrows=n_terms)
+        for row in range(0, n_terms):
+            for col in range(0, n_terms):
+                ax = ax_list[row, col]
+        return
+
+    @staticmethod
+    def round_trip(y_arr, y_rtn_arr, **kwargs):
+        title = kwargs.get('title', 'title')
+        ax_list = Plot.set_plot_area(title,
+                                     xlabel="sample",
+                                     ylabel="val")
+        ax = ax_list[0, 0]
+        y = y_arr.flatten()
+        n_samples, = y.shape
+        y_rtn = y_rtn_arr.flatten()
+        x = np.arange(0, n_samples, 1)
+        ax.plot(x, y,
+                color='black', clip_on=True,
+                fillstyle='none', marker='o', mew=1.0, ms=3.0, linestyle='None')
+        ax.plot(x, y_rtn,
+                color='red', clip_on=True,
+                fillstyle='none', marker='x', mew=1.0, ms=3.0, linestyle='None')
+        Plot.show()
+        return
+
+    @staticmethod
+    def wavelength_coverage(traces):
+        ax_list = Plot.set_plot_area('Wavelength coverage',
+                                     xlabel="Wavelength / micron",
+                                     ylabel="Prism angle + 0.02 x Echelle angle ")
+        ax = ax_list[0, 0]
+        ccs4_colours = mcolors.CSS4_COLORS
+        colours = sorted(ccs4_colours,
+                         key=lambda c: tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(c))),
+                         reverse=True)
+        colour_iterator = iter(colours)
+        config_colour = {}
+
+        for trace in traces:
+            ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
+            ech_orders = trace.series['ech_order']
+            tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
+            config_colour[tag] = next(colour_iterator)
+            for tf in trace.tf_list[0:1]:
+                config, matrices, rays, wave_bounds = tf
+                ech_order, slice_no, spifu_no = config
+                x1, x2, x3, x4 = wave_bounds
+
+                tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
+                colour = 'blue'     # config_colour[tag]
+                y_spifu = 0.002 * ech_order + 0.0012 * (spifu_no % 3) - 0.0006
+                y = prism_angle + 0.02 * ech_angle
+                if spifu_no != -1:
+                    y += y_spifu
+                ypr = prism_angle
+
+                ax.plot([x1, x2], [y, y], linestyle='solid', linewidth=1.5, color=colour)
+                ax.plot([x3, x4], [y, y], linestyle='solid', linewidth=1.5, color=colour)
+                ax.plot([x1, x4], [ypr, ypr],
+                        linestyle='dotted', linewidth=1.0, color='black')
+                label = "{:d}".format(int(ech_order))
+                if spifu_no != -1:
+                    label += "/{:d}".format(int(spifu_no))
+                ax.text(x1, y, label)
+        Plot.show()
+        return
+
+    @staticmethod
+    def plot_points(ax, x, y, **kwargs):
         """ Plot an array of points in the open plot region. """
 
         n_pts = len(x)
@@ -247,29 +263,8 @@ class Plot:
         xyList = np.array([[xy[0]], [xy[1]]])
         self.plot_points(ax, xyList, **kwargs)
 
-    def plotCoverage(self, pars, **kwargs):
-        nConfigs = len(pars)
-        wLim = kwargs.get('wlim', [2.7, 5.7])
-        paLim = kwargs.get('ylim', [5.0, 7.5])
-
-        self.setPlotArea('Prism angle v Wavelength Coverage',
-                         wLim, 'Wavelength [micron]',
-                         paLim, 'Prism angle [deg]')
-        ax = self.axList[0, 0]
-        eaMin = -7.0
-        eaMax =  7.0
-        for i in range(0, nConfigs):
-            (ea, so, pa, w1, w2, w3, w4) = pars[i]
-            f = (ea - eaMin) / (eaMax - eaMin)
-            r = 0.2
-            g = f
-            b = 1.0 - f
-            print(r, g, b)
-            ax.plot([w1,w4], [pa,pa],
-                    color=[r,g,b], linestyle='-', linewidth=2.0)
-        self.show()
-
-    def show(self):
+    @staticmethod
+    def show():
         """ Wrapper for matplotlib show function. """
         import matplotlib.pyplot as plt
         plt.show()

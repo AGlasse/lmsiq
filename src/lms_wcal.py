@@ -17,29 +17,30 @@ class Wcal:
         return
 
     @staticmethod
-    def write_poly(configs):
+    def write_poly(wcal_file, configs, wave_limits):
         """ Write the polynomial coefficients which transform between wavelength
         and echelle angle to a .csv file.
         """
-        efw_file = Globals.wcal_file
-        (eas, eos, pas, w1s, w2s, w3s, w4s) = configs
+        eos, eas, pas, w1s, w2s, w3s, w4s = configs[0:7]
+        w1s, w2s, w3s, w4s = wave_limits
         eomin = int(np.min(eos))
         eomax = int(np.max(eos))
         n_eos = eomax - eomin + 1
         wbs = (w2s + w3s) / 2.0
 
-        f = open(efw_file, 'w')
+        f = open(wcal_file, 'w')
         fmt = "{:>15s},{:>15s},{:>15s},{:>15s},{:>15s},\n"
         f.write(fmt.format("Echelle Order", "Poly Coeffs.", "wav->ang", "Poly Coeffs.", "ang->wav"))
         for i in range(0, n_eos):
             eo = eomin + i
             line = "{:15d},".format(eo)
             idx = np.where(eos == eo)
-            p_wtoa = np.poly1d(np.polyfit(wbs[idx], eas[idx], Wcal.fit_order))        # Wavelength to angle
+            w, a = wbs[idx], eas[idx]
+            p_wtoa = np.poly1d(np.polyfit(w, a, Wcal.fit_order))        # Wavelength to angle
             for term in p_wtoa:
                 token = "{:15.7e},".format(term)
                 line = line + token
-            p_atow = np.poly1d(np.polyfit(eas[idx], wbs[idx], Wcal.fit_order))        # Angle to wavelength
+            p_atow = np.poly1d(np.polyfit(a, w, Wcal.fit_order))        # Angle to wavelength
             for term in p_atow:
                 token = "{:15.7e},".format(term)
                 line = line + token
@@ -48,11 +49,10 @@ class Wcal:
         return
 
     @staticmethod
-    def read_poly():
+    def read_poly(wcal_file):
         """ Read the polynomial coefficients which transform between wavelength
         and echelle angle from a .csv file.
         """
-        wcal_file = Globals.wcal_file
         fmt = "Reading echelle angle v wavelength polynomials from file= {:s}"
         print(fmt.format(wcal_file))
         lines = open(wcal_file, 'r').read().splitlines()
@@ -84,6 +84,26 @@ class Wcal:
         p = p_atow[i, 1:Wcal.fit_order + 2]
         w = np.polyval(p, angle)
         return w
+
+    @staticmethod
+    def get_polyfit_transform(poly, ech_bounds, configuration):
+
+        slice_id, _, _, grating_angle, order, im_pix_size = configuration
+        e_idx = int(order - ech_bounds[0])
+        shape = poly.shape
+        n_mat = shape[2]
+        n_terms = shape[4]
+        tr = []
+
+        for m in range(0, n_mat):
+            mat = np.zeros((n_terms, n_terms))
+            for i in range(0, n_terms):
+
+                for j in range(0, n_terms):
+                    poly_coeffs = poly[e_idx, slice_id, m, :, i, j]
+                    mat[i, j] = np.polyval(poly_coeffs, grating_angle)
+            tr.append(mat)
+        return tr[0], tr[1], tr[2], tr[3]
 
     @staticmethod
     def find_echelle_angle(w, order):
