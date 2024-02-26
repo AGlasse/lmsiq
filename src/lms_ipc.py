@@ -18,13 +18,18 @@ class Ipc:
     ipc_factor_nominal, ipc_factor = 0.013, 0.0
 
     def __init__(self, **kwargs):
-        """ Generate a 3 x 3 detector pixel kernel image, which includes diffusion (according to Hardy et al. 2014)
-        and inter-pixel capacitance (nominal 1.3 % - Rauscher ref.)
+        return
+
+    @staticmethod
+    def make_kernel(oversampling, **kwargs):
+        """ Generate a 3 x 3 detector pixel kernel image, which includes diffusion
+        (according to Hardy et al. 2014) and inter-pixel capacitance
+        (nominal 1.3 % - Rauscher ref.)
         """
         loss = kwargs.get('loss', 0.5)
 
         det_kernel_size = 3
-        oversampling = Globals.get_im_oversampling('raw_zemax')
+        # oversampling = Globals.get_im_oversampling('raw_zemax')
         kernel_size = det_kernel_size * oversampling
         kernel_shape = kernel_size, kernel_size
         kernel = np.zeros(kernel_shape)
@@ -36,11 +41,10 @@ class Ipc:
         kernel /= renorm
         Ipc.kernel = kernel
         Ipc.oversampling, Ipc.det_kernel_size = oversampling, det_kernel_size
-        Ipc.plot_kernel()
         return
 
     @staticmethod
-    def test():
+    def test(iq_filer):
         params = 'file_id', 1.
         image1 = np.zeros((128, 128)) + 1.0      # make an extended image
         obs1 = image1, params
@@ -55,10 +59,13 @@ class Ipc:
         obs3 = image3, params
         obs_con3 = Ipc.convolve(obs3)
         sum3 = np.sum(obs_con3[0])
+        png_folder = iq_filer.iq_png_folder + 'kernel/'
+        png_folder = iq_filer.get_folder(png_folder)
+        png_file = 'convolution_test'
+        png_path = png_folder + png_file
 
-        Plot.images([obs1, obs2, obs3, obs_con1, obs_con2, obs_con3], nrowcol=(2, 3), title='Ipc Test',
-                    shrink=0.1,
-                    png_path='../output/convolution_test')
+        Plot.images([obs1, obs2, obs3, obs_con1, obs_con2, obs_con3],
+                    nrowcol=(2, 3), title='Ipc Test', shrink=0.1, png_path=png_path)
 
         return
 
@@ -70,12 +77,15 @@ class Ipc:
         return
 
     @staticmethod
-    def plot_kernel():
+    def plot_kernel(iq_filer):
         title = "Diffusion + IPC ({:6.3f} %)".format(Ipc.ipc_factor)
         params = title, None
-
+        png_folder = iq_filer.iq_png_folder + 'kernel/'
+        png_folder = iq_filer.get_folder(png_folder)
+        png_file = 'kernel'
+        png_path = png_folder + png_file
         Plot.images([(Ipc.kernel, params)],
-                    nrowcol=(1, 1), title=title, png_path='../output/kernel')
+                    nrowcol=(1, 1), title=title, png_path=png_path)
         return
 
     @staticmethod
@@ -137,11 +147,14 @@ class Ipc:
         return
 
     @staticmethod
-    def convolve(obs):
+    def convolve(im1, oversampling):
         """ Convolve the IPC kernel with an image (im1). Returned as im2.  A bit clumsy.
         """
-        im1, params = obs
-        kernel, oversampling, det_kernel_size = Ipc.kernel, Ipc.oversampling, Ipc.det_kernel_size
+        if Ipc.kernel is None:
+            Ipc.make_kernel(oversampling)
+
+#        im1, params = obs
+        kernel, det_kernel_size = Ipc.kernel, Ipc.det_kernel_size
         knorm = np.sum(kernel) * oversampling * oversampling
         nr, nc = im1.shape
         nrk, nck = kernel.shape
@@ -168,4 +181,4 @@ class Ipc:
                 im2[r:r+oversampling, c:c+oversampling] += im2_pix
         im2 *= knorm
 #        print("Ipc.convolve, {:8.3e} -> {:8.3e}".format(np.sum(im1), np.sum(im2)))
-        return im2, params
+        return im2      # , params

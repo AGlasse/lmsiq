@@ -13,23 +13,34 @@ import numpy as np
 
 print('lms_distort - Starting')
 
-nominal = 'nominal'
-spifu = 'spifu'
-optics = {nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)', ('phase', 'fp2_x'), ('det_x', 'det_y')),
-          spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)', ('phase', 'fp1_x'), ('det_x', 'det_y'))}
-optical_configuration = nominal
+analysis_type = 'distortion'
 
-config_summary, coord_in, coord_out = optics[optical_configuration]
-is_spifu = optical_configuration == spifu
-filer = Filer(optical_configuration)
+nom_coords_in = 'phase', 'fp2_x'
+nom_date_stamp = '20240109'     # Old version = 20190627
+
+spifu_coords_in = 'phase', 'fp1_x'
+spifu_date_stamp = '20231009'
+
+coords_out = 'det_x', 'det_y'
+optics = {Globals.nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
+                            nom_coords_in, coords_out, nom_date_stamp),
+          Globals.spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                          spifu_coords_in, coords_out, spifu_date_stamp)}
+optical_configuration = Globals.nominal
+
+date_stamps = []
+
+config_summary, coord_in, coord_out, zem_date_stamp = optics[optical_configuration]
+is_spifu = optical_configuration == Globals.spifu
+model_configuration = analysis_type, optical_configuration, zem_date_stamp
+filer = Filer(model_configuration)
 
 print("- optical path  = {:s}".format(optical_configuration))
 print("- input coords  = {:s}, {:s}".format(coord_in[0], coord_in[1]))
 print("- output coords = {:s}, {:s}".format(coord_out[0], coord_out[1]))
 
 # File locations and names
-zem_folder = "../data/distortion/{:s}".format(optical_configuration)
-zem_folder = Filer.get_folder(zem_folder)
+zem_folder = filer.data_folder
 
 detector = Detector()
 
@@ -41,22 +52,25 @@ plot = Plot()
 
 n_mats = Globals.n_mats_transform
 
-st_file = open(Filer.stats_file, 'w')
+st_file = open(filer.stats_file, 'w')
 
-run_config = 4, 2       # Nominal 4, 2
+run_config = 4, 2
 n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
 suppress_plots = False          # f = Plot first trace
-generate_transforms = True     # for all Zemax ray trace files and write to lms_dist_buffer.txt
+generate_transforms = False      # for all Zemax ray trace files and write to lms_dist_buffer.txt
 if generate_transforms:
     print()
     print("Generating distortion transforms")
     fmt = "- reading Zemax ray trace data from folder {:s}"
     print(fmt.format(zem_folder))
 
+    # Select *.csv files
     file_list = listdir(zem_folder)
+    file_list = [f for f in file_list if '.csv' in f]
+
     n_traces = len(file_list)
     offset_data_list = []
     traces = []
@@ -65,69 +79,70 @@ if generate_transforms:
         zf_file = zem_folder + file_name
         trace = Trace(zf_file, coord_in, coord_out, silent=True, is_spifu=is_spifu)
         print(trace.__str__())
-        trace.create_transforms(n_terms, debug=False)
+        debug = not suppress_plots
+        trace.create_transforms(n_terms, debug=debug)
         trace.add_wave_bounds(debug=False)
         traces.append(trace)
         offset_data_list.append(trace.offset_data)
         if not suppress_plots:
-            # trace.plot_dispersion(poly_order=0)         # Level shift
-            # trace.plot_dispersion(poly_order=1)
-            trace.plot_scatter(slice_list=[14.])
             trace.plot_focal_planes()
             trace.plot_fit_maps()
-            suppress_plots = False       # True = Just plot first file/setting
-    Filer.write_pickle(Filer.trace_file, traces)
-    stats_data = n_terms, -1, np.array(offset_data_list)
-    util.print_stats(st_file, stats_data)
+            suppress_plots = True       # True = Just plot first file/setting
+    print(Filer.trace_file)
+    filer.write_pickle(filer.trace_file, traces)
+    # stats_data = n_terms, -1, np.array(offset_data_list)
+    # util.print_stats(st_file, stats_data)
 
 # Wavelength calibration -
 # Create an interpolation object to give,
 #   wave = f(order, slice, spifu_slice, prism_angle, ech_angle, det_x, det_y)
 suppress_plots = False
-derive_wcal = True
+derive_wcal = False
 if derive_wcal:
     print()
     print("Generating wavelength calibration file (wavelength <-> echelle angle)")
-    traces = Filer.read_pickle(Filer.trace_file)
+    traces = Filer.read_pickle(filer.trace_file)
     wcal = {}
     for trace in traces:
-        for tf in trace.tf_list:
-            config, matrices, rays, wave_bounds = tf
+        for slice_object in trace.slice_objects:
+            config, matrices, offset_corrections, rays, wave_bounds = slice_object
             ech_order, slice_no, spifu_no = config
             a, b, ai, bi = matrices
             waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit = rays
-    plot.wavelength_coverage(traces)
+    plot.wavelength_coverage(traces, optical_configuration)
 
-# Generate polynomial fits to transform matrix coefficients. (per slice and per echelle order)
-generate_polynomials = True    # which interpolate transforms to any echelle angle / order
-if generate_polynomials:
-    fmt = "Generating polynomial fit to wavelength v transform term for each slice and echelle order"
-    print(fmt)
-    fmt = "- polynomial order = {:d}"
-    print(fmt.format(poly_order))
-    traces = Filer.read_pickle(Filer.trace_file)
-    transform_tuple = util.get_transform_fits(traces, poly_order)
-    Filer.write_pickle(Filer.tf_fit_file, transform_tuple)
-
-# Evaluate the transform performance when mapping the trace data using the polynomial fitted
-# transforms calculated in tf_fit_file.
+# Evaluate the transform performance when mapping test data.  The method is to interpolate the
+# coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
 evaluate_transforms = True     # performance statistics, for optimising code parameters.
-debug = True
+debug = False
 if evaluate_transforms:
     print('lms_distort - Evaluating polynomial fitted primary (AB) transforms')
-    det_x_fit, det_y_fit = None, None
-    transform_tuple = Filer.read_pickle(Filer.tf_fit_file)
-    transform_configs, transform_fits = transform_tuple
 
-    traces = Filer.read_pickle(Filer.trace_file)
+    traces = filer.read_pickle(filer.trace_file)
+
+    test_efp_x = 0.000
+    test_efp_y = 0.000
+    test_wave = 4.65
+    test_efp_point = test_efp_x, test_efp_y, test_wave
+
+    test_ech_order, test_slice_no, test_spifu_no = 27, 14, -1
+    test_ech_angle, test_prism_angle = 0.0, 6.65
+    if optical_configuration == Globals.spifu:
+        test_ech_order, test_slice_no, test_spifu_no = 27, 14, 3
+        test_ech_angle = 0.0, 6.97
+
+    test_config = test_ech_order, test_slice_no, test_spifu_no
+    test_det_x, test_det_y = Util.efp_to_dfp(traces, test_efp_point, test_config)
+
+    traces = filer.read_pickle(filer.trace_file)
     for trace in traces:
         ech_angle = trace.parameter['Echelle angle']
         prism_angle = trace.parameter['Prism angle']
-        for tf in trace.tf_list:
-            config, matrices, rays, _ = tf
+        for slice_object in trace.slice_objects:
+            config, matrices, offset_corrections, rays, _ = slice_object
             waves, phase, alpha, det_x, det_y, det_x_loc, det_y_loc = rays     # Local slice transformed x, y
-            a_fit, b_fit, _, _ = Util.lookup_transform_fit(config, prism_angle, transform_fits)
-            det_x_fit, det_y_fit = Util.apply_distortion(phase, alpha, a_fit, b_fit)
+            # a_fit, b_fit, _, _ = Util.lookup_transform_fit(config, prism_angle, transform_fits)
+            # det_x_fit, det_y_fit = Util.apply_distortion(phase, alpha, a_fit, b_fit)
             if debug:
                 nrows, ncols = 7, 4
                 fig_title = "{:s} ea = {:4.2f}".format(trace.parameter['name'], ech_angle)
@@ -146,17 +161,17 @@ if evaluate_transforms:
     offset_x = np.array(det_x_fit) - np.array(det_x)
     offset_y = np.array(det_y_fit) - np.array(det_y)
 
-    fmt = "Residuals, n_tran_terms={:d}, n_poly_terms={:d}"
-    fig_title = fmt.format(n_terms, poly_order+1)
-    ax_list = plot.set_plot_area(fig_title, fontsize=22,
-                                 xlabel="Wavelength [micron]",
-                                 ylabel="Mean ray offset at detector [micron]")
-    ax = ax_list[0, 0]
-    x = np.mean(offset_x, axis=(1, 2)) * 1000.0
-    y = np.mean(offset_y, axis=(1, 2)) * 1000.0
-    plot.plot_points(ax, wms, x, colour='blue', ms=6, mk='o')
-    plot.plot_points(ax, wms, y, colour='red', ms=6, mk='+')
-    plot.show()
+    # fmt = "Residuals, n_tran_terms={:d}, n_poly_terms={:d}"
+    # fig_title = fmt.format(n_terms, poly_order+1)
+    # ax_list = plot.set_plot_area(fig_title, fontsize=22,
+    #                              xlabel="Wavelength [micron]",
+    #                              ylabel="Mean ray offset at detector [micron]")
+    # ax = ax_list[0, 0]
+    # x = np.mean(offset_x, axis=(1, 2)) * 1000.0
+    # y = np.mean(offset_y, axis=(1, 2)) * 1000.0
+    # plot.plot_points(ax, wms, x, colour='blue', ms=6, mk='o')
+    # plot.plot_points(ax, wms, y, colour='red', ms=6, mk='+')
+    # plot.show()
 
     stats_data = n_terms, poly_order, offset_x, offset_y
     util.print_stats(st_file, stats_data)

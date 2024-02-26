@@ -7,12 +7,12 @@ Python object to encapsulate ray trace data for the LMS
 """
 import math
 import numpy as np
+import matplotlib.patches as mpatches
 from scipy.optimize import least_squares
 from lms_detector import Detector
 from lms_globals import Globals
 from lms_dist_util import Util
 from lms_dist_plot import Plot
-import matplotlib.patches as mpatches
 
 
 class Trace:
@@ -41,7 +41,7 @@ class Trace:
         @author: Alistair Glasse
         Read Zemax ray trace data
         """
-        self.tf_list, self.ray_trace = None, None
+        self.slice_objects, self.ray_trace = None, None
         self.offset_data, self.wave_bounds = None, None
         self.coord_in = coord_in
         self.coord_out = coord_out
@@ -52,24 +52,20 @@ class Trace:
             print('Reading Zemax model data from ' + path)
 
         csv_name, parameter, series = self._read_csv(path, is_spifu, coord_in, coord_out)
-
+        self.parameter = parameter
         # For SPIFU data, spifu slices 1,2 -> echelle order 23, 3,4 _> 24, 5,6 -> 25
         if is_spifu:
             spifu_slices = series['spifu_slice']
-            spifu_indices = spifu_slices - 1.
-            ech_orders = np.mod(spifu_indices, 3) + 23.
+            spifu_indices = spifu_slices - 1
+            ech_orders = np.mod(spifu_indices, 3) + 23
             series['ech_order'] = ech_orders
 
         waves = series['wavelength']
         ech_orders = series['ech_order']
-        phase = self._waves_to_phase(waves, ech_orders)
         d = Globals.rule_spacing * Globals.ge_refracive_index
         sin_aoi = waves * ech_orders / (2.0 * d)
         phase = np.arcsin(sin_aoi)
-        f = 1 - waves / np.mean(waves)
-        k1, k2 = 0.000006, 375.
-        phase_corr = k1 * np.sin(k2 * f)
-        series['phase'] = phase + phase_corr
+        series['phase'] = phase         # + phase_corr
         self.series = series
 
         # Count the number of slices and rays
@@ -82,14 +78,7 @@ class Trace:
 
         self._update_mask(silent)
         self._create_wave_colours()
-#        self.plot_phase_correction(f, phase_corr)       # self.get('det_x')
         return
-
-    @staticmethod
-    def _waves_to_phase(waves, ech_orders):
-        d = Globals.rule_spacing * Globals.ge_refracive_index
-        phase = waves * ech_orders / (2.0 * d)
-        return phase
 
     def __str__(self):
         fmt = "EA={:6.3f} deg, PA={:6.3f} deg, "
@@ -98,6 +87,13 @@ class Trace:
         smin, smax = self.unique_slices[0], self.unique_slices[-1]
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
         return string
+
+    @staticmethod
+    def waves_to_phase(waves, ech_orders):
+        d = Globals.rule_spacing * Globals.ge_refracive_index
+        sin_aoi = waves * ech_orders / (2.0 * d)
+        phase = np.arcsin(sin_aoi)
+        return phase
 
     def _read_csv(self, path, is_spifu, coord_in, coord_out):
         """ Read trace data in from csv file pointed to by path
@@ -150,22 +146,22 @@ class Trace:
                     val = 0.
                 else:
                     if name == 'ech_order':         # Assign spectral IFU orders later
-                        val = 0. if is_spifu else parameter['Spectral order']
+                        val = 0 if is_spifu else parameter['Spectral order']
                     else:
                         if name == 'spifu_slice':
-                            val = -1.       # Default for nominal configuration
+                            val = -1       # Default for nominal configuration
                             if is_spifu:
                                 zem_col = zem_column['sp_slice']
-                                val = float(tokens[zem_col])
+                                val = int(tokens[zem_col])
                         else:
                             zem_col = zem_column[name]
                             val = float(tokens[zem_col])
                 series[name].append(val)
         # Convert series lists to numpy arrays
+        int_arrays = ['ech_order', 'slice', 'spifu_slice']
         for name in series:
-            values = series[name]
-            series[name] = np.array(values)
-
+            vals = series[name]
+            series[name] = np.array(vals, dtype=int) if name in int_arrays else np.array(vals)
         return csv_name, parameter, series
 
     def _update_mask(self, silent):
@@ -282,29 +278,31 @@ class Trace:
         return a
 
     @staticmethod
+    def _sort(ref, unsort):
+        """ Re-order arrays in list 'unsort' using the index list from sorting array 'ref' in ascending order.
+        """
+        indices = np.argsort(ref)
+        sort = []
+        for array in unsort:
+            sort.append(array[indices])
+        return ref[indices], tuple(sort)
+
+    @staticmethod
     def offset_error_function(p, x, y):
-        two_pi = 2. * math.pi
-        residual = p[0] * np.sin(two_pi * x / p[1]) - y
+        """ Polynomial with odd powered terms.
+        """
+        residual = (x * (p[0] + x * x * (p[1] + p[2] * x * x))) - y
         return residual
 
     @staticmethod
-    def _sort_xy(x_in, y_in):
-        indices = np.argsort(x_in)
-        x = x_in[indices]
-        y = y_in[indices]
-        return x, y
-
-
-    @staticmethod
-    def _sine_fit(x_in, y_in):
-        x, y = Trace._sort_xy(x_in, y_in)
-        guess_amplitude = 0.5 * (np.max(y) - np.min(y))
-        guess_period = (2./3.) * (np.max(x) - np.min(x))
-        guess_oc = [guess_amplitude, guess_period]
-        res_lsq = least_squares(Trace.offset_error_function, guess_oc, args=(x, y))
+    def _sine_fit(x_ref, x_in, y_in):
+        _, xy_sort = Trace._sort(x_ref, (x_in, y_in))
+        guess_oc = [0.0, 0.0, 0.0]
+        res_lsq = least_squares(Trace.offset_error_function, guess_oc, args=xy_sort)
         offset_correction = res_lsq.x
-        fmt = "p_in={:8.6f},{:5.1f} -> p_out={:8.6f},{:5.1f}"
-        print(fmt.format(guess_oc[0], guess_oc[1], offset_correction[0], offset_correction[1]))
+        # fmt = "p_in={:10.2e},{:10.2e},{:10.2e} -> p_out={:10.2e},{:10.2e},{:10.2e}"
+        # print(fmt.format(guess_oc[0], guess_oc[1], guess_oc[2],
+        #                  offset_correction[0], offset_correction[1], offset_correction[2]))
         return offset_correction
 
     def create_transforms(self, n_terms, **kwargs):
@@ -312,12 +310,12 @@ class Trace:
         row, column coordinates.  Also update the wavelength values at the centre and corners of the detector mosaic.
         """
         debug = kwargs.get('debug', False)
-        util = Util()
-        self.tf_list = []
-        off_x_fits = []
+        self.slice_objects = []
+        off_x2_fits, off_y2_fits = [], []
         offset_data = []
-        tf_order = n_terms - 1
+        slice_order = n_terms - 1
         fp_in, fp_out = self.coord_in, self.coord_out
+        is_first = True
         for ech_order in self.unique_ech_orders:
             for spifu_no in self.unique_spifu_slices:
                 for slice_no in self.unique_slices:
@@ -327,30 +325,34 @@ class Trace:
                     det_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
                     det_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
 
-                    a, b = util.distortion_fit(phase, alpha, det_x, det_y, tf_order, inverse=False)
-                    ai, bi = util.distortion_fit(phase, alpha, det_x, det_y, tf_order, inverse=True)
-                    det_x_fit, det_y_fit = Util.apply_distortion(phase, alpha, a, b)
-                    off_x, off_y = det_x - det_x_fit, det_y - det_y_fit
+                    a, b = Util.distortion_fit(phase, alpha, det_x, det_y, slice_order, inverse=False)
+                    ai, bi = Util.distortion_fit(phase, alpha, det_x, det_y, slice_order, inverse=True)
+                    det_x_fit1, det_y_fit1 = Trace.apply_polynomial_distortion(phase, alpha, a, b)
 
-                    offset_correction = self._sine_fit(det_x_fit, off_x)
+                    off_x1, off_y1 = det_x - det_x_fit1, det_y - det_y_fit1
+                    x_sine_corr = self._sine_fit(det_x_fit1, det_x_fit1, off_x1)
+                    y_sine_corr = self._sine_fit(det_x_fit1, det_x_fit1, off_y1)
+                    det_x_fit2 = Trace.apply_sine_correction(x_sine_corr, det_x_fit1, det_x_fit1, True)
+                    det_y_fit2 = Trace.apply_sine_correction(y_sine_corr, det_x_fit1, det_y_fit1, True)
 
-                    off_x_fit = self.offset_error_function(offset_correction, det_x_fit, 0.*det_x_fit)
-                    off_x_fits.append(off_x_fit)
-                    offset_data.append([off_x, off_y])
-                    if debug:
-                        phase_rt, alpha_rt = Util.apply_distortion(det_x_fit, det_y_fit, ai, bi)
-                        print('Trace.create_transforms debug=True')
-                        fmt = "Phase round trip EO= {:d}, slice_no= {:d}, spifu_no= {:d}"
-                        title = fmt.format(int(ech_order), int(slice_no), int(spifu_no))
-                        Plot.round_trip(phase, phase_rt, title=title)
+                    off_x2, off_y2 = det_x - det_x_fit2, det_y - det_y_fit2
+                    off_x2_fits.append(off_x2)
+                    off_y2_fits.append(off_y2)
+
                     config = ech_order, slice_no, spifu_no
                     matrices = a, b, ai, bi
-                    rays = waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit
-                    tf = config, matrices, offset_correction, rays
-
-                    self.tf_list.append(tf)
-                    self.plot_scatter(xfit=1000.*np.array(off_x_fits))
-
+                    offset_corrections = x_sine_corr, y_sine_corr
+                    rays1 = waves, phase, alpha, det_x, det_y, det_x_fit1, det_y_fit1
+                    tf_inter = config, matrices, offset_corrections, rays1
+                    rays2 = waves, phase, alpha, det_x, det_y, det_x_fit2, det_y_fit2
+                    slice_object = config, matrices, offset_corrections, rays2
+                    self.slice_objects.append(slice_object)
+                    if debug and is_first:        # Plot intermediate and full fit to data
+                        tlin1 = "Distortion offsets, A,B, polynomial fit \n"
+                        self.plot_scatter(tf_inter, plot_correction=True, tlin1=tlin1)
+                        tlin1 = "Distortion offsets, post-sinusoidal correction \n"
+                        self.plot_scatter(slice_object, tlin1=tlin1)
+                        is_first = False
         self.offset_data = offset_data
         return
 
@@ -366,23 +368,23 @@ class Trace:
         tfw_list = []
         wb_list = []
         all_det_x_bounds, all_det_x_rtn, all_det_y_bounds, all_det_y_rtn = [], [], [], []
-        for tf in self.tf_list:
+        for tf in self.slice_objects:
             config, matrices, offset_correction, rays = tf
             ech_order, slice_no, spifu_no = config
             a, b, ai, bi = matrices
             _, _, _, _, det_y, _, _ = rays
             det_y_bounds = [np.mean(det_y)] * 4
-            phase_bounds, alpha = Util.apply_distortion(det_x_bounds, det_y_bounds, ai, bi)
+            phase_bounds, alpha = Trace.apply_polynomial_distortion(det_x_bounds, det_y_bounds, ai, bi)
             d = Globals.rule_spacing * Globals.ge_refracive_index
             wave_bounds = phase_bounds * 2.0 * d / ech_order
             wb_list.append(wave_bounds)
             if debug:
-                det_x_rtn, det_y_rtn = Util.apply_distortion(phase_bounds, alpha, a, b)
+                det_x_rtn, det_y_rtn = Trace.apply_polynomial_distortion(phase_bounds, alpha, a, b)
                 all_det_x_bounds.append(det_x_bounds)
                 all_det_x_rtn.append(det_x_rtn)
                 all_det_y_bounds.append(det_y_bounds)
                 all_det_y_rtn.append(det_y_rtn)
-            tfw = config, matrices, rays, wave_bounds
+            tfw = config, matrices, offset_correction, rays, wave_bounds
             tfw_list.append(tfw)
         if debug:
             title = "All Det X round trips "
@@ -390,7 +392,7 @@ class Trace:
             title = "All Det Y round trips "
             Plot.round_trip(np.array(all_det_y_bounds), np.array(all_det_y_rtn), title=title)
 
-        self.tf_list = tfw_list
+        self.slice_objects = tfw_list
         return
 
     @staticmethod
@@ -436,8 +438,8 @@ class Trace:
         ax_list = plot.set_plot_area(fig_title,
                                      fontsize=10.0, sharex=True, sharey=False,
                                      nrows=n_rows, ncols=n_cols, xlim=xlim)
-        for tf in self.tf_list:
-            config, _, rays, wave_coverage = tf
+        for tf in self.slice_objects:
+            config, _, _, rays, wave_coverage = tf
             ech_order, slice_no, spifu_no = config
             _, _, _, x, y, x_fit, y_fit = rays
             spifu_idx = int(spifu_no - spifu_start)
@@ -460,52 +462,79 @@ class Trace:
         plot.show()
         return
 
-    def plot_scatter(self, **kwargs):
+    def plot_scatter(self, tf, **kwargs):
         """ Plot the spread of offsets between ray trace and fit positions on the detector.
         """
         slice_list = kwargs.get('slice_list', None)
-        xfit = kwargs.get('xfit', None)
+        plot_correction = kwargs.get('plot_correction', False)
+        tlin1_default = "Distortion offsets (Zemax - Zemax Fit): \n"
+        tlin1 = kwargs.get('tlin1', tlin1_default)
 
-        ax_list = Plot.set_plot_area('Distortion offsets (Zemax - Zemax Fit)',
-                                     nrows=1, ncols=2, fontsize=10.0, sharey=True)
+        if len(tf) == 5:
+            config, _, offset_corrections, rays, wave_coverage = tf
+        else:
+            config, _, offset_corrections, rays = tf
+        ech_order, slice_no, spifu_no = config
+        off_x_corr, off_y_corr = offset_corrections
+        # Create plot area
+        ech_angle = self.parameter['Echelle angle']
+        prism_angle = self.parameter['Prism angle']
+        fmt = "order={:d}, ech. angle={:3.1f}, prism angle={:4.3f}, slice={:d}"
+        tlin2 = fmt.format(int(ech_order), ech_angle, prism_angle, int(slice_no))
+        if spifu_no >= 0.:
+            tlin2 += ", spifu={:d}".format(int(spifu_no))
+        title = tlin1 + tlin2
+
+        ax_list = Plot.set_plot_area(title, nrows=1, ncols=2, fontsize=10.0, sharey=True)
         x_list, y_list = [], []
-        off_x_list, off_y_list = [], []
-        for tf in self.tf_list:
-            if len(tf) == 5:
-                config, _, _, rays, wave_coverage = tf
-            else:
-                config, _, _, rays = tf
-            _, slice_no, spifu_no = config
-            if slice_list is None or slice_no in slice_list:
-                _, _, _, x, y, x_fit, y_fit = rays
-                x_list.append(x)
-                y_list.append(y)
-                off_x, off_y = x - x_fit, y - y_fit
-                off_x_list.append(off_x)
-                off_y_list.append(off_y)
-        x_all, y_all = np.array(x_list), np.array(y_list)
-        off_x_all = np.array(off_x_list) * 1000.
-        off_y_all = np.array(off_y_list) * 1000.
-        off_x_rms = np.std(off_x_all)
-        off_y_rms = np.std(off_y_all)
+        off_det_x_list, off_det_y_list, off_det_a_list = [], [], []
 
+        if slice_list is None or slice_no in slice_list:
+            _, _, _, det_x, det_y, det_x_fit, det_y_fit = rays
+            x_list.append(det_x)
+            y_list.append(det_y)
+            off_det_x, off_det_y = det_x - det_x_fit, det_y - det_y_fit
+            off_det_a = np.sqrt(np.square(off_det_x) + np.square(off_det_y))
+            off_det_x_list.append(off_det_x)
+            off_det_y_list.append(off_det_y)
+            off_det_a_list.append(off_det_a)
+
+            for pane in range(0, 2):
+                ax = ax_list[0, pane]
+                u = det_x if pane == 0 else det_y
+                if plot_correction and pane == 0:
+                    xf = Trace.offset_error_function(off_x_corr, det_x, 0.)
+                    yf = Trace.offset_error_function(off_y_corr, det_x, 0.)
+                    uf, (vf,) = Trace._sort(u, (xf,))
+                    ax.plot(uf, 1000.*vf, ls='solid', lw=1.5, color='salmon')
+                    uf, (vf,) = Trace._sort(u, (yf,))
+                    ax.plot(uf, 1000.*vf, ls='solid', lw=1.5, color='olive')
+                ax.plot(u, 1000. * off_det_x, marker='.', ls='none', ms=1.5, color='orangered')
+                ax.plot(u, 1000. * off_det_y, marker='.', ls='none', ms=1.5, color='green')
+                ax.plot(u, 1000. * off_det_a, marker='.', ls='none', ms=1.5, color='blue')
+
+        # Add the legend to both plots
         x_labels = ['Det x / mm', 'Det y / mm']
         y_labels = ["Offset / micron.", '']
         fmt = "{:s} offset stdev= {:3.1f} um"
-        label1, label2 = fmt.format('x', off_x_rms), fmt.format('y', off_y_rms)
         for pane in range(0, 2):
             ax = ax_list[0, pane]
             ax.set_xlabel(x_labels[pane])
             ax.set_ylabel(y_labels[pane])
-            absc = x_all if pane == 0 else y_all
-            if xfit is not None:
-                ax.plot(absc, xfit, ls='solid', lw=1.5, color='black')
-            ax.plot(absc, off_x_all, marker='.', ls='none', ms=1.0, color='blue')
-            ax.plot(absc, off_y_all, marker='.', ls='none', ms=1.0, color='green')
+            off_x_all = np.array(off_det_x_list) * 1000.
+            off_y_all = np.array(off_det_y_list) * 1000.
+            off_a_all = np.array(off_det_a_list) * 1000.
+            off_x_rms = np.std(off_x_all)
+            off_y_rms = np.std(off_y_all)
+            off_a_rms = np.std(off_a_all)
+            label1 = fmt.format('x', off_x_rms)
+            label2 = fmt.format('y', off_y_rms)
+            label3 = fmt.format('a', off_a_rms)
+            patch_x = mpatches.Patch(color='salmon', label=label1)
+            patch_y = mpatches.Patch(color='olive', label=label2)
+            patch_a = mpatches.Patch(color='blue', label=label3)
+            ax.legend(handles=[patch_x, patch_y, patch_a])
 
-            patch_x = mpatches.Patch(color='blue', label=label1)
-            patch_y = mpatches.Patch(color='green', label=label2)
-            ax.legend(handles=[patch_x, patch_y])
         Plot.show()
         return
 
@@ -518,27 +547,6 @@ class Trace:
         wfit = fit(det_xy)
         dw = waves - wfit
         return dw
-
-    def plot_phase_correction(self, det_x, phase_corr):
-#        poly_order = kwargs.get('poly_order', 0)            # Linear fit is default (poly_order = 0)
-        title = "Phase correction"
-        ax_list = Plot.set_plot_area(title,
-                                     nrows=1, ncols=1, fontsize=10.0)
-        x_label = "det_x / mm"
-        y_label = "phase correction"
-        fmt = "{:s} offset"
-        label1, label2 = fmt.format('x'), fmt.format('y')
-
-        ax = ax_list[0, 0]
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-
-        ax.plot(det_x, phase_corr, fillstyle='full', ms=1.0, marker='o', linestyle='None', color='blue')
-        # patch_x = mpatches.Patch(color='blue', label=label1)
-        # patch_y = mpatches.Patch(color='green', label=label2)
-        # ax.legend(handles=[patch_x, patch_y])
-        Plot.show()
-        return
 
     def plot_dispersion(self, **kwargs):
         """ Plot detector coordinate v wavelength per echelle order
@@ -677,3 +685,38 @@ class Trace:
                     fmt = "{:8.1f},{:8.1f},{:8.1f},{:8.1f}\n"
                     text += fmt.format(ave_x, rms_x, ave_y, rms_y)
         return text
+
+    @staticmethod
+    def apply_polynomial_distortion(x, y, a, b):
+        """
+        @author Alistair Glasse
+        21/2/17   Create to encapsulate distortion transforms
+        Apply a polynomial transform pair (A,B or AI,BI) to an array of points
+        affine = True  Apply an affine version of the transforms (remove all non-
+        linear terms)
+        """
+        dim = a.shape[0]
+        n_pts = len(x)
+
+        exponent = np.array([range(0, dim), ] * n_pts).transpose()
+
+        xmat = np.array([x, ] * dim)
+        xin = np.power(xmat, exponent)
+        ymat = np.array([y, ] * dim)
+        yin = np.power(ymat, exponent)
+
+        xout = np.zeros(n_pts)
+        yout = np.zeros(n_pts)
+        for i in range(0, n_pts):
+            xout[i] = yin[:, i] @ a @ xin[:, i]
+            yout[i] = yin[:, i] @ b @ xin[:, i]
+        return xout, yout
+
+    @staticmethod
+    def apply_sine_correction(sine_corr, det_x, y_in, fwd):
+        """ Apply sinusoidal correction.
+        fwd = True for det_
+        """
+        y_corr = Trace.offset_error_function(sine_corr, det_x, 0.)
+        y = y_in + y_corr
+        return np.array(y)

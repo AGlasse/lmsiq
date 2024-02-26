@@ -1,9 +1,9 @@
+import os
 import numpy as np
 from lms_globals import Globals
 from lms_filer import Filer
 from lms_wcal import Wcal
 from lms_ipc import Ipc
-from lms_ipg import Ipg
 from lms_detector import Detector
 from lmsiq_analyse import Analyse
 from lmsiq_fitsio import FitsIo
@@ -11,31 +11,65 @@ from lmsiq_plot import Plot
 from lmsiq_phase import Phase
 from lmsiq_cuber import Cuber
 from lmsiq_summariser import Summariser
+from lmsiq_image_manager import ImageManager
 from lms_dist_util import Util
 
 print('LMS Repeatability (lmsiq.py) - started')
 print()
 
+analysis_type = 'iq'
+
 # Define the optical path, either nominal or with the spectral IFU inserted in the beam.
-nominal = 'nominal'
-spifu = 'spifu'
+nominal = Globals.nominal
+spifu = Globals.spifu
 optics = {nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)', ('phase', 'fp2_x'), ('det_x', 'det_y')),
           spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)', ('phase', 'fp1_x'), ('det_x', 'det_y'))}
 
-# List of locations (slices numbers and IFU) where Zemax images are provided.
+# Locations (slices numbers and IFU) where Zemax images are provided.
 # The target PSF is centred on the first slice in the list.  The number of adjacent
 # slices is next, then optional 'ifu' if images at the IFU image slicer are present
-slice_locs_20230607 = ['14', '5', 'ifu']
-slice_locs_20230630 = ['14', '9', 'ifu']
+slice_locs_20230607 = ['14', '2']
+slice_locs_20230630 = ['14', '4']
 # Configuation tuple - dataset, optical_configuration, n_orders, n_runs, im_locs, folder_label, label
-datasets = {0: (nominal, '20230207', 11, 100, ['1', '1'], '_with_toroidalM12_', 'toroidal M12, slice  1'),
-            1: (nominal, '20230607', 3, 5, slice_locs_20230607, '_with_toroidalM12_', 'toroidal M12'),
-            2: (nominal, '20230630', 2, 10, slice_locs_20230630, '_with_toroidalM12_', 'toroidal M12')   # 21, 100
-           }
-dataset_to_analyse = 2
-dataset = datasets[dataset_to_analyse]
-optical_path = dataset[0]
-date_stamp = dataset[1]
+
+# nominal_identifier_old = {'optical_configuration': nominal,
+#                       'iq_date_stamp': '20230630',
+#                       'iq_folder_leader': 'psf_model',
+#                       'dist_date_stamp': '20240109',
+#                       'zemax_format': 'old_zemax',
+#                       'specifu_config_file': None,
+#                       'ifu_setup': slice_locs_20230630,
+#                       }
+nominal_identifier = {'optical_configuration': nominal,
+                      'iq_date_stamp': '20240209',
+                      'iq_folder_leader': 'psf_IFU2det_',
+                      'dist_date_stamp': '20240109',
+                      'zemax_format': 'new_zemax',
+                      'specifu_config_file': None,
+                      'cube_slice_bounds': (13, 1),
+                      }
+# spifu_identifier_old = {'optical_configuration': spifu,
+#                     'iq_date_stamp': '20240124',
+#                     'iq_folder_leader': 'psf_model',
+#                     'dist_date_stamp': '20240109',
+#                     'zemax_format': 'new_zemax',
+#                     'specifu_config_file': 'SpecIFU_config.csv',
+#                     'ifu_setup': (11, 100, ['1', '1', 'ifu']),
+#                     }
+spifu_identifier = {'optical_configuration': spifu,
+                    'iq_date_stamp': '20240209',
+                    'iq_folder_leader': 'psf_model',
+                    'dist_date_stamp': '20240109',
+                    'zemax_format': 'new_zemax',
+                    'specifu_config_file': 'SpecIFU_config.csv',
+                    'cube_slice_bounds': (13, 1),
+                    }
+
+data_identifier = nominal_identifier
+optical_path = data_identifier['optical_configuration']
+date_stamp = data_identifier['iq_date_stamp']
+is_spifu = optical_path == Globals.spifu
+
 fmt = "Analysing dataset for {:s} optical path, dated {:s}"
 print(fmt.format(optical_path, date_stamp))
 
@@ -46,56 +80,51 @@ plot = Plot()
 detector = Detector()
 util = Util()
 fitsio = FitsIo(optical_path)
-Filer(optical_path)
-Filer.setup_folders(dataset)
+
+model_configuration = analysis_type, optical_path, date_stamp
+iq_filer = Filer(model_configuration)
+
+image_manager = ImageManager()
+image_manager.make_dictionary(data_identifier, iq_filer)
+
 summariser = Summariser()
 
-
-# File locations and names
-output_folder = "../output/distortion/{:s}".format(optical_path)
-output_folder = Filer.get_folder(output_folder)
-
-raytrace_file = output_folder + optical_path + '_raytrace.txt'
-
-copy_from_zip = False        # Copy Zemax organised files into 'data' folder
-if copy_from_zip:
-    print("Copying and slice sorting Zemax data from '../zip/' to '../data/")
-    FitsIo.copy_from_zip(dataset)
-
-# Get Zemax parameters from first wavelength data to set up global oversampling factors
-Globals.det_pix_size = Detector.det_pix_size
-im_pix_size, zemax_configuration = FitsIo.setup_zemax_configuration(dataset)
-Globals.im_pix_size = im_pix_size
-Globals.zemax_configuration = zemax_configuration
-
-run_test = False  # Generate test case with 50 % IPC and an image with one bright pixel.
+run_test = True  # Generate test case with 50 % IPC and an image with one bright pixel.
 print("Running test case = {:s}".format(str(run_test)))
 ipc = Ipc()
-Ipc.test()
-inter_pixels = [True, False]                    # True = include diffusion kernel convolution
+
+inter_pixels = [True, False]                        # True = include diffusion kernel convolution
 
 # Analyse Zemax data
 process_phase_data = False
 if process_phase_data:
     print()
     print("Processing centroid shift impact for dataset {:s}".format(date_stamp))
-    phase = Phase()                             # Module for phase (wavelength) shift analysis
-    phase.process(dataset, inter_pixels)
+    phase = Phase()                                 # Module for phase (wavelength) shift analysis
+    mc_start, mc_end = 0, 3
+    print("Setting mc_start={:d}, mc_end={:d}".format(mc_start, mc_end))
+
+    mc_bounds = mc_start, mc_end
+    process_control = mc_bounds, inter_pixels
+    phase.process(data_identifier, process_control, iq_filer, image_manager, plot_level=1)
 
 build_cubes = True
 if build_cubes:
     print('Reconstructing cubes and analysing slice profile data')
     cuber = Cuber()
-    cuber.build(dataset, inter_pixels, raytrace_file)
+    rt_date_stamp = '20231009' if is_spifu else '20240109'
+    rt_model_configuration = 'distortion', optical_path, rt_date_stamp
+    rt_filer = Filer(rt_model_configuration)
+    cuber.build(data_identifier, inter_pixels, image_manager, iq_filer)
 
-process_cubes = True
+process_cubes = False
 if process_cubes:
     print('Processing cubes to extract slice by slice profiles and reconstructed image Strehls (and more)')
     cuber = Cuber()
-    cuber.process(dataset, inter_pixels)
+    cuber.process(data_identifier, inter_pixels, iq_filer)
 
-poly_file = '../output/lms_dist_poly_old.txt'           # Distortion polynomial
-poly, ech_bounds = Util.read_polyfits_file(poly_file)   # Use distortion map for finding dispersion
+#poly_file = '../output/lms_dist_poly_old.txt'           # Distortion polynomial
+#poly, ech_bounds = Util.read_polyfits_file(poly_file)   # Use distortion map for finding dispersion
 
 # Read in dataset centroids for plotting.
 stats_list = []
@@ -106,8 +135,8 @@ profile_data = None
 
 plot_profiles = True
 if plot_profiles:
-    dataset = datasets[dataset_to_analyse]
-    optical_path, date_stamp, n_wavelengths, n_mcruns, slice_locs, folder_name, config_label = dataset
+    data_identifier = data_identifiers[dataset_to_analyse]
+    optical_path, date_stamp, n_wavelengths, n_mcruns, slice_locs, folder_name, config_label = data_identifier
     n_mcruns_tag = "{:04d}".format(n_mcruns)
     # Get boresight slice only
     tgt_slice_no, n_slices, slice_idents = Util.parse_slice_locations(slice_locs, boresight=True)
@@ -131,11 +160,13 @@ if plot_profiles:
                 profile_data_list = []
                 for inter_pixel in inter_pixels:
                     Ipc.set_inter_pixel(inter_pixel)
-                    profile_dict, profiles = Summariser.read_summary(process_level, slice_subfolder)
-                    profile_data = plot_id, dataset, profile_dict, profiles, Ipc.tag
+                    profile_dict, profiles = Summariser.read_summary(process_level, slice_subfolder, iq_filer)
+                    profile_data = plot_id, data_identifier, profile_dict, profiles, Ipc.tag
                     profile_data_list.append(profile_data)
-
-                png_path = Filer.png_path + '/profiles/' + process_level + '_' + profile
+                png_folder = iq_filer.iq_png_folder + '/profiles'
+                png_folder = iq_filer.get_folder(png_folder)
+                png_file = process_level + '_' + profile
+                png_path = png_folder + png_file
                 ylabel, plot_errors = profile_labels[profile]
                 srp_req = 'srp' in profile
                 plot.profile(profile, profile_data_list,

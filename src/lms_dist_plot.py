@@ -6,6 +6,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from lms_globals import Globals
 
 
 class Plot:
@@ -63,8 +64,8 @@ class Plot:
         xlim = [2.5, 5.5]
         ylim = [-2.0, 2.0]
         ax_list = self.set_plot_area('Zemax vXX.YY',
-                                   xlim=xlim, xlabel='Wavelength [um]',
-                                   ylim=ylim, ylabel='Mech. rot. / Image motion [arcsec/pixel]')
+                                     xlim=xlim, xlabel='Wavelength [um]',
+                                     ylim=ylim, ylabel='Mech. rot. / Image motion [arcsec/pixel]')
         ax = ax_list[0, 0]
 
         ea_settings = np.unique(eas)
@@ -187,44 +188,45 @@ class Plot:
         return
 
     @staticmethod
-    def wavelength_coverage(traces):
+    def wavelength_coverage(traces, optical_configuration):
         ax_list = Plot.set_plot_area('Wavelength coverage',
                                      xlabel="Wavelength / micron",
                                      ylabel="Prism angle + 0.02 x Echelle angle ")
         ax = ax_list[0, 0]
         ccs4_colours = mcolors.CSS4_COLORS
+        if optical_configuration == Globals.spifu:
+            ccs4_colours = mcolors.TABLEAU_COLORS
+
         colours = sorted(ccs4_colours,
                          key=lambda c: tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(c))),
                          reverse=True)
         colour_iterator = iter(colours)
         config_colour = {}
+        old_labels = []
 
-        for trace in traces:
+        for trace in traces[0:-1]:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
-            ech_orders = trace.series['ech_order']
             tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-            config_colour[tag] = next(colour_iterator)
-            for tf in trace.tf_list[0:1]:
-                config, matrices, rays, wave_bounds = tf
-                ech_order, slice_no, spifu_no = config
-                x1, x2, x3, x4 = wave_bounds
+            config_colour[tag] = next(colour_iterator, 'black')
+            for tf in trace.slice_objects:
+                config, matrices, offset_corrections, rays, wave_bounds = tf
+                label, slice_no, spifu_no = config
+                x = rays[0]
+                y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * rays[4]
+                x_label, y_label = x[0], y[0]
 
                 tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-                colour = 'blue'     # config_colour[tag]
-                y_spifu = 0.002 * ech_order + 0.0012 * (spifu_no % 3) - 0.0006
-                y = prism_angle + 0.02 * ech_angle
-                if spifu_no != -1:
-                    y += y_spifu
-                ypr = prism_angle
+                colour = config_colour[tag]
+                ax.plot(x, y, color=colour, clip_on=True,
+                        fillstyle='none', marker='.', mew=1.0, ms=3, linestyle='None')
 
-                ax.plot([x1, x2], [y, y], linestyle='solid', linewidth=1.5, color=colour)
-                ax.plot([x3, x4], [y, y], linestyle='solid', linewidth=1.5, color=colour)
-                ax.plot([x1, x4], [ypr, ypr],
-                        linestyle='dotted', linewidth=1.0, color='black')
-                label = "{:d}".format(int(ech_order))
+                label = "{:d}".format(int(label))
                 if spifu_no != -1:
                     label += "/{:d}".format(int(spifu_no))
-                ax.text(x1, y, label)
+                is_new_label = label not in old_labels
+                if is_new_label:
+                    ax.text(x_label, y_label, label)
+                    old_labels.append(label)
         Plot.show()
         return
 

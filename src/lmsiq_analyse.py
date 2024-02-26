@@ -14,22 +14,21 @@ class Analyse:
         return
 
     @staticmethod
-    def extract_cube_strips(obs_list, oversampling):
+    def extract_cube_strips(image_list, oversampling):
         first_obs = True
-        n_obs = len(obs_list)
+        n_obs = len(image_list)
         c1, c2 = 0, 0
         strips = None
-        for i, obs in enumerate(obs_list):
-            im = obs[0]
+        for i, image in enumerate(image_list):
             if first_obs:
-                nzr, nzc = im.shape
+                nzr, nzc = image.shape
                 zc_cen = int(nzc / 2)
                 spec_width_pix = 2.5  # Spectral width per slice for reconstructed cubes.
                 zc_hwid = int(0.5 * spec_width_pix * oversampling)
                 c1, c2 = zc_cen - zc_hwid, zc_cen + zc_hwid
                 strips = np.zeros((n_obs, nzr))
                 first_obs = False
-            strip = np.sum(im[:, c1:c2], axis=1)
+            strip = np.sum(image[:, c1:c2], axis=1)
             strips[i, :] = strip
         return strips
 
@@ -74,11 +73,11 @@ class Analyse:
         return gauss, linear
 
     @staticmethod
-    def find_fwhm(obs, oversampling, **kwargs):
+    def find_fwhm(image, oversampling, **kwargs):
         debug = kwargs.get('debug', False)
         axis = kwargs.get('axis', 0)
 
-        image, par = obs
+#        image, par = obs
         nr5, nc5 = image.shape
         half_aperture = 2 * oversampling
         rc_lo = int(nc5 / 2) - half_aperture
@@ -157,8 +156,8 @@ class Analyse:
         return phases, np.abs(phase_diffs)
 
     @staticmethod
-    def find_phot(obs, **kwargs):
-        image, _ = obs
+    def find_phot(image, **kwargs):
+#        image, _ = obs
         method = kwargs.get('method', 'fixed_aperture')
         method_parameters = kwargs.get('method_parameters', None)
         phot = 0.
@@ -207,13 +206,9 @@ class Analyse:
         return centroid
 
     @staticmethod
-    def _find_mean_centroid(observations):
+    def _find_mean_centroid(images):
         """ Find the mean centroid position for all images in a list.
         """
-        images = []
-        for obs in observations:
-            image, _ = obs
-            images.append(image)
         cube = np.array(images)
         image_ave = np.average(cube, axis=0)
         centroid = centroid_com(image_ave)
@@ -231,10 +226,11 @@ class Analyse:
         return phase_shift_rates
 
     @staticmethod
-    def eed(observations, axis, **kwargs):
+    def eed(image_list, obs_dict, axis, **kwargs):
         """ Calculate the enslitted energy along an axis.
-        :param observations:    List of image, header pairs
-        :param axis: Variable axis, 'spectral' or 'spatial'
+        :param image_list:              List of imagess
+        :param obs_dict            List of parameters associated with image list
+        :param axis:                    ='spectral' or 'spatial'
         :param kwargs: is_log = True for samples which are uniform in log space
         :return radii: Sampled axis
                 ees_mean: Mean enslitted energy profile
@@ -245,10 +241,10 @@ class Analyse:
         is_log = kwargs.get('log10sampling', True)  # Use sampling equispaced in log10
         oversample = kwargs.get('oversample', 1.)
 
-        ny, nx = observations[0][0].shape
+        ny, nx = image_list[0].shape
         nxy_min = nx if nx < ny else ny
 
-        n_obs = len(observations)
+        n_obs = len(image_list)
         r_sample = 0.1
         r_start = r_sample
         # Set maximum radial size of aperture (a bit less than the full image size to avoid OOB errors)
@@ -267,18 +263,17 @@ class Analyse:
         im_sums = np.zeros(n_obs)
         im_peaks = np.zeros(n_obs)
 
-        for j, obs in enumerate(observations):
-            image, params = obs
-            file_id, mm_fitspix = params
+        for j, image in enumerate(image_list):
+            file_name = obs_dict['file_names'][j]
             imin, imax = np.amin(image), np.amax(image)
             centroid = centroid_com(image)
             umin, vmin = centroid[0] - r_max, centroid[1] - r_max
             umax, vmax = centroid[0] + r_max, centroid[1] + r_max
-            is_x_oob = umin < 0 or umax > nxy_min - 1
-            is_y_oob = vmin < 0 or vmax > nxy_min - 1
+            is_x_oob = umin < 0 or umax > nx - 1
+            is_y_oob = vmin < 0 or vmax > ny - 1
             if debug:
                 fmt = "Processing file {:s} into column {:d} {:10.1e} {:10.1e}"
-                print(fmt.format(file_id, j, imin, imax))
+                print(fmt.format(file_name, j, imin, imax))
                 if is_x_oob or is_y_oob:
                     txt = "!! U/V out of bounds (signal truncated) !! - "
                     fmt = "u={:5.1f} -{:5.1f}, v={:5.1f} -{:5.1f}"
@@ -305,11 +300,18 @@ class Analyse:
 
         # Rescale x axis from image scale to LMS pixels
         ees_perfect, ees_design = ees_all[:, 0], ees_all[:, 1]
-        ees_mc = ees_all[:, 2:]
-        ees_mean = np.mean(ees_mc, axis=1)
-        ees_rms = np.std(ees_mc, axis=1)
+        ees_mcs = ees_all[:, 2:]
+        ees_mc_mean = np.mean(ees_mcs, axis=1)
+        ees_mc_rms = np.std(ees_mcs, axis=1)
         xdet = np.divide(radii, oversample)         # Convert x scale to LMS detector pixels
-        ees_data = axis, xdet, ees_perfect, ees_design, ees_mean, ees_rms, ees_mc
+        ees_data = {'xdet': xdet, 'perfect': ees_perfect, 'design': ees_design,
+                    'mc_mean': ees_mc_mean, 'mc_rms': ees_mc_rms}
+
+        mc_start, mc_end = obs_dict['mc_bounds']
+        for mc_no in range(mc_start, mc_end + 1):
+            mc_tag = "MC_{:04d}".format(mc_no)
+            ees_data[mc_tag] = ees_mcs[:, mc_no]
+
         return ees_data
 
     @staticmethod
@@ -406,8 +408,9 @@ class Analyse:
         return strehls
 
     @staticmethod
-    def lsf(observations, axis, **kwargs):
-        """ Find the normalised line spread function for all image files.
+    def lsf(image_list, obs_dict, axis, **kwargs):
+        """ Find the normalised line spread function for all image files.  Note that the pixel is centred
+        at its index number, so we perform rectangular aperture photometry centred at
         :returns - uvals, pixel scale
                  - lsf_mean, mean line spread function for all images
                  - lsf_rms, root mean square distribution per pixel
@@ -416,74 +419,87 @@ class Analyse:
         debug = kwargs.get('debug', False)
         centroid_relative = kwargs.get('centroid_relative', True)
         oversample = kwargs.get('oversample', 1.)
-        v_coadd = kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
+        v_coadd= kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
         u_radius = kwargs.get('u_radius', 'all')    # Maximum radial size of aperture (a bit less than 1/2 image size)
-        u_sample = 1.0      # Sample psf once per pixel to avoid steps
-        u_start = 0.0       # Offset from centroid
+        usample = 1.0      # Sample psf once per pixel to avoid steps
+        ustart = 0.0       # Offset from centroid
 
-        image, params = observations[0]
-        n_rows, n_cols = image.shape
+        n_rows, n_cols = image_list[0].shape
 
-        v_coadd = n_cols - 1 if v_coadd == 'all' else v_coadd
-        u_radius = (n_rows - 1) / 2.0 if u_radius == 'all' else u_radius
+        vcoadd = n_cols - 1 if v_coadd == 'all' else v_coadd
+        uradius = (n_rows - 1) / 2.0 if u_radius == 'all' else u_radius
         if axis == 'spectral':
-            v_coadd = n_rows if v_coadd == 'all' else v_coadd
-            u_radius = (n_cols - 1) / 2.0 if u_radius == 'all' else u_radius
+            vcoadd = n_rows if v_coadd == 'all' else v_coadd
+            uradius = (n_cols - 1) / 2.0 if u_radius == 'all' else u_radius
 
-        uvals = np.arange(u_start - u_radius, u_start + u_radius, u_sample)
+        uvals = np.arange(ustart - uradius, ustart + uradius + 1., usample)
         n_points = uvals.shape[0]
 
-        n_files = len(observations)
+        n_files = len(image_list)
         lsf_all = np.zeros((n_points, n_files))
 
         centroid = np.zeros((2,))
         if centroid_relative:
-            centroid = Analyse._find_mean_centroid(observations)
+            centroid = Analyse._find_mean_centroid(image_list)
 
-        for j, obs in enumerate(observations):
-            image, params = obs
-            file_id, mm_fitspix = params
+        for j, image in enumerate(image_list):
+            file_name = obs_dict['file_names'][j]
+            # file_id, mm_fitspix = params
             if debug:
-                print('Processing file {:s} into column {:d}'.format(file_id, j))
+                print('Processing file {:s} into column {:d}'.format(file_name, j))
             ap_pos = np.array(centroid)
-            u_cen = centroid[0] if axis == 'spectral' else centroid[1]
-            us = np.add(uvals, u_cen)
+            ucen = centroid[0] if axis == 'spectral' else centroid[1]
+            us = np.add(uvals, ucen)
             for i in range(0, n_points):  # One radial point per row
                 u = us[i]
                 if axis == 'spectral':
                     ap_pos[0] = u
-                    aperture = RectangularAperture(ap_pos, w=u_sample, h=v_coadd)  # Spectral
+                    aperture = RectangularAperture(ap_pos, w=usample, h=vcoadd)  # Spectral
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
                 if axis == 'spatial':
                     ap_pos[1] = u
-                    v_coadd = n_cols if v_coadd == 'all' else v_coadd
-                    aperture = RectangularAperture(ap_pos, w=v_coadd, h=u_sample)  # Spatial
+                    vcoadd = n_cols if vcoadd == 'all' else vcoadd
+                    aperture = RectangularAperture(ap_pos, w=vcoadd, h=usample)  # Spatial
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
         lsf_norm = lsf_all / np.amax(lsf_all, axis=0)
         lsf_perfect, lsf_design = lsf_norm[:, 0], lsf_norm[:, 1]
-        lsf_mc = lsf_norm[:, 2:]
-        lsf_mean = np.mean(lsf_mc, axis=1)
+        lsf_mcs = lsf_norm[:, 2:]
+        lsf_mc_mean = np.mean(lsf_mcs, axis=1)
 
-        lsf_mean = lsf_mean / np.amax(lsf_mean)     # Re-normalise averages of many profiles
-        lsf_rms = np.std(lsf_mc, axis=1)
+        # lsf_mc_mean = lsf_mc_mean / np.amax(lsf_mc_mean)     # Re-normalise averages of many profiles
+        lsf_mc_rms = np.std(lsf_mcs, axis=1)
         xdet = np.divide(uvals, oversample)         # Convert x scale to LMS detector pixels
-        return axis, xdet, lsf_perfect, lsf_design, lsf_mean, lsf_rms, lsf_mc
+        lsf_data = {'xdet': xdet, 'perfect': lsf_perfect, 'design': lsf_design,
+                    'mc_mean': lsf_mc_mean, 'mc_rms': lsf_mc_rms}
+
+        mc_start, mc_end = obs_dict['mc_bounds']
+        for mc_no in range(mc_start, mc_end + 1):
+            mc_tag = "MC_{:04d}".format(mc_no)
+            lsf_data[mc_tag] = lsf_mcs[:, mc_no]
+
+        return lsf_data
 
     @staticmethod
     def exact_rectangular(image, aperture):
+        """ Calculate the signal within an aperture which may be non-integer in pixel shape.  Note that
+        it assumes that pixel index i,j extends from i-pco to i+pco etc.  Here, pco is the pixel centre offset
+        relative to the index value.
+        """
+        pco = 0.5       # Pixel centre offset,
+
         cen = aperture.positions
         w = aperture.w
         h = aperture.h
-        x1 = cen[0] - w / 2.0
+        x1 = cen[0] - (w / 2.0) + pco
         x2 = x1 + w
-        y1 = cen[1] - h / 2.0
+        y1 = cen[1] - (h / 2.0) + pco
         y2 = y1 + h
         c1, c2, r1, r2 = int(x1), int(x2), int(y1), int(y2)
         c1, r1 = max(0, c1),max(0, r1)
         rmax, cmax = image.shape
         c2, r2 = min(cmax-1, c2), min(rmax-1, r2)
-
-        nr = r2 - r1 + 1      # Number of rows in subarray, 1 pixel extra to allow sub-pixel fragments.
+        # Number of rows and columns in subarray, 1 pixel extra to allow sub-pixel fragments.
+        nr = r2 - r1 + 1
         nc = c2 - c1 + 1
         wts = np.ones((nr, nc))
         im = image[r1:r1+nr, c1:c1+nc]

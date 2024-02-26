@@ -5,6 +5,7 @@
 Update:
 """
 import numpy as np
+from lms_filer import Filer
 from lms_globals import Globals
 
 
@@ -15,6 +16,25 @@ class Wcal:
 
     def __init__(self):
         return
+
+    @staticmethod
+    def find_dispersion(traces, obs_dict):
+        """ Find the dispersion (micron per pixel) for the LMS configuration defined in
+        obs_dict using the nearest transform in 'traces'
+        """
+        dw_lms_pix = 1.0
+        optical_configuration = obs_dict['optical_configuration']
+        date_stamp = obs_dict['optical_configuration']
+        model_configuration = 'distortion', optical_configuration, date_stamp
+        dist_filer = Filer(model_configuration)
+        traces = dist_filer.read_pickle(dist_filer.trace_file)
+
+        # if is_spifu:
+        #     traces = Filer.
+
+
+
+        return dw_lms_pix
 
     @staticmethod
     def write_poly(wcal_file, configs, wave_limits):

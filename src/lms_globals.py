@@ -10,6 +10,11 @@ Python object to encapsulate LMS optical constants
 class Globals:
     zemax_configuration = None
     det_pix_size, im_pix_size = None, None
+    # Optical configurations
+    nominal = 'nominal'
+    spifu = 'spifu'
+    optical_configurations = [nominal, spifu]
+
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
     efp_as_mm = 0.303           # Plate scale (arcsec/mm) in entrance focal plane
     alpha_fov = 1.0             # Set up field of view (arcsec)
@@ -31,9 +36,9 @@ class Globals:
     process_levels = ['raw_zemax', 'proc_zemax', 'proc_detector']
     axes = ['spectral', 'spatial']
 
-    @staticmethod
-    def get_im_oversampling(process_level):
-        im_oversampling = Globals.det_pix_size / Globals.im_pix_size
-        if process_level == 'proc_detector':
-            im_oversampling = 1.
-        return int(im_oversampling)
+    # @staticmethod
+    # def get_im_oversampling(process_level):
+    #     im_oversampling = Globals.det_pix_size / Globals.im_pix_size
+    #     if process_level == 'proc_detector':
+    #         im_oversampling = 1.
+    #     return int(im_oversampling)

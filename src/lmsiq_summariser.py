@@ -65,9 +65,10 @@ class Summariser:
         return [hdr1, hdr2]
 
     @staticmethod
-    def write_summary(process_level, slice_subfolder, rows):
+    def write_summary(process_level, slice_subfolder, rows, iq_filer):
         summary_file_name = process_level + '_summary_' + Ipc.tag
-        folder = Filer.get_slice_results_folder(slice_subfolder)
+        folder = iq_filer.output_folder + slice_subfolder + Ipc.folder
+        folder = iq_filer.get_folder(folder)
         path = folder + summary_file_name + '.csv'
         with open(path, 'w', newline='') as text_file:
             for row in rows:
@@ -75,10 +76,15 @@ class Summariser:
         return
 
     @staticmethod
-    def read_summary(process_level, slice_subfolder):
+    def read_summary(process_level, slice_subfolder, iq_filer):
         summary_file_name = process_level + '_summary_' + Ipc.tag
-        folder = Filer.get_slice_results_folder(slice_subfolder)
+        folder = iq_filer.output_folder + slice_subfolder + Ipc.folder
+        folder = iq_filer.get_folder(folder)
         path = folder + summary_file_name + '.csv'
+
+        # summary_file_name = process_level + '_summary_' + Ipc.tag
+        # folder = iq_filer.get_slice_results_folder(slice_subfolder)
+        # path = folder + summary_file_name + '.csv'
         if not os.path.exists(path):
             print("!! File {:s} not found".format(path))
             print("   - run lmsiq with IPC = x.xxx and 'reanalyse = True'")

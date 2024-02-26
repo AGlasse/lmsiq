@@ -11,7 +11,7 @@ class FitsIo:
 
     data_path, zip_path = '', ''
 
-    def __init__(self,optical_path):
+    def __init__(self, optical_path):
         FitsIo.data_path = '../data/iq/' + optical_path + '/'
         FitsIo.zip_path = '../zip/'
         return
@@ -23,8 +23,9 @@ class FitsIo:
         return
 
     @staticmethod
-    def setup_zemax_configuration(config):
-        optical_path, date_stamp, n_wavelengths, n_mcruns, slice_locs, folder_name, config_label = config
+    def setup_zemax_configuration(data_identifier):
+
+        optical_path, date_stamp, n_wavelengths, n_mcruns, slice_locs, folder_name, config_label = data_identifier
         wave_tag = "{:02d}/".format(0)
         data_folder = date_stamp + folder_name + wave_tag
         zemax_configuration = FitsIo.read_param_file(date_stamp, data_folder)
@@ -32,21 +33,51 @@ class FitsIo:
         return im_pix_size, zemax_configuration
 
     @staticmethod
-    def copy_from_zip(config):
-        dataset, n_wavelengths, n_mcruns, slice_locs, folder_name, config_label = config
-        zip_folder_list = listdir(FitsIo.zip_path)
-        dataset_folder = FitsIo.data_path + 'psf_model_' + dataset + '_multi_wavelength/'
-        if not os.path.exists(dataset_folder):
-            os.mkdir(dataset_folder)
+    def get_data_table(data_identifier):
+        optical_configuration, date_stamp, n_wavelengths, n_mcruns, \
+            par_file, zim_locs, folder_name, config_label \
+            = data_identifier
+        data_table = {'file_path': [], 'mc_id': [],       # Monte-Carlo ID (-1 des, -2 perf)
+                      'centre_slice': [], 'spifu_slice': [],
+                      'field_x': [], 'field_y': [],
+                      'im_pixel_size': [],
+                      }
+        zip_folder = FitsIo.zip_path + date_stamp + '/'
+        zip_folder_list = listdir(zip_folder)
+        for folder in zip_folder_list:
+            zip_sub_folder = zip_folder + folder + '/'
+            zip_files = listdir(zip_sub_folder)
+            parameters = None
+            for file in zip_files:
+                if '.txt' in file:
+                    par_path = zip_sub_folder + file
+                    parameters = FitsIo.read_param_file(par_path)
+                    continue
+            slice_no, wave, prism_angle, grating_angle, order, pix_size = parameters
+            for zip_file in zip_files:
+                print(zip_file)
+                data_table['file_path'].append(zip_file)
+        return data_table
+
+    @staticmethod
+    def copy_from_zip(data_identifier):
+        optical_configuration, date_stamp, n_wavelengths, n_mcruns, zim_locs, _, folder_name, config_label \
+            = data_identifier
+        zip_folder = FitsIo.zip_path + date_stamp + '/'
+        zip_folder_list = listdir(zip_folder)
+        dataset_folder = Filer.get_folder(FitsIo.data_path + date_stamp)
+        # dataset_folder = FitsIo.data_path + date_stamp + '/'
+        # if not os.path.exists(dataset_folder):
+        #     os.mkdir(dataset_folder)
         for folder in zip_folder_list:
             data_folder = dataset_folder + folder
             if not os.path.exists(data_folder):
                 os.mkdir(data_folder)
-            zip_folder = FitsIo.zip_path + folder + '/'
-            zip_files = listdir(zip_folder)
+            zip_sub_folder = zip_folder + folder + '/'
+            zip_files = listdir(zip_sub_folder)
             for zip_file in zip_files:
                 if '.txt' in zip_file:
-                    zip_path = zip_folder + zip_file
+                    zip_path = zip_sub_folder + zip_file
                     FitsIo._copy(zip_path, data_folder)
                     continue
                 tokens = zip_file.split('_')
@@ -62,9 +93,9 @@ class FitsIo:
         return
 
     @staticmethod
-    def read_file_list(dataset, folder, **kwargs):
+    def read_file_list(date_stamp, folder, **kwargs):
         filter_tags = kwargs.get('filter_tags', [])
-        parent_folder = FitsIo.data_path + 'psf_model_' + dataset + '_multi_wavelength/'
+        parent_folder = FitsIo.data_path + date_stamp + '/'
         path = parent_folder + folder
         file_list = listdir(path)
         for filter_tag in filter_tags:
@@ -72,9 +103,7 @@ class FitsIo:
         return path, file_list
 
     @staticmethod
-    def read_param_file(date_stamp, folder):
-        parent_folder = FitsIo.data_path + 'psf_model_' + date_stamp + '_multi_wavelength/'
-        path = parent_folder + folder + folder[0:-1] + '.txt'
+    def read_param_file(path):
         pf = open(path, 'r')
         lines = pf.read().splitlines()
         pf.close()
@@ -84,7 +113,8 @@ class FitsIo:
         grating_angle = float(lines[5].split(':')[1])
         order = -1 * int(lines[6].split(':')[1])
         pix_size = float(lines[24].split(':')[1])
-        return slice_no, wave, prism_angle, grating_angle, order, pix_size
+        parameters = slice_no, wave, prism_angle, grating_angle, order, pix_size
+        return parameters
 
     @staticmethod
     def load_observation(path, file_name, file_id):
@@ -101,43 +131,6 @@ class FitsIo:
         return image, params
 
     @staticmethod
-    def load_dataset(dataset, folder, n_mcruns, **kwargs):
-        """ Load image and parameter information as a list of observation objects from a list of files, sorting them
-        in order 'perfect, design then obs_id = 00, 01 etc.
-        :param n_mcruns:
-        :param folder:
-        :param dataset:
-        :return observations:  List of image, params tuples.
-        """
-        observations = []
-        filter_tags = ['perfect', 'fits']
-        path, file_list = FitsIo.read_file_list(dataset, folder, filter_tags=filter_tags)
-        if len(file_list) < 1:
-            print(folder)
-            print(len(file_list))
-
-        file_name = file_list[0]
-        obs = FitsIo.load_observation(path, file_name, '')
-        observations.append(obs)
-
-        filter_tags = ['design', 'fits']
-        path, file_list = FitsIo.read_file_list(dataset, folder, filter_tags=filter_tags)
-        file_name = file_list[0]
-        obs = FitsIo.load_observation(path, file_name, '')
-        observations.append(obs)
-
-        # Select file to analyse
-        for mcrun in range(0, n_mcruns):
-            mcrun_tag = "{:04d}".format(mcrun)
-
-            filter_tags = [mcrun_tag, 'fits']
-            path, file_list = FitsIo.read_file_list(dataset, folder, filter_tags=filter_tags)
-            file_name = file_list[0]
-            obs = FitsIo.load_observation(path, file_name, '')
-            observations.append(obs)
-        return observations
-
-    @staticmethod
     def read_zemax(path, f):
         file_path = join(path, f)
         hdu_list = fits.open(file_path, mode='readonly')
@@ -151,19 +144,32 @@ class FitsIo:
         return image, params
 
     @staticmethod
-    def write_cube(process_level, ipc_tag, waves, alpha_oversampling, cube):
-        file_path = Filer.cube_path + process_level + '_' + ipc_tag + '_cube.fits'
+    def write_cube(cube, cube_name, iq_filer):
+        fits_folder = Filer.get_folder(iq_filer.output_folder + 'cube/fits')
+        fits_path = fits_folder + cube_name
+
         hdu = fits.PrimaryHDU(cube)
-        hdu.header['ALPHA_OS'] = alpha_oversampling
-        for i, wave in enumerate(waves):
-            kw = "WAV{:d}".format(i)
-            hdu.header[kw] = wave
-        hdu.writeto(file_path, overwrite=True)
+#        hdu.header['ALPHA_OS'] = alpha_oversampling
+#         for i, wave in enumerate(waves):
+#             kw = "WAV{:d}".format(i)
+#             hdu.header[kw] = wave
+        hdu.writeto(fits_path + '.fits', overwrite=True)
         return
 
+    # @staticmethod
+    # def write_cube(process_level, ipc_tag, waves, alpha_oversampling, cube, iq_filer):
+    #     file_path = iq_filer.cube_path + process_level + '_' + ipc_tag + '_cube.fits'
+    #     hdu = fits.PrimaryHDU(cube)
+    #     hdu.header['ALPHA_OS'] = alpha_oversampling
+    #     for i, wave in enumerate(waves):
+    #         kw = "WAV{:d}".format(i)
+    #         hdu.header[kw] = wave
+    #     hdu.writeto(file_path, overwrite=True)
+    #     return
+
     @staticmethod
-    def read_cube(process_level, ipc_tag):
-        file_path = Filer.cube_path + process_level + '_' + ipc_tag + '_cube.fits'
+    def read_cube(process_level, ipc_tag, iq_filer):
+        file_path = iq_filer.cube_path + process_level + '_' + ipc_tag + '_cube.fits'
         hdul = fits.open(file_path, readonly=True)
         hdu = hdul[0]
         data = hdu.data

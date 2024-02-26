@@ -1,53 +1,76 @@
 import os
+from os import listdir
 import numpy as np
 import pickle
 
 
 class Filer:
 
+    analysis_types = ['distortion', 'iq']
     trace_file, poly_file, wcal_file, stats_file, tf_fit_file = None, None, None, None, None
     base_results_path = None
-    cube_path, png_path = None, None
+    cube_path, iq_png_folder = None, None
     slice_results_path, dataset_results_path = None, None
     pdp_path, profiles_path, centroids_path = None, None, None
-    # summary_dict = {'wave': (10, 6, '(um)'), 'order': (6, 0, '-'),
-    #                 'strehl': (7, 3, '-'), 'strehl_err': (11, 3, '-'),
-    #                 'srp_mc_lin': (12, 0, '-'), 'srp_mc_lin_err': (15, 0, '-'),
-    #                 'srp_mc_gau': (12, 0, '-'), 'srp_mc_gau_err': (15, 0, '-'),
-    #                 }
 
-    def __init__(self, optical_configuration):
-        Filer._set_file_locations(optical_configuration)
+    def __init__(self, model_configuration):
+        analysis_type, optical_configuration, date_stamp = model_configuration
+        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_configuration, date_stamp)
+        self.data_folder = self.get_folder('../data/' + sub_folder)
+        self.output_folder = self.get_folder('../output/' + sub_folder)
+        file_leader = self.output_folder + sub_folder.replace('/', '_')
+        if analysis_type == 'distortion':
+            self.trace_file = file_leader + '_trace'  # All ray coordinates
+            self.poly_file = file_leader + '_dist_poly.txt'
+            self.wcal_file = file_leader + '_dist_wcal.txt'  # Echelle angle as function of wavelength
+            self.stats_file = file_leader + '_dist_stats.txt'
+            self.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
+        if analysis_type == 'iq':
+            self.cube_path = Filer.get_folder(self.output_folder + '/ifu_cube')
         return
 
-    @staticmethod
-    def _set_file_locations(optical_configuration):
-        """ Set common file locations for use by lms_distort and lms_iq
-        :return:
-        """
-        output_folder = "../output/distortion/{:s}".format(optical_configuration)
-        output_folder = Filer.get_folder(output_folder)
-        folder = output_folder + optical_configuration
-        Filer.trace_file = folder + '_trace.pkl'  # All ray coordinates
-        Filer.poly_file = folder + '_dist_poly.txt'
-        Filer.wcal_file = folder + '_dist_wcal.txt'  # Echelle angle as function of wavelength
-        Filer.stats_file = folder + '_dist_stats.txt'
-        Filer.tf_fit_file = folder + '_dist_tf_fit.pkl'  # Use pkl files to write objects directly
-        return
+    def read_specifu_config(self):
+        path = self.data_folder + 'SpecIFU_config.csv'
+        with open(path, 'r') as text_file:
+            text_block = text_file.read()
+        line_list = text_block.split('\n')
+        specifu_config = {}
+        for line in line_list:
+            if len(line) < 2:
+                continue
+            tokens = line.split(',')
+            key = tokens[0].split(' ')[0]
+            specifu_config[key] = []
+            for token in tokens[2:]:
+                val = int(token) if key in ['Conf', 'Order'] else float(token)
+                specifu_config[key].append(val)
+#            print(line)
+        return specifu_config
 
     @staticmethod
     def read_pickle(pickle_path):
-        file = open(pickle_path, 'rb')
+        file = open(pickle_path + '.pkl', 'rb')
         python_object = pickle.load(file)
         file.close()
         return python_object
 
     @staticmethod
     def write_pickle(pickle_path, python_object):
-        file = open(pickle_path, 'wb')
+        file = open(pickle_path + '.pkl', 'wb')
         pickle.dump(python_object, file)
         file.close()
         return
+
+    @staticmethod
+    def get_file_list(folder, **kwargs):
+        inc_tags = kwargs.get('inc_tags', [])
+        exc_tags = kwargs.get('exc_tags', [])
+        file_list = listdir(folder)
+        for tag in inc_tags:
+            file_list = [f for f in file_list if tag in f]
+        for tag in exc_tags:
+            file_list = [f for f in file_list if tag not in f]
+        return file_list
 
     @staticmethod
     def get_folder(in_path):
@@ -60,36 +83,42 @@ class Filer:
         return out_path
 
     @staticmethod
-    def setup_folders(config):
-        optical_path, dataset, _, _, slice_locs, folder_name, config_label = config
+    def setup_distortion_folders(data_identifier):
+        optical_path, dataset, _, _, slice_locs, folder_name, config_label = data_identifier
 
         br_folder = '../results/' + optical_path + '/'
         Filer.base_results_path = Filer.get_folder(br_folder)
         dr_folder = br_folder + dataset
         Filer.dataset_results_path = Filer.get_folder(dr_folder)
         Filer.cube_path = Filer.get_folder(dr_folder + '/cubes')
-        Filer.png_path = Filer.get_folder(dr_folder + '/png')
+        Filer.iq_png_folder = Filer.get_folder(dr_folder + '/png')
         return
 
-    @staticmethod
-    def read_phase_data(data_type, data_id, n_runs):
-        """ Read data from file
-        """
-        path = Filer._get_results_path(data_id, data_type)
-        with open(path, 'r') as text_file:
-            text_block = text_file.read()
+    # @staticmethod
+    # def setup_iq_folders(data_identifier):
+    #     optical_path, dataset, _, _, slice_locs, folder_name, config_label = data_identifier
+    #
+    #     br_folder = '../results/' + optical_path + '/'
+    #     Filer.base_results_path = Filer.get_folder(br_folder)
+    #     dr_folder = br_folder + dataset
+    #     Filer.dataset_results_path = Filer.get_folder(dr_folder)
+    #     Filer.cube_path = Filer.get_folder(dr_folder + '/cubes')
+    #     Filer.iq_png_folder = Filer.get_folder(dr_folder + '/png')
+    #     return
+    #
+    def write_phase_data(self, data_table, data_type, config_no, ipc_tag):
+        pickle_name = data_type + "_config{:02d}_{:s}".format(config_no, ipc_tag)
+        path = self.get_folder(self.output_folder + 'phase/' + data_type) + pickle_name
+        Filer.write_pickle(path, data_table)
+        return path
 
-        line_list = text_block.split('\n')
-        value_list = []
-        for line in line_list[2:]:
-            tokens = line.split(',')
-            row_values = []
-            if len(tokens) > 2:
-                for col in range(0, n_runs + 1):
-                    row_values.append(float(tokens[col]))
-                value_list.append(row_values)
-        values = np.array(value_list)
-        return values
+    def read_phase_data(self, data_type, config_no, ipc_tag):
+        """ Read phase data table from file
+        """
+        pickle_name = data_type + "_config{:02d}_{:s}".format(config_no, ipc_tag)
+        path = self.get_folder(self.output_folder + 'phase/' + data_type) + pickle_name
+        data_table = self.read_pickle(path)
+        return data_table
 
     @staticmethod
     def write_centroids(data_id, det_shifts, xcen_block):
@@ -144,8 +173,7 @@ class Filer:
             phase_shifts[:, col] = phase_shifts[:, col] - phase_shifts[:, 0]
         return phase_shifts
 
-    @staticmethod
-    def write_profiles(data_type, data_id, xy_data, **kwargs):
+    def write_profiles(self, data_type, data_id, xy_data, **kwargs):
         """ Write EE or LSF results_proc_detected to a csv file.
         :param data_id:
         :param xy_data:
@@ -153,48 +181,58 @@ class Filer:
         :return:
         """
         set_path = kwargs.get('set_path', None)
+        obs_dict, ipc_tag, process_level = data_id
 
-        dataset, slice_folder, ipc_tag, process_level, config_tag, n_mcruns_tag, axis = data_id
+        # axis, x, y_perfect, y_design, y_mean, y_rms, y_mcs = xy_data
+        # n_points, n_files = y_mcs.shape
+        # x_max = y_mean[-1]
+        lines = []
 
-        axis, x, y_perfect, y_design, y_mean, y_rms, y_mcs = xy_data
-        n_points, n_files = y_mcs.shape
-        x_max = y_mean[-1]
-        rows = []
+        for key in obs_dict:
+            line = "{:s},{:s},".format(key, str(obs_dict[key]))
+            lines.append(line)
 
-        fmt = "type=,{:s},n_points=,{:d},n_files=,{:d},dataset=,{:s},x_max=,{:16.3f}"
-        run = "{:s}_{:s}".format(dataset, config_tag)
-        hdr1 = fmt.format(axis, n_points, n_files, run, x_max)
-        rows.append(hdr1)
-        fmt = "{:>16s},{:>16s},{:>16s},{:>16s},{:>16s},"
-        row = fmt.format('X/pix.', 'perfect', 'design', 'Mean', 'RMS')
-        for j in range(0, n_files):
-            file_id = "{:04d}".format(j)
-            row += "{:>16s},".format(file_id)
+        # Write header line for xy data
+        line = ''
+        for key in xy_data:
+            if key != 'mc_list':
+                line += "{:s},".format(key)
+                continue
+            mc_list = xy_data['mc_list']
+            for mc_key in mc_list:
+                line += "{:s},".format(mc_key)
+        lines.append(line)
 
-        rows.append(row)
+        n_lines, = xy_data['xdet'].shape
+        for i in range(0, n_lines):
+            line = ''
+            for key in xy_data:
+                if key != 'mc_list':
+                    line += "{:13.8f},".format(xy_data[key][i])
+                    continue
+                mc_list = xy_data['mc_list']
+                for mc_key in mc_list:
+                    line += "{:13.8f},".format(mc_list[mc_key][i])
+            lines.append(line)
 
-        for i in range(0, n_points):
-            fmt = "{:>16.6f},{:>16.8e},{:>16.8e},{:>16.8e},{:>16.8e},"
-            row = fmt.format(x[i], y_perfect[i], y_design[i], y_mean[i], y_rms[i])
-            for j in range(0, n_files):
-                row += "{:16.8e},".format(y_mcs[i, j])
-            rows.append(row)
         if set_path is None:
-            path = Filer._get_results_path(data_id, data_type)
+            folder = self.get_folder(self.output_folder + 'profiles')
+
+            csv_name = data_type + process_level + ipc_tag
+            path = folder + csv_name + '.csv'
         else:
             path = set_path
         print("Filer.write_profiles to {:s}".format(path))
         with open(path, 'w', newline='') as text_file:
-            for row in rows:
-                print(row, file=text_file)
+            for line in lines:
+                print(line, file=text_file)
         return
 
-    @staticmethod
-    def _get_results_path(data_id, data_type):
+    def _get_results_path(self, data_id, data_type):
         dataset, slice_subfolder, ipc_tag, process_level, config_folder, mcrun_tag, axis = data_id
-        folder = Filer.dataset_results_path + slice_subfolder
+        folder = self.output_folder + slice_subfolder
         folder += ipc_tag + '/' + process_level + '/' + data_type
-        folder = Filer.get_folder(folder)
+        folder = self.get_folder(folder)
 
         type_tags = {'xcentroids': '_xcen', 'ycentroids': '_ycen',
                      'xfwhm_gau': '_xfwhm', 'photometry': '_phot',
