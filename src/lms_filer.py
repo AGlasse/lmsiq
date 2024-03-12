@@ -9,13 +9,14 @@ class Filer:
     analysis_types = ['distortion', 'iq']
     trace_file, poly_file, wcal_file, stats_file, tf_fit_file = None, None, None, None, None
     base_results_path = None
-    cube_path, iq_png_folder = None, None
+    cube_folder, iq_png_folder = None, None
     slice_results_path, dataset_results_path = None, None
     pdp_path, profiles_path, centroids_path = None, None, None
 
     def __init__(self, model_configuration):
-        analysis_type, optical_configuration, date_stamp = model_configuration
-        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_configuration, date_stamp)
+        analysis_type, optical_path, date_stamp, _, _, _ = model_configuration
+        # analysis_type, optical_path, date_stamp = model_configuration
+        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_path, date_stamp)
         self.data_folder = self.get_folder('../data/' + sub_folder)
         self.output_folder = self.get_folder('../output/' + sub_folder)
         file_leader = self.output_folder + sub_folder.replace('/', '_')
@@ -26,7 +27,7 @@ class Filer:
             self.stats_file = file_leader + '_dist_stats.txt'
             self.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
         if analysis_type == 'iq':
-            self.cube_path = Filer.get_folder(self.output_folder + '/ifu_cube')
+            self.cube_folder = self.get_folder(self.output_folder + '/cube')
         return
 
     def read_specifu_config(self):
@@ -90,22 +91,10 @@ class Filer:
         Filer.base_results_path = Filer.get_folder(br_folder)
         dr_folder = br_folder + dataset
         Filer.dataset_results_path = Filer.get_folder(dr_folder)
-        Filer.cube_path = Filer.get_folder(dr_folder + '/cubes')
+        # Filer.cube_path = Filer.get_folder(dr_folder + '/cubes')
         Filer.iq_png_folder = Filer.get_folder(dr_folder + '/png')
         return
 
-    # @staticmethod
-    # def setup_iq_folders(data_identifier):
-    #     optical_path, dataset, _, _, slice_locs, folder_name, config_label = data_identifier
-    #
-    #     br_folder = '../results/' + optical_path + '/'
-    #     Filer.base_results_path = Filer.get_folder(br_folder)
-    #     dr_folder = br_folder + dataset
-    #     Filer.dataset_results_path = Filer.get_folder(dr_folder)
-    #     Filer.cube_path = Filer.get_folder(dr_folder + '/cubes')
-    #     Filer.iq_png_folder = Filer.get_folder(dr_folder + '/png')
-    #     return
-    #
     def write_phase_data(self, data_table, data_type, config_no, ipc_tag):
         pickle_name = data_type + "_config{:02d}_{:s}".format(config_no, ipc_tag)
         path = self.get_folder(self.output_folder + 'phase/' + data_type) + pickle_name

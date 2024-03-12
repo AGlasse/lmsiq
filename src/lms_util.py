@@ -16,6 +16,14 @@ class Util:
         return
 
     @staticmethod
+    def print_list(title, val_list):
+        text = title + ' - '
+        for val in val_list:
+            text += "{:d}, ".format(val)
+        print(text)
+        return
+
+    @staticmethod
     def write_text_file(transform_file, text_block):
         tf_file = open(transform_file, 'w')
         tf_file.write(text_block)

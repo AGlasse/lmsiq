@@ -40,10 +40,33 @@ class Analyse:
         return y
 
     @staticmethod
-    def find_fwhm_multi(obs_list, oversampling, **kwargs):
+    def get_dispersion(ds_dict, traces):
+        """ Get the mean dispersion at the passed wavelength from the 'trace' objects generated using
+        the distortion model.  For now this just works by interpolating the wave v dw_dx_mean values
+        for all traces.
+        """
+        wave = ds_dict['wavelength']
+
+        wave_list, dw_dx_mean_list, dw_dx_std_list = [], [], []
+        for trace in traces:
+            wave_list.append(trace.mean_wavelength)
+            dw_dx_mean, dw_dx_std = trace.dw_dx
+            dw_dx_mean_list.append(dw_dx_mean)
+            dw_dx_std_list.append(dw_dx_std)
+        wave_means = np.array(wave_list)
+        sort_indices = np.argsort(wave_means)
+        w_sort = wave_means[sort_indices]
+        dw_dx_means = np.array(dw_dx_mean_list)[sort_indices]
+        dw_dx_stds = np.array(dw_dx_std_list)[sort_indices]
+        dw_dx = np.interp(wave, wave_means, dw_dx_means), np.interp(wave, wave_means, dw_dx_stds)
+        return dw_dx
+
+    @staticmethod
+    def find_fwhm_multi(image_list, **kwargs):
+
         fits, fit_errs, fwhms_lin, xls, xrs, yhs = [], [], [], [], [], []
-        for obs in obs_list:
-            gauss, linear = Analyse.find_fwhm(obs, oversampling, **kwargs)
+        for image in image_list:
+            gauss, linear = Analyse.find_fwhm(image, **kwargs)
             is_error_gau, fit, fit_err = gauss
             if is_error_gau:
                 continue
@@ -73,21 +96,21 @@ class Analyse:
         return gauss, linear
 
     @staticmethod
-    def find_fwhm(image, oversampling, **kwargs):
+    def find_fwhm(image, **kwargs):
         debug = kwargs.get('debug', False)
+        oversample = kwargs.get('oversample', 1)
         axis = kwargs.get('axis', 0)
 
-#        image, par = obs
         nr5, nc5 = image.shape
-        half_aperture = 2 * oversampling
+        half_aperture = 2 * oversample
         rc_lo = int(nc5 / 2) - half_aperture
         rc_hi = rc_lo + 2 * half_aperture + 1
 
-        nrows, ncols = image.shape
+        n_rows, n_cols = image.shape
+        n_pts = n_cols if axis == 0 else n_rows
         sub_image = image[rc_lo:rc_hi] if axis == 0 else image[:, rc_lo:rc_hi]
-
         y = np.mean(sub_image, axis=axis)
-        x = np.arange(0.0, float(ncols)) / oversampling        # Find FWHM in detector units
+        x = np.arange(0.0, float(n_pts)) / oversample        # Find FWHM in detector units
         is_error_gau, fit, covar = Analyse._fit_gaussian(x, y)
         cv1 = np.array(covar)
         cv2 = np.diag(cv1)
@@ -157,7 +180,6 @@ class Analyse:
 
     @staticmethod
     def find_phot(image, **kwargs):
-#        image, _ = obs
         method = kwargs.get('method', 'fixed_aperture')
         method_parameters = kwargs.get('method_parameters', None)
         phot = 0.
@@ -226,11 +248,26 @@ class Analyse:
         return phase_shift_rates
 
     @staticmethod
-    def eed(image_list, obs_dict, axis, **kwargs):
+    def find_strehls(image_list):
+        n_runs = len(image_list)
+        strehls = np.zeros(n_runs)
+        perfect = image_list[0]
+        pmax = np.amax(perfect)
+        psum = np.sum(perfect)
+        for run_idx in range(0, n_runs):
+            image = image_list[run_idx]
+            imax = np.amax(image)
+            isum = np.sum(image)
+            strehl = (imax / isum) * (psum / pmax)
+            strehls[run_idx] = strehl
+        return strehls
+
+    @staticmethod
+    def eed(image_list, obs_dict, axis_name, lsf_data, **kwargs):
         """ Calculate the enslitted energy along an axis.
         :param image_list:              List of imagess
         :param obs_dict            List of parameters associated with image list
-        :param axis:                    ='spectral' or 'spatial'
+        :param axis_name:                    ='spectral' or 'spatial'
         :param kwargs: is_log = True for samples which are uniform in log space
         :return radii: Sampled axis
                 ees_mean: Mean enslitted energy profile
@@ -262,33 +299,37 @@ class Analyse:
         ees_all = np.zeros((n_points, n_obs))
         im_sums = np.zeros(n_obs)
         im_peaks = np.zeros(n_obs)
+        if debug:
+            print()
 
         for j, image in enumerate(image_list):
             file_name = obs_dict['file_names'][j]
-            imin, imax = np.amin(image), np.amax(image)
+            img_min, img_max = np.amin(image), np.amax(image)
             centroid = centroid_com(image)
             umin, vmin = centroid[0] - r_max, centroid[1] - r_max
             umax, vmax = centroid[0] + r_max, centroid[1] + r_max
             is_x_oob = umin < 0 or umax > nx - 1
             is_y_oob = vmin < 0 or vmax > ny - 1
             if debug:
-                fmt = "Processing file {:s} into column {:d} {:10.1e} {:10.1e}"
-                print(fmt.format(file_name, j, imin, imax))
+                fmt = "\r- processing file {:s} into column {:d} {:10.1e} {:10.1e}"
+                print(fmt.format(file_name, j, img_min, img_max))
                 if is_x_oob or is_y_oob:
                     txt = "!! U/V out of bounds (signal truncated) !! - "
                     fmt = "u={:5.1f} -{:5.1f}, v={:5.1f} -{:5.1f}"
                     txt += fmt.format(umin, umax, vmin, vmax)
                     print(txt)
+
             for i in range(0, n_points):        # One radial point per row
                 r = radii[i]      # Increase aperture width to measure spectral cog profile
-                if axis == 'radial':
+                aperture = None
+                if axis_name == 'radial':
                     aperture = CircularAperture(centroid, r)
                     signal_list = aperture.do_photometry(image)
                     signal = signal_list[0][0]
                 else:
-                    if axis == 'spectral':
+                    if axis_name in ['spectral', 'across-slice']:
                         aperture = RectangularAperture(centroid, w=2.*r, h=2.*r_max)     # Spectral
-                    if axis == 'spatial':
+                    if axis_name in ['spatial', 'along-slice']:
                         aperture = RectangularAperture(centroid, w=2.*r_max, h=2.*r)     # Spatial
                     signal = Analyse.exact_rectangular(image, aperture)
                 ees_all[i, j] = signal
@@ -296,21 +337,21 @@ class Analyse:
             enorm = np.sum(image)
             ees_all[:, j] = np.divide(ees_all[:, j], enorm)
             im_sums[j] = ees_all[n_points-1, j]
-            im_peaks[j] = imax
+            im_peaks[j] = img_max
 
         # Rescale x axis from image scale to LMS pixels
-        ees_perfect, ees_design = ees_all[:, 0], ees_all[:, 1]
+        # ees_perfect, ees_design = ees_all[:, 0], ees_all[:, 1]
         ees_mcs = ees_all[:, 2:]
         ees_mc_mean = np.mean(ees_mcs, axis=1)
         ees_mc_rms = np.std(ees_mcs, axis=1)
         xdet = np.divide(radii, oversample)         # Convert x scale to LMS detector pixels
-        ees_data = {'xdet': xdet, 'perfect': ees_perfect, 'design': ees_design,
-                    'mc_mean': ees_mc_mean, 'mc_rms': ees_mc_rms}
+        ees_data = {'xvals': xdet, 'yvals': ees_all,
+                    'ees_mc_mean': ees_mc_mean, 'ees_mc_rms': ees_mc_rms}
 
-        mc_start, mc_end = obs_dict['mc_bounds']
-        for mc_no in range(mc_start, mc_end + 1):
-            mc_tag = "MC_{:04d}".format(mc_no)
-            ees_data[mc_tag] = ees_mcs[:, mc_no]
+        # mc_start, mc_end = obs_dict['mc_bounds']
+        # for mc_no in range(mc_start, mc_end + 1):
+        #     mc_tag = "MC_{:04d}".format(mc_no)
+        #     ees_data[mc_tag] = ees_mcs[:, mc_no]
 
         return ees_data
 
@@ -404,7 +445,6 @@ class Analyse:
         strehls[:, 0:2] = all_strehls[:, 0:2]
         strehls[:, 2] = np.mean(all_strehls[:, 2:], axis=1)
         strehls[:, 3] = np.std(all_strehls[:, 2:], axis=1)
-        # Perfect (=1.), Design, <MC> <MC_err>
         return strehls
 
     @staticmethod
@@ -419,7 +459,7 @@ class Analyse:
         debug = kwargs.get('debug', False)
         centroid_relative = kwargs.get('centroid_relative', True)
         oversample = kwargs.get('oversample', 1.)
-        v_coadd= kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
+        v_coadd = kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
         u_radius = kwargs.get('u_radius', 'all')    # Maximum radial size of aperture (a bit less than 1/2 image size)
         usample = 1.0      # Sample psf once per pixel to avoid steps
         ustart = 0.0       # Offset from centroid
@@ -428,8 +468,8 @@ class Analyse:
 
         vcoadd = n_cols - 1 if v_coadd == 'all' else v_coadd
         uradius = (n_rows - 1) / 2.0 if u_radius == 'all' else u_radius
-        if axis == 'spectral':
-            vcoadd = n_rows if v_coadd == 'all' else v_coadd
+        if axis == 0:
+            vcoadd = n_rows - 1 if v_coadd == 'all' else v_coadd
             uradius = (n_cols - 1) / 2.0 if u_radius == 'all' else u_radius
 
         uvals = np.arange(ustart - uradius, ustart + uradius + 1., usample)
@@ -448,36 +488,56 @@ class Analyse:
             if debug:
                 print('Processing file {:s} into column {:d}'.format(file_name, j))
             ap_pos = np.array(centroid)
-            ucen = centroid[0] if axis == 'spectral' else centroid[1]
+            ucen = centroid[0] if axis == 0 else centroid[1]
             us = np.add(uvals, ucen)
             for i in range(0, n_points):  # One radial point per row
                 u = us[i]
-                if axis == 'spectral':
+                if axis == 0:       # spectral or across-slice
                     ap_pos[0] = u
-                    aperture = RectangularAperture(ap_pos, w=usample, h=vcoadd)  # Spectral
+                    aperture = RectangularAperture(ap_pos, w=usample, h=vcoadd)
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
-                if axis == 'spatial':
+                if axis == 1:       # Spatial or along-slice
                     ap_pos[1] = u
-                    vcoadd = n_cols if vcoadd == 'all' else vcoadd
                     aperture = RectangularAperture(ap_pos, w=vcoadd, h=usample)  # Spatial
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
         lsf_norm = lsf_all / np.amax(lsf_all, axis=0)
-        lsf_perfect, lsf_design = lsf_norm[:, 0], lsf_norm[:, 1]
-        lsf_mcs = lsf_norm[:, 2:]
-        lsf_mc_mean = np.mean(lsf_mcs, axis=1)
-
-        # lsf_mc_mean = lsf_mc_mean / np.amax(lsf_mc_mean)     # Re-normalise averages of many profiles
-        lsf_mc_rms = np.std(lsf_mcs, axis=1)
         xdet = np.divide(uvals, oversample)         # Convert x scale to LMS detector pixels
-        lsf_data = {'xdet': xdet, 'perfect': lsf_perfect, 'design': lsf_design,
-                    'mc_mean': lsf_mc_mean, 'mc_rms': lsf_mc_rms}
+        lsf_data = {'xvals': xdet, 'yvals': lsf_norm}
 
-        mc_start, mc_end = obs_dict['mc_bounds']
-        for mc_no in range(mc_start, mc_end + 1):
-            mc_tag = "MC_{:04d}".format(mc_no)
-            lsf_data[mc_tag] = lsf_mcs[:, mc_no]
+        mc_start, _ = obs_dict['mc_bounds']
+        pd_tags, model_tags = ['perfect', 'design'], []
+        lsf_data['fwhm_lin'], lsf_data['xl'], lsf_data['xr'] = [], [], []
+        for i, image in enumerate(image_list):
+            key = "MC_{:03d}".format(mc_start + i) if i > 1 else pd_tags[i]
+            model_tags.append(key)
+
+            gauss, linear = Analyse.find_fwhm(image, axis=axis, debug=True)
+            _, fwhm_per_lin, _, xl, xr, yh = linear
+            lsf_data['fwhm_lin'].append(fwhm_per_lin)
+            lsf_data['xl'].append(xl)
+            lsf_data['xr'].append(xr)
 
         return lsf_data
+
+    @staticmethod
+    def _find_line_widths(image_list, axis):
+        """ Calculate the line widths for a list of images along a specified axis. """
+        line_widths = {}
+        per_gauss, per_linear = Analyse.find_fwhm(image_list[0], axis=axis, debug=True)
+        _, fwhm_per_lin, _, xl, xr, yh = per_linear
+        line_widths['perfect'] = [fwhm_per_lin, xl, xr]
+
+        des_gauss, des_linear = Analyse.find_fwhm(image_list[1], axis=axis, debug=True)
+        _, fwhm_des_lin, _, xl, xr, yh = des_linear
+        line_widths['design'] = [fwhm_per_lin, xl, xr]
+
+        # Find line widths of Monte-Carlo data
+        mc_gauss, mc_linear = Analyse.find_fwhm_multi(image_list[2:], axis=axis, debug=True)
+        _, mc_fit, mc_fit_err = mc_gauss
+        # fwhm_mc_gau, fwhm_mc_gau_err = mc_fit[1], mc_fit_err[1]
+        _, fwhm_lin_mc, fwhm_lin_mc_err, xl, xr, yh = mc_linear
+        line_widths['mc_mean'] = [fwhm_lin_mc, xl, xr]
+        return line_widths
 
     @staticmethod
     def exact_rectangular(image, aperture):

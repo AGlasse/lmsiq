@@ -2,7 +2,7 @@
 """
 
 """
-from lms_dist_util import Util
+from lms_util import Util
 from lms_wcal import Wcal
 from lms_globals import Globals
 from lms_efficiency import Efficiency

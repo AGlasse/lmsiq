@@ -4,7 +4,7 @@
 """
 from os import listdir
 from lms_filer import Filer
-from lms_dist_util import Util
+from lms_util import Util
 from lms_dist_plot import Plot
 from lms_dist_trace import Trace
 from lms_globals import Globals
@@ -15,29 +15,34 @@ print('lms_distort - Starting')
 
 analysis_type = 'distortion'
 
-nom_coords_in = 'phase', 'fp2_x'
-nom_date_stamp = '20240109'     # Old version = 20190627
+coords_out = 'det_x', 'det_y'
 
+nominal = Globals.nominal
+nom_coords_in = 'phase', 'fp2_x'
+nom_date_stamp = '20240109'  # Old version = 20190627
+nom_config = (analysis_type, nominal, nom_date_stamp,
+              'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
+              nom_coords_in, coords_out)
+
+spifu = Globals.spifu
 spifu_coords_in = 'phase', 'fp1_x'
 spifu_date_stamp = '20231009'
+spifu_config = (analysis_type, spifu, spifu_date_stamp,
+                'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                spifu_coords_in, coords_out)
 
-coords_out = 'det_x', 'det_y'
-optics = {Globals.nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
-                            nom_coords_in, coords_out, nom_date_stamp),
-          Globals.spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                          spifu_coords_in, coords_out, spifu_date_stamp)}
-optical_configuration = Globals.nominal
+model_configurations = {nominal: nom_config, spifu: spifu_config}
 
-date_stamps = []
+""" SET MODEL CONFIGURATION HERE """
+model_config = model_configurations[nominal]
+filer = Filer(model_config)
 
-config_summary, coord_in, coord_out, zem_date_stamp = optics[optical_configuration]
-is_spifu = optical_configuration == Globals.spifu
-model_configuration = analysis_type, optical_configuration, zem_date_stamp
-filer = Filer(model_configuration)
+_, optical_path, date_stamp, optical_path_label, coords_in, coords_out = model_config
+is_spifu = optical_path == spifu
 
-print("- optical path  = {:s}".format(optical_configuration))
-print("- input coords  = {:s}, {:s}".format(coord_in[0], coord_in[1]))
-print("- output coords = {:s}, {:s}".format(coord_out[0], coord_out[1]))
+print("- optical path  = {:s}".format(optical_path))
+print("- input coords  = {:s}, {:s}".format(coords_in[0], coords_in[1]))
+print("- output coords = {:s}, {:s}".format(coords_out[0], coords_out[1]))
 
 # File locations and names
 zem_folder = filer.data_folder
@@ -59,8 +64,8 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-suppress_plots = False          # f = Plot first trace
-generate_transforms = False      # for all Zemax ray trace files and write to lms_dist_buffer.txt
+suppress_plots = False  # f = Plot first trace
+generate_transforms = True  # for all Zemax ray trace files and write to lms_dist_buffer.txt
 if generate_transforms:
     print()
     print("Generating distortion transforms")
@@ -77,7 +82,7 @@ if generate_transforms:
     for file_name in file_list:
         print(file_name)
         zf_file = zem_folder + file_name
-        trace = Trace(zf_file, coord_in, coord_out, silent=True, is_spifu=is_spifu)
+        trace = Trace(zf_file, coords_in, coords_out, silent=True, is_spifu=is_spifu)
         print(trace.__str__())
         debug = not suppress_plots
         trace.create_transforms(n_terms, debug=debug)
@@ -87,7 +92,7 @@ if generate_transforms:
         if not suppress_plots:
             trace.plot_focal_planes()
             trace.plot_fit_maps()
-            suppress_plots = True       # True = Just plot first file/setting
+            suppress_plots = True  # True = Just plot first file/setting
     print(Filer.trace_file)
     filer.write_pickle(filer.trace_file, traces)
     # stats_data = n_terms, -1, np.array(offset_data_list)
@@ -113,7 +118,7 @@ if derive_wcal:
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
-evaluate_transforms = True     # performance statistics, for optimising code parameters.
+evaluate_transforms = True  # performance statistics, for optimising code parameters.
 debug = False
 if evaluate_transforms:
     print('lms_distort - Evaluating polynomial fitted primary (AB) transforms')
@@ -127,7 +132,7 @@ if evaluate_transforms:
 
     test_ech_order, test_slice_no, test_spifu_no = 27, 14, -1
     test_ech_angle, test_prism_angle = 0.0, 6.65
-    if optical_configuration == Globals.spifu:
+    if optical_path == spifu:
         test_ech_order, test_slice_no, test_spifu_no = 27, 14, 3
         test_ech_angle = 0.0, 6.97
 
@@ -140,7 +145,7 @@ if evaluate_transforms:
         prism_angle = trace.parameter['Prism angle']
         for slice_object in trace.slice_objects:
             config, matrices, offset_corrections, rays, _ = slice_object
-            waves, phase, alpha, det_x, det_y, det_x_loc, det_y_loc = rays     # Local slice transformed x, y
+            waves, phase, alpha, det_x, det_y, det_x_loc, det_y_loc = rays  # Local slice transformed x, y
             # a_fit, b_fit, _, _ = Util.lookup_transform_fit(config, prism_angle, transform_fits)
             # det_x_fit, det_y_fit = Util.apply_distortion(phase, alpha, a_fit, b_fit)
             if debug:

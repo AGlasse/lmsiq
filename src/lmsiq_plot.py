@@ -163,44 +163,53 @@ class Plot:
         return title
 
     @staticmethod
-    def plot_ee(ees_data, obs_dict, axis, plot_label, ipc_tag, **kwargs):
+    def plot_cube_profile(type_key, data, name, ds_dict, axis, **kwargs):
+        xlog = kwargs.get('xlog', False)
         png_path = kwargs.get('png_path', None)
         plot_all = kwargs.get('plot_all', True)
 
-        key_list = []
-#        axis, xlms, y_per, y_des, y_mean, y_rms, y_mcs = ee_data
-        wavelength = obs_dict['wavelength']
-        title = Plot._make_profile_title(axis, wavelength, plot_label, ipc_tag)
+        wavelength = ds_dict['wavelength']
+        data_pars = {'ee': {'title_lead': 'Enslitted energy',
+                            'xlabels': {'spectral': 'aperture height',
+                                        'spatial': 'aperture width',
+                                        'across-slice': 'aperture width',
+                                        'along-slice': 'aperture height'},
+                            'ylabels': {'spectral': 'EE(x)',
+                                        'spatial': 'EE(y)',
+                                        'across-slice': 'EE(x)',
+                                        'along-slice': 'EE(y)'},
+                            },
+                     'lsf': {'title_lead': 'Line spread function',
+                             'xlabels': {'spectral': 'spectral',
+                                         'spatial': 'spatial',
+                                         'across-slice': 'across slice',
+                                         'along-slice': 'along slice'},
+                             'ylabels': {'spectral': 'signal',
+                                         'spatial': 'signal',
+                                         'across-slice': 'signal',
+                                         'along-slice': 'signal'},
+                             }
+                     }
+        data_par = data_pars[type_key]
+
+        title_lead = data_par['title_lead']
+        title = "{:s}\n{:s}, $\lambda$= {:5.3f} $\mu$m".format(title_lead, name, wavelength)
 
         fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
         ax = ax_list
 
-        xlms = ees_data['xdet']
-        x_ref = 3.
-
-        a = np.log10(2. * xlms)
-        a_ref = math.log10(2. * x_ref)
-        xlim = [a[0], a[-1]]
-        ylim = [0.0, 1.05]
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-
-        xtick_lin_vals = np.array([0.1, 0.3, 1.0, 3.0, 10.0, 30.0])
-        xtick_vals = np.log10(xtick_lin_vals)
-        ax.set_xticks(xtick_vals)
-        ax.set_xticklabels(xtick_lin_vals)
-        ax_xlabel = 'width'
+        x = data['xvals']
+        ys = data['yvals']
+        n_pts, n_profiles = ys.shape
+        ax_xlabel = data_par['xlabels'][axis]
         ax_xtag = 'w'
 
-        if axis == 'spatial':
-            ax_xlabel = 'height'
-            ax_xtag = 'h'
-        ax_ylabel = "Enslitted energy fraction 'EE({:s})'".format(ax_xtag)
+        ax_ylabel = data_par['ylabels'][axis]
         if axis == 'radial':
             ax_ylabel = "Encircled energy fraction 'EE(r)'"
             ax_xlabel, ax_xtag = 'radius', 'r'
         ax.set_ylabel(ax_ylabel, fontsize=16.0)
-        ax.set_xlabel("Aperture {:s} '{:s}' (det. pixels)".format(ax_xlabel, ax_xtag), fontsize=16.0)
+        ax.set_xlabel("{:s} '{:s}' (det. pixels)".format(ax_xlabel, ax_xtag), fontsize=16.0)
 
         ax.set_title(title, fontsize=16.0)
         for tick in ax.yaxis.get_major_ticks():
@@ -209,31 +218,26 @@ class Plot:
             tick.label.set_fontsize(16.0)
         ax.xaxis.grid()
         ax.yaxis.grid()
+        if xlog:
+            ax.set_xscale('log')
 
-        if plot_all:
-            if plot_all:
-                for key in ees_data:
-                    if 'MC' in key:
-                        y = ees_data[key]
-                        ax.plot(xlms, y, color='grey', lw=0.5)
-
-        plot_key_data = {'mean': ('<model>', 0, 'blue'),
-                         'per': ('perfect', 1, 'red'),
-                         'des': ('design', 2, 'green'),
+        plot_key_data = {0: ('perfect', 'red'),
+                         1: ('design', 'green'),
+                         2: ('<model>', 'blue')
                          }
-        # for plot_key in plot_key_data:
-        #     for ee_key in ee_refs:
-        #         if plot_key in ee_key:
-        #             key_label, y_col, colour = plot_key_data[plot_key]
-        #             y = y_mcs[:, y_col]
-        #             ee_ref = ee_refs[ee_key]
-        #             ax.plot(a, y, color=colour)
-        #             ax.plot(a_ref, ee_ref, color=colour, marker='o')
-        #             key_list.append((key_label, colour, [ee_ref]))
-
-        key_title = "EE at '{:s}'={:5.2f} pix.".format(ax_xtag, 2 * x_ref)
-        Plot.key(ax, axis, key_list, xlim, ylim,
-                 fmts=['{:>8.3f}'], col_labels=None, title=key_title)
+        for prof_idx in range(0, n_profiles):
+            if prof_idx in plot_key_data:
+                label, colour = plot_key_data[prof_idx]
+                if type_key == 'lsf':
+                    xfwhm, xl, xr = data['fwhm_lin'][prof_idx], data['xl'][prof_idx], data['xr'][prof_idx]
+                    label += " {:5.2f}".format(xfwhm)
+                y = ys[:, prof_idx]
+                ax.plot(x, y, color=colour, lw=1.5, label=label)
+            else:
+                if plot_all:
+                    y = ys[:, prof_idx]
+                    ax.plot(x, y, color='grey', lw=0.5)
+        ax.legend()
 
         if png_path is not None:
             plt.savefig(png_path, bbox_inches='tight')
@@ -242,75 +246,151 @@ class Plot:
         return
 
     @staticmethod
-    def plot_lsf(lsf_data, obs_dict, axis, dw_pix, plot_label, ipc_tag, line_widths, **kwargs):
-        """ Plot line spread functions.  y_all element of lsf_data holds the perfect and esign profiles
-        in index 0 and 1,
-        :param axis:
-        :param obs_dict:
-        :param ipc_tag:
-        :param line_widths:   FWHM data (det. pixels) for this configuration
-        :param plot_label:
-        :param lsf_data:
-        :param dw_pix:
-        :param kwargs:
-        :return:
-        """
+    def strehls(cube_series, **kwargs):
+        data_tag = 'strehl'                               # Tag identifying fwhm data in cube_series
         png_path = kwargs.get('png_path', None)
-        plot_all = kwargs.get('plot_all', True)
-        xlim_det = kwargs.get('xlim_det', 5.0)
-
-        # axis, x, y_per, y_des, y_mean, y_rms, y_mcs = lsf_data
-        wavelength = obs_dict['wavelength']
-        title = Plot._make_profile_title(axis, wavelength, plot_label, ipc_tag)
+        select = kwargs.get('select', {})
+        ordinate = kwargs.get('ordinate', 'fwhm')
+        ordinate_unit = kwargs.get('ordinate_unit', 'pixels')
+        nvals = len(cube_series['ipc_on'])
+        sel_indices = np.full(nvals, True)
+        for key in select:
+            val = select[key]
+            series = np.array(cube_series[key])
+            sel_indices = np.logical_and(sel_indices, series == val)
 
         fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
         ax = ax_list
+        xlabel = 'Wavelength / $\mu$m'
+        ylabel = ordinate + ' ' + ordinate_unit
+        ax.set_ylabel(ylabel, fontsize=16.0)
+        ax.set_xlabel(xlabel, fontsize=16.0)
 
-        x = lsf_data['xdet']
-        xlim = [-xlim_det, xlim_det]
-        ylim = [0.0, 1.05]
-        xtick_interval = 1.0 if xlim[1] < 5.0 else 2.0
-        xtick_lin_vals = np.arange(xlim[0], xlim[1] + 1.0, xtick_interval)
+        w_unsorted = np.array(cube_series['wavelength'])[sel_indices]
+        sorted_indices = np.argsort(w_unsorted)
+        plot_series = {}
+        for key in cube_series:
+            cube_array = np.array(cube_series[key])
+            plot_array = cube_array[sel_indices]
+            plot_series[key] = plot_array[sorted_indices]
 
-        ax.set_xlim(xlim)
-        ax.set_ylim(ylim)
-        ax.set_xticks(xtick_lin_vals)
-        ax.set_xticklabels(xtick_lin_vals)
-        ax_ylabel = 'Spectral'
-        ax_xtag = 'x'
-        if axis == 'spatial':
-            ax_ylabel = 'Spatial'
-            ax_xtag = 'y'
+        y_table = {}
+        y_mc_list = []
+        x = plot_series['wavelength']
+        for key in cube_series:
+            if data_tag in key:
+                y = plot_series[key]
+                if ordinate == 'srp':
+                    dw_dlmspix = plot_series['dw_dlmspix']
+                    y = x * 1000. / (y * dw_dlmspix)
+                if 'MC' in key:                             # Find min and max of MC FWHM values
+                    y_mc_list.append(y)
+                else:
+                    y_table[key] = y
+        is_mc_data = len(y_mc_list) > 0
+        if is_mc_data:
+            y_mcs = np.array(y_mc_list)
+            y_mc_lo, y_mc_hi = np.amin(y_mcs, axis=0), np.amax(y_mcs, axis=0)
+            y_mc_mean = np.mean(y_mcs, axis=0)
+            y_table['mc_mean'] = y_mc_mean
 
-        axis_font = 16.0
-        title_font = 14.0
-        ax.set_ylabel("{:s} Profile 'f({:s})'".format(ax_ylabel, ax_xtag), fontsize=axis_font)
-        ax.set_xlabel("'{:s}' (det. pixels)".format(ax_xtag), fontsize=axis_font)
-        ax.set_title(title, fontsize=title_font)
         for tick in ax.yaxis.get_major_ticks():
-            tick.label.set_fontsize(axis_font)
+            tick.label.set_fontsize(16.0)
         for tick in ax.xaxis.get_major_ticks():
-            tick.label.set_fontsize(axis_font)
-        if plot_all:
-            for key in lsf_data:
-                if 'MC' in key:
-                    y = lsf_data[key]
+            tick.label.set_fontsize(16.0)
+        ax.xaxis.grid()
+        ax.yaxis.grid()
+        if is_mc_data:
+            ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
+        plot_keys = {'mc_mean': ('<model>', 'blue'),
+                     'perfect': ('perfect', 'red'),
+                     'design': ('design', 'green')}
+        handles = []
+        for key in y_table:
+            y = y_table[key]
+            for plot_key in plot_keys:
+                if plot_key in key:
+                    label, colour = plot_keys[plot_key]
+                    handle, = ax.plot(x, y, marker='>', mew=2.0, label=label,
+                                      ls='none', fillstyle='none', color=colour)
+                    handles.append(handle)
+
+        ax.legend(handles=handles)
+
+        if png_path is not None:
+            plt.savefig(png_path, bbox_inches='tight')
+            plt.close(fig)
+        plt.show()
+
+    @staticmethod
+    def wav_series(cube_series, **kwargs):
+        png_path = kwargs.get('png_path', None)
+        select = kwargs.get('select', {})
+        ordinate = kwargs.get('ordinate', 'fwhms')
+        ordinate_unit = kwargs.get('ordinate_unit', 'pixels')
+        plot_all = kwargs.get('plot_all', True)
+        nvals = len(cube_series['ipc_on'])
+        sel_indices = np.full(nvals, True)
+        for key in select:
+            val = select[key]
+            series = np.array(cube_series[key])
+            sel_indices = np.logical_and(sel_indices, series == val)
+
+        fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
+        ax = ax_list
+        xlabel = 'Wavelength / $\mu$m'
+        ylabel = ordinate + ' ' + ordinate_unit
+        ax.set_ylabel(ylabel, fontsize=16.0)
+        ax.set_xlabel(xlabel, fontsize=16.0)
+
+        w_unsorted = np.array(cube_series['wavelength'])[sel_indices]
+        sorted_indices = np.argsort(w_unsorted)
+        plot_series = {}
+        for key in cube_series:
+            cube_array = np.array(cube_series[key])
+            plot_array = cube_array[sel_indices]
+            plot_series[key] = plot_array[sorted_indices]
+
+        y_table = {}
+        x = plot_series['wavelength']
+
+        yvals = plot_series['strehls'] if ordinate == 'strehls' else plot_series['fwhms']
+        n_pts, n_profiles = yvals.shape
+        if ordinate == 'srps':
+            dw_dlmspix = plot_series['dw_dlmspix']
+            for i in range(0, n_pts):
+                for j in range(0, n_profiles):
+                    dw = yvals[i, j] * dw_dlmspix[i]
+                    yvals[i, j] = x[i] * 1000. / dw
+        y_mcs = yvals[:, 2:]
+        y_mc_lo, y_mc_hi = np.amin(y_mcs, axis=1), np.amax(y_mcs, axis=1)
+        y_mc_mean = np.mean(y_mcs, axis=0)
+        y_table['mc_mean'] = y_mc_mean
+
+        for tick in ax.yaxis.get_major_ticks():
+            tick.label.set_fontsize(16.0)
+        for tick in ax.xaxis.get_major_ticks():
+            tick.label.set_fontsize(16.0)
+        ax.xaxis.grid()
+        ax.yaxis.grid()
+        ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
+        plot_key_data = {0: ('perfect', 'red'),
+                         1: ('design', 'green'),
+                         2: ('<model>', 'blue')}
+        handles = []
+        for prof_idx in range(0, n_profiles):
+            if prof_idx in plot_key_data:
+                label, colour = plot_key_data[prof_idx]
+                y = yvals[:, prof_idx]
+                handle, = ax.plot(x, y, color=colour, lw=1.5, label=label)
+                handles.append(handle)
+            else:
+                if plot_all:
+                    y = yvals[:, prof_idx]
                     ax.plot(x, y, color='grey', lw=0.5)
 
-        colours = {'perfect': 'red', 'design': 'green', '<mean>': 'blue'}
+        ax.legend(handles=handles)
 
-        for key in lsf_data:
-            if key not in colours:
-                continue
-            colour = colours[key]
-            xfwhm, xl, xr = line_widths[key]
-            y = lsf_data[key]
-            yh = 0.5
-            label = "{:s}, {:4.2f}".format(key, xfwhm)
-            ax.plot(x, y, color=colour, lw=2.0, label=label)
-            Plot._hwarrow(ax, 'right', xl, yh, 0.5, 0.02, colour)
-            Plot._hwarrow(ax, 'left', xr, yh, 0.5, 0.02, colour)
-        ax.legend()
         if png_path is not None:
             plt.savefig(png_path, bbox_inches='tight')
             plt.close(fig)
@@ -490,53 +570,6 @@ class Plot:
                 ax.plot(waves, y_table[key], lw=0.5, marker='+', mew=2.0, label=ipc_key + key)
         plt.legend()
 
-        if png_path is not None:
-            plt.savefig(png_path, bbox_inches='tight')
-            plt.close(fig)
-        plt.show()
-        return
-
-    @staticmethod
-    def profile(profile, profile_data_list, **kwargs):
-        srp_req = kwargs.get('srp_req', False)
-        png_path = kwargs.get('png_path', None)
-        plot_errors = kwargs.get('plot_errors', False)
-        ls = kwargs.get('ls', 'none')
-        xlabel = 'Wavelength [$\mu$m]'
-        ylabel = kwargs.get('ylabel', 'Value')
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-        ax.set_xlabel(xlabel, fontsize=16.0)
-        ax.set_ylabel(ylabel, fontsize=16.0)
-        ax.set_xlim([2.5, 5.6])
-        ax.set_title(profile, fontsize=14.0)
-        for tick in ax.yaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
-        for tick in ax.xaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
-
-        colours = {'ipc_off': 'black', 'ipc_on': 'green'}
-        for profile_data in profile_data_list:
-            plot_id, config, profile_dict, profiles, ipc_tag = profile_data
-            config_number, _, ls, marker = plot_id
-            fillstyle = 'none'
-            w_idx = profile_dict['wave']
-            w = profiles[:, w_idx]
-            label = ipc_tag
-            idx = profile_dict[profile]
-            y = profiles[:, idx]
-            if plot_errors:
-                yerr = profiles[:, idx + 1]
-            key_words = {'marker': marker, 'ms': 10., 'mew': 2.0, 'fillstyle': fillstyle,
-                         'label': label, 'color': colours[ipc_tag]}
-            ax.plot(w, y, ls=ls, lw=1.0, **key_words)
-            if plot_errors:
-                ax.plot(w, y - yerr, ls='dotted', lw=1.0, color=colours[ipc_tag])
-                ax.plot(w, y + yerr, ls='dotted', lw=1.0, color=colours[ipc_tag])
-            if srp_req:
-                w_metis2745 = [2.7, 4.8, 4.8, 5.5]
-                y_metis2745 = [100000, 100000, 85000, 85000]
-                ax.plot(w_metis2745, y_metis2745, ls='dashed', lw=2.0, color='red')
-        plt.legend()
         if png_path is not None:
             plt.savefig(png_path, bbox_inches='tight')
             plt.close(fig)

@@ -11,7 +11,7 @@ import matplotlib.patches as mpatches
 from scipy.optimize import least_squares
 from lms_detector import Detector
 from lms_globals import Globals
-from lms_dist_util import Util
+from lms_util import Util
 from lms_dist_plot import Plot
 
 
@@ -29,7 +29,7 @@ class Trace:
                           'Detector': ('det_x', 'det_y')}
 
     is_spifu = None
-    parameter, column, data, phase = None, None, None, None
+    parameter = None
     n_slices, n_rays_slice, n_spifu_slices, n_rays_spifu_slice = None, None, None, None
     unique_slices, unique_spifu_slices, unique_ech_orders = [None], [None], [None]
     coord_in, coord_out = None, None
@@ -78,6 +78,7 @@ class Trace:
 
         self._update_mask(silent)
         self._create_wave_colours()
+        self._find_dispersion()
         return
 
     def __str__(self):
@@ -94,6 +95,31 @@ class Trace:
         sin_aoi = waves * ech_orders / (2.0 * d)
         phase = np.arcsin(sin_aoi)
         return phase
+
+    def _find_dispersion(self, **kwargs):
+        """ Calculate the dispersion relation (nm/pixel) as a linear fit to
+        all wavelength and det_x data.
+        """
+        do_plot = kwargs.get('do_plot', False)
+
+        waves = self.series['wavelength']
+        det_x = self.series['det_x']
+        det_y = self.series['det_y']
+        sorted_indices = np.argsort(waves)
+        w_sort, x_sort, y_sort = waves[sorted_indices], det_x[sorted_indices], det_y[sorted_indices]
+        dw_sort = w_sort[1:] - w_sort[:-1]
+        nz_indices = np.nonzero(dw_sort)
+        w = 1000. * w_sort[nz_indices]              # Convert wavelength units from micron to nm
+        x, y = x_sort[nz_indices], y_sort[nz_indices]
+        dw, dx, dy = w[1:] - w[:-1], x[1:] - x[:-1], y[1:] - y[:-1]
+        dw_dx, dw_dy = -dw / dx, -dw / dy
+        dw_dx_mean, dw_dx_std = np.mean(dw_dx), np.std(dw_dx)
+        title = "Dispersion [nm / mm] = {:6.3f} $\pm$ {:5.3f}".format(dw_dx_mean, dw_dx_std)
+        if do_plot:
+            self.plot_dispersion(x[1:], y[1:], dw_dx, title=title)
+        self.dw_dx = dw_dx_mean, dw_dx_std
+
+        return
 
     def _read_csv(self, path, is_spifu, coord_in, coord_out):
         """ Read trace data in from csv file pointed to by path
@@ -548,36 +574,27 @@ class Trace:
         dw = waves - wfit
         return dw
 
-    def plot_dispersion(self, **kwargs):
-        """ Plot detector coordinate v wavelength per echelle order
+    @staticmethod
+    def plot_dispersion(x, y, dw_dx, **kwargs):
+        """ Plot distortion variation with detector coordinate v wavelength per echelle order
         """
-        poly_order = kwargs.get('poly_order', 0)            # Linear fit is default (poly_order = 0)
-        title = "Dispersion offset, poly order= {:d}".format(poly_order)
+        title = kwargs.get('title', 'Dispersion')
         ax_list = Plot.set_plot_area(title,
-                                     nrows=1, ncols=2, fontsize=10.0, sharey=True)
-        x_labels = ['Det x / mm', 'Det y / mm']
-        y_labels = ["Wave. res. / micron.", ""]
-        fmt = "{:s} offset"
+                                     nrows=1, ncols=1, fontsize=10.0)
+        x_label = 'x(det), y(det) / mm'
+        y_label = "$\delta\lambda/\delta$x / (nm / mm)"
+        fmt = "{:s}(det)"
         label1, label2 = fmt.format('x'), fmt.format('y')
 
-        for pane in range(0, 2):
-            ax = ax_list[0, pane]
-            ax.set_xlabel(x_labels[pane])
-            ax.set_ylabel(y_labels[pane])
+        ax = ax_list[0, 0]
+        ax.set_xlabel(x_label)
+        ax.set_ylabel(y_label)
 
-            for slice_no in self.unique_slices[0:1]:
-                waves = self.get('wavelength', slice_no=slice_no)
-                det_x = self.get('det_x', slice_no=slice_no)
-                det_y = self.get('det_y', slice_no=slice_no)
-                dw_x = self._find_residual(det_x, waves, poly_order)
-                dw_y = self._find_residual(det_y, waves, poly_order)
-
-                absc = det_x if pane == 0 else det_y
-                ax.plot(absc, dw_x, fillstyle='full', ms=1.0, marker='o', linestyle='None', color='blue')
-                ax.plot(absc, dw_y, fillstyle='full', ms=1.0, marker='o', linestyle='None', color='green')
-            patch_x = mpatches.Patch(color='blue', label=label1)
-            patch_y = mpatches.Patch(color='green', label=label2)
-            ax.legend(handles=[patch_x, patch_y])
+        ax.plot(x, dw_dx, fillstyle='full', ms=10.0, marker='o', linestyle='None', color='blue')
+        ax.plot(y, dw_dx, fillstyle='full', ms=10.0, marker='D', linestyle='None', color='green')
+        patch_x = mpatches.Patch(color='blue', label=label1)
+        patch_y = mpatches.Patch(color='green', label=label2)
+        ax.legend(handles=[patch_x, patch_y])
         Plot.show()
         return
 
@@ -651,40 +668,40 @@ class Trace:
         plot.show()
         return
 
-    def tfs_to_text(self, tf_list):
-        from lms_dist_util import Util
-
-        util = Util()
-        n_terms, _ = tf_list[0][3].shape
-        fp_in, fp_out = self.coord_in, self.coord_out
-        text = ''
-        for tf_idx, tf in enumerate(tf_list):
-            eo, sno, spifu_no, a, b, ai, bi = tf
-            phase = self.get(fp_in[0], slice=sno, spifu_slice=spifu_no)
-            alpha = self.get(fp_in[1], slice=sno, spifu_slice=spifu_no)
-            det_x = self.get(fp_out[0], slice=sno, spifu_slice=spifu_no)
-            det_y = self.get(fp_out[1], slice=sno, spifu_slice=spifu_no)
-
-            x, y = util.apply_distortion(phase, alpha, a, b)
-            ave_x, rms_x, ave_y, rms_y = self.get_fit_statistics(x, y, det_x, det_y)
-            ea, pa, w1, w2, w3, w4 = self._get_parameters()
-            for i in range(0, 4):
-                mat = tf[i + 3]
-                for j in range(0, n_terms):
-
-                    fmt = "{:3.0f},{:6.3f},{:6.3f},{:6.0f},{:6.0f},"
-                    text += fmt.format(eo, ea, pa, sno, spifu_no)
-                    fmt = "{:6d},{:6d},{:6d},"
-                    text += fmt.format(tf_idx, i, j)
-                    fmt = '{:15.7e},'
-                    for k in range(0, n_terms):
-                        text += fmt.format(mat[j, k])
-
-                    fmt = "{:8.3f},{:8.3},{:8.3f},{:8.3f},"
-                    text += fmt.format(w1, w2, w3, w4)
-                    fmt = "{:8.1f},{:8.1f},{:8.1f},{:8.1f}\n"
-                    text += fmt.format(ave_x, rms_x, ave_y, rms_y)
-        return text
+    # def tfs_to_text(self, tf_list):
+    #     from lms_dist_util import Util
+    #
+    #     util = Util()
+    #     n_terms, _ = tf_list[0][3].shape
+    #     fp_in, fp_out = self.coord_in, self.coord_out
+    #     text = ''
+    #     for tf_idx, tf in enumerate(tf_list):
+    #         eo, sno, spifu_no, a, b, ai, bi = tf
+    #         phase = self.get(fp_in[0], slice=sno, spifu_slice=spifu_no)
+    #         alpha = self.get(fp_in[1], slice=sno, spifu_slice=spifu_no)
+    #         det_x = self.get(fp_out[0], slice=sno, spifu_slice=spifu_no)
+    #         det_y = self.get(fp_out[1], slice=sno, spifu_slice=spifu_no)
+    #
+    #         x, y = util.apply_distortion(phase, alpha, a, b)
+    #         ave_x, rms_x, ave_y, rms_y = self.get_fit_statistics(x, y, det_x, det_y)
+    #         ea, pa, w1, w2, w3, w4 = self._get_parameters()
+    #         for i in range(0, 4):
+    #             mat = tf[i + 3]
+    #             for j in range(0, n_terms):
+    #
+    #                 fmt = "{:3.0f},{:6.3f},{:6.3f},{:6.0f},{:6.0f},"
+    #                 text += fmt.format(eo, ea, pa, sno, spifu_no)
+    #                 fmt = "{:6d},{:6d},{:6d},"
+    #                 text += fmt.format(tf_idx, i, j)
+    #                 fmt = '{:15.7e},'
+    #                 for k in range(0, n_terms):
+    #                     text += fmt.format(mat[j, k])
+    #
+    #                 fmt = "{:8.3f},{:8.3},{:8.3f},{:8.3f},"
+    #                 text += fmt.format(w1, w2, w3, w4)
+    #                 fmt = "{:8.1f},{:8.1f},{:8.1f},{:8.1f}\n"
+    #                 text += fmt.format(ave_x, rms_x, ave_y, rms_y)
+    #     return text
 
     @staticmethod
     def apply_polynomial_distortion(x, y, a, b):
@@ -692,8 +709,7 @@ class Trace:
         @author Alistair Glasse
         21/2/17   Create to encapsulate distortion transforms
         Apply a polynomial transform pair (A,B or AI,BI) to an array of points
-        affine = True  Apply an affine version of the transforms (remove all non-
-        linear terms)
+        affine = True  Apply an affine version of the transforms (remove all non-linear terms)
         """
         dim = a.shape[0]
         n_pts = len(x)

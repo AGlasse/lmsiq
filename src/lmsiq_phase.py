@@ -1,22 +1,14 @@
 import numpy as np
-from lms_globals import Globals
 from lms_detector import Detector
 from lms_ipc import Ipc
 from lmsiq_plot import Plot
 from lmsiq_analyse import Analyse
+from lms_util import Util
 
 
 class Phase:
 
     def __init__(self):
-        return
-
-    @staticmethod
-    def _print_list(title, val_list):
-        text = title + ' - '
-        for val in val_list:
-            text += "{:d}, ".format(val)
-        print(text)
         return
 
     @staticmethod
@@ -54,10 +46,12 @@ class Phase:
             slice_nos = uni_par['slice_nos']
             spifu_nos = uni_par['spifu_nos']
 
-            Phase._print_list('Configurations', config_nos)
-            Phase._print_list('Field numbers ', field_nos)
-            Phase._print_list('slice numbers ', slice_nos)
-            Phase._print_list('spifu numbers ', spifu_nos)
+            print()
+            print("Detector diffusion = {:s}".format(str(inter_pixel)))
+            Util.print_list('configurations', config_nos)
+            Util.print_list('field numbers ', field_nos)
+            Util.print_list('slice numbers ', slice_nos)
+            Util.print_list('spifu numbers ', spifu_nos)
 
             for config_no in config_nos:
                 for field_no in field_nos:
@@ -92,9 +86,9 @@ class Phase:
                     phot_obs = {'phase shift': det_shifts}
                     phot_obs_rms = {}
                     for obs_no, obs_1 in enumerate(obs_list):
-                        fmt = "\r- Diffusion= {:s}, configuration {:d}, field {:d} of {:d}, " +\
+                        fmt = "\r- configuration {:d}, field {:d} of {:d}, " +\
                               "slice {:d}, model {:03d} of {:03d}"
-                        print(fmt.format(str(inter_pixel), config_no,
+                        print(fmt.format(config_no,
                               field_no, len(field_nos), tgt_slice_no, obs_no + 1, n_obs),
                               end="", flush=True)
                         obs_key = phase_labels[obs_no]
@@ -119,13 +113,13 @@ class Phase:
                             obs_4 = Detector.measure(obs_3, im_pix_size)
 
                             # Find the FWHM and <signal> in the detector plane (obs_4)
-                            xgauss, _ = Analyse.find_fwhm(obs_4, det_oversampling,
+                            xgauss, _ = Analyse.find_fwhm(obs_4, oversample=det_oversampling,
                                                           debug=False, axis=0)
                             is_error, xfit, xfit_err = xgauss
                             if is_error:
                                 continue
                             _, xfwhm, xcen = xfit
-                            ygauss, _ = Analyse.find_fwhm(obs_4, det_oversampling,
+                            ygauss, _ = Analyse.find_fwhm(obs_4, oversample=det_oversampling,
                                                           debug=False, axis=1)
                             is_error, yfit, yfit_err = ygauss
                             if is_error:
