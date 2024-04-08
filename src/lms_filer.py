@@ -15,7 +15,7 @@ class Filer:
 
     def __init__(self, model_configuration):
         analysis_type, optical_path, date_stamp, _, _, _ = model_configuration
-        # analysis_type, optical_path, date_stamp = model_configuration
+        self.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_path, date_stamp)
         self.data_folder = self.get_folder('../data/' + sub_folder)
         self.output_folder = self.get_folder('../output/' + sub_folder)
@@ -45,7 +45,6 @@ class Filer:
             for token in tokens[2:]:
                 val = int(token) if key in ['Conf', 'Order'] else float(token)
                 specifu_config[key].append(val)
-#            print(line)
         return specifu_config
 
     @staticmethod

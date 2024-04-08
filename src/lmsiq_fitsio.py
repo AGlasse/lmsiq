@@ -149,23 +149,8 @@ class FitsIo:
         fits_path = fits_folder + cube_name
 
         hdu = fits.PrimaryHDU(cube)
-#        hdu.header['ALPHA_OS'] = alpha_oversampling
-#         for i, wave in enumerate(waves):
-#             kw = "WAV{:d}".format(i)
-#             hdu.header[kw] = wave
         hdu.writeto(fits_path + '.fits', overwrite=True)
         return
-
-    # @staticmethod
-    # def write_cube(process_level, ipc_tag, waves, alpha_oversampling, cube, iq_filer):
-    #     file_path = iq_filer.cube_path + process_level + '_' + ipc_tag + '_cube.fits'
-    #     hdu = fits.PrimaryHDU(cube)
-    #     hdu.header['ALPHA_OS'] = alpha_oversampling
-    #     for i, wave in enumerate(waves):
-    #         kw = "WAV{:d}".format(i)
-    #         hdu.header[kw] = wave
-    #     hdu.writeto(file_path, overwrite=True)
-    #     return
 
     @staticmethod
     def read_cube(process_level, ipc_tag, iq_filer):

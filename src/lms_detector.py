@@ -50,8 +50,6 @@ class Detector:
     def measure(image_in, im_pix_pitch):
         """ Measure an observation by rebinning at the detector pixel resolution.
         """
-#        image_in, params = observation
-#        _, im_pix_pitch = params
         sampling = int(Detector.det_pix_size / im_pix_pitch)        # Image pixels per detector pixel
         nr, nc = image_in.shape
         n_frame_rows, n_frame_cols = int(nr/sampling), int(nc/sampling)
@@ -64,6 +62,10 @@ class Detector:
                 c2 = c1 + sampling
                 image_out[r, c] = np.mean(image_in[r1:r2, c1:c2])
         return image_out
+
+
+
+
 
     @staticmethod
     def set_flat(observation):

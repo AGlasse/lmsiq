@@ -22,35 +22,41 @@ class ImageManager:
         values corresponding to the selected data.
         """
         is_new_zemax = data_identifier['zemax_format'] == 'new_zemax'
-        is_nominal = data_identifier['optical_configuration'] == 'nominal'
         ImageManager.is_new_zemax = is_new_zemax
         model_dict = {'optical_configuration': None,
                       'im_pix_size': None,
                       'fits_trailer': None,
                       'mc_bounds': None,
                       }
-        config_dict = {'folders': [], 'fits_leaders': [],
+        config_dict = {'folders': [],
                        'config_nos': [],
                        'field_nos': [],
                        'slice_nos': [], 'slice_tags': [], 'slice_tgts': [],
                        'spifu_nos': [],
-                       'wavelengths': [], 'focal_planes': [],
+                       'wavelengths': [],
                        'prism_angles': [], 'grating_angles': [], 'grating_orders': [],
                        }
         dataset_folder = iq_filer.data_folder
-        folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['SpecIFU_config.csv'])
-        is_new_zemax_nominal = is_new_zemax and is_nominal
-        specifu_config = iq_filer.read_specifu_config() if is_new_zemax_nominal else None
+        folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
+        config_no_list, field_no_list = [], []        # specifu_config = iq_filer.read_specifu_config() if is_new_zemax_nominal else None
         for folder in folder_list:
+            is_valid_field = False
+            for valid_field_no in data_identifier['field_bounds']:
+                field_text = '_field{:d}'.format(valid_field_no)
+                is_valid_field = True if field_text in folder else is_valid_field
+            if not is_valid_field:
+                continue
+            print('Folder {:s} included in analysis'.format(folder))
+
             optical_configuration = data_identifier['optical_configuration']
             model_dict['optical_configuration'] = optical_configuration
             config_dict['folders'].append(folder)
             slice_tgt = 13
             config_dict['slice_tgts'].append(slice_tgt)
 
-            zip_sub_folder = dataset_folder + folder + '/'
-            par_files = iq_filer.get_file_list(zip_sub_folder, inc_tags=['.txt'])
-            par_path = zip_sub_folder + par_files[0]
+            fits_folder = dataset_folder + folder + '/'
+            par_files = iq_filer.get_file_list(fits_folder, inc_tags=['.txt'])
+            par_path = fits_folder + par_files[0]
             # Note that the slice number information is wrong in the new zemax format (since start of 2024)
             parameters = ImageManager._read_param_file(par_path)
             for key in parameters:
@@ -64,90 +70,62 @@ class ImageManager:
                     continue
                 print("Keyword {:s} not found in model_dict or config_dict".format(key))
 
+            if data_identifier['optical_configuration'] == 'spifu':
+                config_dict['prism_angles'].append(6.99716)
+                config_dict['grating_angles'].append(0.00000)
+                config_dict['grating_orders'].append(-23)
+
             # Get list of file names for a single run (e.g. identical except for MC run no., 'perfect' or 'design' tags
-            exc_tags = []
-            fits_trailer = '.fits'
-            if is_new_zemax:
-                if optical_configuration == 'nominal':
-                    exc_tags = ['specslice', 'preslice']
-                    fits_trailer = '_MC_spatslice.fits'
-                else:
-                    exc_tags = ['spatslice', 'preslice']
-                    fits_trailer = '_MC_specslice.fits'
-            inc_tags = [fits_trailer]
+            if optical_configuration == 'nominal':
+                exc_tags = ['specslice', 'preslice']
+                fits_trailer = '_MC_spatslice.fits'
+            else:
+                exc_tags = ['spatslice', 'preslice']
+                fits_trailer = '_MC_specslice.fits'
             model_dict['fits_trailer'] = fits_trailer
-            fits_files = iq_filer.get_file_list(zip_sub_folder,
+            inc_tags = ['.fits']
+            fits_files = iq_filer.get_file_list(fits_folder,
                                                 inc_tags=inc_tags,
                                                 exc_tags=exc_tags)
 
-            lead = parameters['fits_leader']    # Get configuration and field number
-            c_end = lead.find('field')
-            config_no_txt = lead[6:c_end]
-            config_no = int(config_no_txt)
-            f_end = lead.find('wave')
-            n_field_chars = len('field')
-            field_no_txt = lead[c_end + n_field_chars:f_end]
-            field_no = int(field_no_txt)
+            # lead = parameters['fits_leader']    # Get configuration and field number
+            tokens = folder.split('_')
+            field_no = int(tokens[3][-1:])
+            field_no_list.append(field_no)
+            config_no = int(tokens[4][-2:])
+            config_no_list.append(config_no)
 
             # Read in and decode Monte-Carlo file names and slice/spifu numbers.
-            focal_plane = ''
             mc_no_list = []
             slice_no_list, slice_tag_list, spifu_no_list = [], [], []
             for fits_file in fits_files:
 
                 tokens = fits_file.split('_')
-                idx = 3 if is_new_zemax else 4
-                slice_tag: str = tokens[idx]            # New zemax defaults
-                focal_plane = 'det'
-                slice_no, spifu_no = None, None
-                if slice_tag == 'slicer':
-                    focal_plane = slice_tag
-                else:
-                    date_stamp = data_identifier['iq_date_stamp']
-                    if date_stamp in ['20240209']:
-                        optical_configuration = data_identifier['optical_configuration']
-                        slice_no, spifu_no = ImageManager._find_new_zemax_parameters(config_no,
-                                                                                     optical_configuration,
-                                                                                     date_stamp)
-                    if date_stamp in ['20240305']:
-                        config_base = int(int((config_no - 1) / 3.) * 3. + 1.)
-                        c1 = int(slice_tag) - config_base
-                        c2 = c1 + slice_tgt - 1
-                        slice_no = c2
-                        spifu_no = -1
-                        # print(c1, c2, config_no, slice_tag, slice_no)
-                        # config_dict['slice_tags'].append(slice_tag)
+                slice_idx = 3
+                spifu_idx = slice_idx + 1
+                slice_tag = tokens[slice_idx]
 
-                    if slice_no is None:
-                        slice_no = int(slice_tag)
-                        spifu_no = -1
+                if ('design' in fits_file) or ('perfect' in fits_file) or ('slicer' in fits_file):
+                    continue
+                if '_MC_' in fits_file:
+                    slice_no = int(slice_tag)
+                    spifu_no = int(tokens[spifu_idx])
+                    mc_idx = spifu_idx + 1
+                    mc_tag = tokens[mc_idx]
 
-                is_new_slice = slice_tag not in slice_tag_list
-                is_new_spifu = spifu_no not in spifu_no_list
-                if is_new_slice or is_new_spifu:
-                    slice_tag_list.append(slice_tag)
-                    slice_no_list.append(slice_no)
-                    spifu_no_list.append(spifu_no)
-                mc_token = tokens[idx + 1]
-                mc_text = mc_token[0:4]
-                if mc_text.isdigit():
-                    mc_no = int(mc_text)
-                    mc_no_list.append(mc_no)
+                    is_new_slice = slice_tag not in slice_tag_list
+                    is_new_spifu = spifu_no not in spifu_no_list
+                    if is_new_slice or is_new_spifu:
+                        slice_tag_list.append(slice_tag)
+                        slice_no_list.append(slice_no)
+                        spifu_no_list.append(spifu_no)
+                    if mc_tag.isdigit():
+                        mc_no = int(mc_tag)
+                        mc_no_list.append(mc_no)
             mc_array = np.array(mc_no_list)
             mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
             model_dict['mc_bounds'] = mc_start, mc_end
-            config_dict['slice_nos'].append(slice_no_list)
             config_dict['slice_tags'].append(slice_tag_list)
-            config_dict['focal_planes'].append(focal_plane)
-            if specifu_config is None:      # Prism angle etc. set in parameter file
-                config_dict['spifu_nos'].append(-1)
-                config_no = int(folder[-2:])
-            else:
-                configs = specifu_config['Conf']
-                idx = configs.index(config_no)
-                config_dict['prism_angles'].append(specifu_config['Prism'][idx])
-                config_dict['grating_angles'].append(specifu_config['Grism'][idx])
-                config_dict['grating_orders'].append(specifu_config['Order'][idx])
             config_dict['slice_nos'].append(slice_no_list)
             config_dict['spifu_nos'].append(spifu_no_list)
             config_dict['config_nos'].append(config_no)
@@ -198,8 +176,7 @@ class ImageManager:
         lines = pf.read().splitlines()
         pf.close()
         # Note, field position format changed from [x, y] to single integer in 20240209 dataset
-        param_translator = {'name': ('fits_leader', 'str_str'),
-                            'wavelength': ('wavelength', 'fl_fl'),
+        param_translator = {'wavelength': ('wavelength', 'fl_fl'),
                             'prism angle': ('prism_angle', 'fl_fl'), 'grating angle': ('grating_angle', 'fl_fl'),
                             'grating order': ('grating_order', 'fl_int'),
                             'Pixel size (micron)': ('im_pix_size', 'fl_fl')
@@ -238,25 +215,30 @@ class ImageManager:
         return params
 
     @staticmethod
-    def load_dataset(iq_filer, **kwargs):
+    def load_dataset(iq_filer, selection, **kwargs):
         """ Load a data (sub-)set (perfect, design plus MC images).  Filter = None to read all
         data in class.
         """
         model_dict = ImageManager.model_dict
         config_dict = ImageManager.config_dict
-        is_new_zemax = ImageManager.is_new_zemax
 
         debug = kwargs.get('debug', False)
-        slice_no = kwargs.get('slice_no', 13)
-        spifu_no = kwargs.get('spigu_no', -1)
+        xy_shift = kwargs.get('xy_shift', None)
+        if xy_shift is None:
+            print()
+            t1 = '  Loading data with xy_shift = None'
+            t2 = ', Zemax sources will be shifted by 0.25 detector pixels from the image centre'
+            print(t1 + t2)
+        slice_no = selection['slice_no']
+        spifu_no = selection['spifu_no']
 
-        # Find the single data set which matches a config_no, field_no, slice_no, spifu_no
+        # Find the single data set which matches the selection parameters.
         all_indices = []
-        for kw_key in kwargs:
+        for kw_key in selection:
             indices = []
             for config_key in config_dict:
                 if kw_key in config_key:
-                    kw_val = kwargs[kw_key]
+                    kw_val = selection[kw_key]
                     cfg_vals = config_dict[config_key]
                     for idx, cfg_val in enumerate(cfg_vals):
                         if kw_val == cfg_val:
@@ -275,15 +257,17 @@ class ImageManager:
                 break
         if dataset_idx < 0:
             print('!! ImageManager.load_dataset - unique data set not found !!')
+            for item in selection:
+                print('-- ', selection[item])
 
         # Generate the dictionary for this dataset ('ds') combining config, model and keyword data
         ds_dict = {}
-        list_index = np.argwhere(np.array(config_dict['slice_nos'][dataset_idx]) == slice_no)[0][0]
+        slice_nos = np.array(config_dict['slice_nos'][dataset_idx])
+        list_index = np.argwhere(slice_nos == slice_no)[0][0]
         for config_key in config_dict:
             ds_key = config_key[:-1]          # Strip final 's' off keyword (slice_nos -> slice_no etc.)
             ds_value = config_dict[config_key][dataset_idx]
             if isinstance(ds_value, list):
-                # print(ds_value)
                 ds_dict[ds_key] = ds_value[list_index]
             else:
                 ds_dict[ds_key] = ds_value
@@ -292,35 +276,23 @@ class ImageManager:
         for kw_key in kwargs:
             ds_dict[kw_key] = kwargs[kw_key]
 
-        focal_plane = ds_dict['focal_plane']
         config_no = ds_dict['config_no']
-
-        slice_tag = ds_dict['slice_tag'] if focal_plane == 'det' else ''
+        slice_tag = ds_dict['slice_tag']
         folder = ds_dict['folder']
         fits_folder = iq_filer.data_folder + folder + '/'
 
-        mc_start, mc_end = ds_dict['mc_bounds']
-
-        # Create list of text filters for reading in a specific model
-        fits_leader = ds_dict['fits_leader']
-        if focal_plane == 'slicer':
-            config_tag = '_slicer'
-        else:
-            config_tag = "{:s}_{:s}".format(fits_leader, slice_tag)
+        mc_start, mc_end = selection['mc_bounds']
+        obs_tag = "_{:02d}_{:02d}_{:02d}".format(config_no, slice_no, spifu_no)
 
         # Load perfect and design images first
         mc_tags = ['_perfect', '_design']           # Initialise mc tag list for old format
-        if is_new_zemax:
-            mc_tags = ['perf', 'design']
         for mc_no in range(mc_start, mc_end + 1):
-            mc_tag = "_{:04d}".format(mc_no)
-            if is_new_zemax:
-                mc_tag += '_MC'
+            mc_tag = "_{:04d}_MC".format(mc_no)
             mc_tags.append(mc_tag)
 
         images, file_names = [], []
         for mc_tag in mc_tags:
-            inc_tags = [mc_tag, config_tag]
+            inc_tags = [mc_tag, obs_tag, '.fits']
             file_list = iq_filer.get_file_list(fits_folder,
                                                inc_tags=inc_tags,
                                                excl_tags=['slicer'])
@@ -328,7 +300,7 @@ class ImageManager:
             if n_files > 1:
                 print("!! multiple files named {:s} in {:s}".format(file_list[0], folder))
             if n_files < 1:
-                print("!! No files found with {:s} and {:s}".format(mc_tag, config_tag))
+                print("\n!! No files found with {:s}{:s}".format(obs_tag, mc_tag))
 
             file = file_list[0]
             if debug:
@@ -337,7 +309,28 @@ class ImageManager:
             path = fits_folder + file
             hdu_list = fits.open(path, mode='readonly')
             hdu = hdu_list[0]
-            images.append(hdu.data)
+            image_in = hdu.data
+            image = np.array(image_in)          # Make a copy of the raw image (maybe shift it).
+            if xy_shift is not None:            # Oversample, shift, resample
+                sampling, dr, dc = xy_shift
+                n_rows, n_cols = image_in.shape
+                # Create super-sampled copy of image
+                osim = np.zeros((sampling * n_rows, sampling * n_cols))
+                for row in range(0, n_rows):
+                    for col in range(0, n_cols):
+                        r1, c1 = row * sampling, col * sampling
+                        r2, c2 = r1 + sampling, c1 + sampling
+                        osim[r1:r2, c1:c2] = image[row, col]
+                # Apply the integer pixel shift
+                osim = np.roll(osim, (dr, dc), axis=(0, 1))
+                # Rebin into image
+                for row in range(0, n_rows):
+                    for col in range(0, n_cols):
+                        r1, c1 = row * sampling, col * sampling
+                        r2, c2 = r1 + sampling, c1 + sampling
+                        image[row, col] = np.mean(osim[r1:r2, c1:c2])
+
+            images.append(image)     # Remove first row and column
             file_names.append(file)
         ds_dict['file_names'] = file_names
         return images, ds_dict

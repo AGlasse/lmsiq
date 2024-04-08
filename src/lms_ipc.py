@@ -12,7 +12,7 @@ from lmsiq_plot import Plot
 
 class Ipc:
 
-    kernel, ipc_factor = None, None
+    kernel, ipc_factor, intra_screen = None, None, None
     tag, folder = None, None
     oversampling, det_kernel_size = None, None
     ipc_factor_nominal, ipc_factor = 0.013, 0.0
@@ -22,15 +22,15 @@ class Ipc:
 
     @staticmethod
     def make_kernel(oversampling, **kwargs):
-        """ Generate a 3 x 3 detector pixel kernel image, which includes diffusion
-        (according to Hardy et al. 2014) and inter-pixel capacitance
-        (nominal 1.3 % - Rauscher ref.)
+        """ Generate a 3 x 3 detector pixel kernel image, which includes diffusion (according to Hardy et al. 2014)
+        and inter-pixel capacitance (nominal 1.3 % - Rauscher ref.)
+        The signal in pixel i, j is centred at i+.5, j+.5
         """
         loss = kwargs.get('loss', 0.5)
 
         det_kernel_size = 3
         # oversampling = Globals.get_im_oversampling('raw_zemax')
-        kernel_size = det_kernel_size * oversampling
+        kernel_size = det_kernel_size * oversampling + 1        # Force odd number, central pixel = peak transmission
         kernel_shape = kernel_size, kernel_size
         kernel = np.zeros(kernel_shape)
         # Generate diffusion component  A exp(-B x^2) where A = 1 and B = 2.4 to minimise transmission losses
@@ -41,6 +41,19 @@ class Ipc:
         kernel /= renorm
         Ipc.kernel = kernel
         Ipc.oversampling, Ipc.det_kernel_size = oversampling, det_kernel_size
+        return
+
+    @staticmethod
+    def make_intra_pixel_transmission_screen(oversampling):
+        """ Make a flat transmission field which can be applied to super-sampled images multiplicatively to
+        account for the 3.3 % loss of signal at pixel corners.
+        oversampling must be an even number (it is really always equal to 4).
+        """
+        stamp_shape = oversampling, oversampling
+        core, edge = 1., 1. - 0.033
+        screen = np.full(stamp_shape, edge)
+        screen[1:-1, 1:-1] = core
+        Ipc.intra_screen = screen
         return
 
     @staticmethod
@@ -147,38 +160,89 @@ class Ipc:
         return
 
     @staticmethod
-    def convolve(im1, oversampling):
-        """ Convolve the IPC kernel with an image (im1). Returned as im2.  A bit clumsy.
+    def apply(im1, oversampling):
+        """ Apply the detector diffusion and transmission screen to an image
         """
+        im2 = np.zeros(im1.shape)           # Create new image for output
         if Ipc.kernel is None:
             Ipc.make_kernel(oversampling)
-
-#        im1, params = obs
-        kernel, det_kernel_size = Ipc.kernel, Ipc.det_kernel_size
-        knorm = np.sum(kernel) * oversampling * oversampling
-        nr, nc = im1.shape
+        kernel = Ipc.kernel
         nrk, nck = kernel.shape
-        im2 = np.zeros(im1.shape)
-        rc_half = int(det_kernel_size / 2.0)
-        for r in range(0, nr-1, oversampling):
-            kr1 = 0 if r > oversampling else oversampling - r
-            imr1 = r - rc_half * oversampling + kr1
-            kr2 = nrk if r < nr - oversampling else nrk - (nr - r)
-            imr2 = imr1 + (rc_half + 2) * oversampling - (nrk - kr2) - kr1
-            for c in range(0, nc-1, oversampling):
-                kc1 = 0 if c > oversampling else oversampling - c
-                imc1 = c - rc_half * oversampling + kc1
-                kc2 = nck if c < nc - oversampling else nck - (nc - c)
-                imc2 = imc1 + (rc_half + 2) * oversampling - (nck - kc2) - kc1
-                im1_sub = im1[imr1:imr2, imc1:imc2]
-                im_k = kernel[kr1:kr2, kc1:kc2]
-                im2_sub = im1_sub * im_k
-                im2_pix = np.zeros((oversampling, oversampling))
-                nrr, ncc = im2_sub.shape
-                for rp in range(0, nrr, oversampling):
-                    for cp in range(0, ncc, oversampling):
-                        im2_pix += im2_sub[rp:rp + oversampling, cp:cp + oversampling]
-                im2[r:r+oversampling, c:c+oversampling] += im2_pix
-        im2 *= knorm
-#        print("Ipc.convolve, {:8.3e} -> {:8.3e}".format(np.sum(im1), np.sum(im2)))
-        return im2      # , params
+        rck_half = int(nrk / 2.0)
+        # Apply the kernel first by brute force convolution.
+        nri, nci = im1.shape
+        for ri in range(0, nri):
+            for ci in range(0, nci):
+                patch = im1[ri, ci] * kernel
+                ri1 = ri - rck_half
+                rk1 = 0
+                if ri1 < 0:
+                    rk1 = -ri1
+                    ri1 = 0
+                ri2 = ri + rck_half + 1
+                rk2 = nrk
+                if ri2 > nri:
+                    rk2 = nri - ri2
+                    ri2 = nri
+
+                ci1 = ci - rck_half
+                ck1 = 0
+                if ci1 < 0:
+                    ck1 = -ci1
+                    ci1 = 0
+                ci2 = ci + rck_half + 1
+                ck2 = nck
+                if ci2 > nci:
+                    ck2 = nci - ci2
+                    ci2 = nci
+
+                area_weight = (ci2 - ci1) * (ri2 - ri1) / (nrk * nck)
+                weight = patch[rk1:rk2, ck1:ck2] * area_weight
+                sub_im = im2[ri1:ri2, ci1:ci2]
+                if weight.shape != sub_im.shape:
+                    nob = 1
+                im2[ri1:ri2, ci1:ci2] += weight
+
+        if Ipc.intra_screen is None:
+            Ipc.make_intra_pixel_transmission_screen(oversampling)
+        screen = Ipc.intra_screen
+        for ri in range(0, nri, oversampling):
+            for ci in range(0, nci, oversampling):
+                im2[ri:ri+oversampling, ci:ci+oversampling] *= screen
+
+        return im2
+
+#     @staticmethod
+#     def convolve_old(im1, oversampling):
+#         """ Convolve the IPC kernel with an image (im1). Returned as im2.  A bit clumsy.
+#         """
+#         if Ipc.kernel is None:
+#             Ipc.make_kernel(oversampling)
+#         kernel, det_kernel_size = Ipc.kernel, Ipc.det_kernel_size
+#         knorm = np.sum(kernel) * oversampling * oversampling
+#         nr, nc = im1.shape
+#         nrk, nck = kernel.shape
+#         im2 = np.zeros(im1.shape)
+#         rc_half = int(det_kernel_size / 2.0)
+#         for r in range(0, nr-1, oversampling):
+#             kr1 = 0 if r > oversampling else oversampling - r
+#             imr1 = r - rc_half * oversampling + kr1
+#             kr2 = nrk if r < nr - oversampling else nrk - (nr - r)
+#             imr2 = imr1 + (rc_half + 2) * oversampling - (nrk - kr2) - kr1
+#             for c in range(0, nc-1, oversampling):
+#                 kc1 = 0 if c > oversampling else oversampling - c
+#                 imc1 = c - rc_half * oversampling + kc1
+#                 kc2 = nck if c < nc - oversampling else nck - (nc - c)
+#                 imc2 = imc1 + (rc_half + 2) * oversampling - (nck - kc2) - kc1
+#                 im1_sub = im1[imr1:imr2, imc1:imc2]
+#                 im_k = kernel[kr1:kr2, kc1:kc2]
+#                 im2_sub = im1_sub * im_k
+#                 im2_pix = np.zeros((oversampling, oversampling))
+#                 nrr, ncc = im2_sub.shape
+#                 for rp in range(0, nrr, oversampling):
+#                     for cp in range(0, ncc, oversampling):
+#                         im2_pix += im2_sub[rp:rp + oversampling, cp:cp + oversampling]
+#                 im2[r:r+oversampling, c:c+oversampling] += im2_pix
+#         im2 *= knorm
+# #        print("Ipc.convolve, {:8.3e} -> {:8.3e}".format(np.sum(im1), np.sum(im2)))
+#         return im2      # , params

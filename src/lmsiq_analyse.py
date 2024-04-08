@@ -58,7 +58,7 @@ class Analyse:
         w_sort = wave_means[sort_indices]
         dw_dx_means = np.array(dw_dx_mean_list)[sort_indices]
         dw_dx_stds = np.array(dw_dx_std_list)[sort_indices]
-        dw_dx = np.interp(wave, wave_means, dw_dx_means), np.interp(wave, wave_means, dw_dx_stds)
+        dw_dx = np.interp(wave, w_sort, dw_dx_means), np.interp(wave, w_sort, dw_dx_stds)
         return dw_dx
 
     @staticmethod
@@ -97,7 +97,6 @@ class Analyse:
 
     @staticmethod
     def find_fwhm(image, **kwargs):
-        debug = kwargs.get('debug', False)
         oversample = kwargs.get('oversample', 1)
         axis = kwargs.get('axis', 0)
 
@@ -248,17 +247,27 @@ class Analyse:
         return phase_shift_rates
 
     @staticmethod
-    def find_strehls(image_list):
-        n_runs = len(image_list)
+    def find_strehls(cube_stack):
+        n_runs, n_rows, n_cols = cube_stack.shape
         strehls = np.zeros(n_runs)
-        perfect = image_list[0]
-        pmax = np.amax(perfect)
-        psum = np.sum(perfect)
+        p_factor = None
+        rows = np.arange(0, n_rows)
+        first_time = True
         for run_idx in range(0, n_runs):
-            image = image_list[run_idx]
-            imax = np.amax(image)
+            image = cube_stack[run_idx]
             isum = np.sum(image)
-            strehl = (imax / isum) * (psum / pmax)
+            rmax, cmax = np.unravel_index(np.argmax(image, keepdims=True), image.shape)
+            x = rows
+            y = np.squeeze(image[:, cmax])
+            _, gauss_fit, _ = Analyse._fit_gaussian(x, y)
+            imax = gauss_fit[0]
+            if first_time:
+                psum = isum
+                pmax = imax
+                p_factor = psum / pmax
+                first_time = False
+            strehl = (imax / isum) * p_factor
+            # print("{:03d}, {:8.5f}, {:8.5f}, {:6.3f}".format(run_idx, imax, isum, strehl))
             strehls[run_idx] = strehl
         return strehls
 
@@ -448,6 +457,18 @@ class Analyse:
         return strehls
 
     @staticmethod
+    def _boxcar(series_in, box_width):
+        n_pts, _ = series_in.shape
+        series_out = np.zeros(series_in.shape)
+        box_hw = int(box_width / 2.)
+        for i in range(0, n_pts):
+            i1, i2 = i - box_hw, i + box_hw
+            i1 = i1 if i1 >= 0 else 0
+            i2 = i2 if i2 < n_pts else n_pts
+            series_out[i, :] = np.mean(series_in[i1:i2, :], axis=0)
+        return series_out
+
+    @staticmethod
     def lsf(image_list, obs_dict, axis, **kwargs):
         """ Find the normalised line spread function for all image files.  Note that the pixel is centred
         at its index number, so we perform rectangular aperture photometry centred at
@@ -458,7 +479,8 @@ class Analyse:
         """
         debug = kwargs.get('debug', False)
         centroid_relative = kwargs.get('centroid_relative', True)
-        oversample = kwargs.get('oversample', 1.)
+        oversample = kwargs.get('oversample', 1.)   # Pixel oversampling with respect to detector
+        boxcar = kwargs.get('boxcar', False)        # t=Apply boxcar filter of width = oversample
         v_coadd = kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
         u_radius = kwargs.get('u_radius', 'all')    # Maximum radial size of aperture (a bit less than 1/2 image size)
         usample = 1.0      # Sample psf once per pixel to avoid steps
@@ -484,7 +506,6 @@ class Analyse:
 
         for j, image in enumerate(image_list):
             file_name = obs_dict['file_names'][j]
-            # file_id, mm_fitspix = params
             if debug:
                 print('Processing file {:s} into column {:d}'.format(file_name, j))
             ap_pos = np.array(centroid)
@@ -501,21 +522,34 @@ class Analyse:
                     aperture = RectangularAperture(ap_pos, w=vcoadd, h=usample)  # Spatial
                     lsf_all[i, j] = Analyse.exact_rectangular(image, aperture)
         lsf_norm = lsf_all / np.amax(lsf_all, axis=0)
-        xdet = np.divide(uvals, oversample)         # Convert x scale to LMS detector pixels
-        lsf_data = {'xvals': xdet, 'yvals': lsf_norm}
+        xvals = np.divide(uvals, oversample)         # Convert x scale to LMS detector pixels
+        if boxcar:
+            lsf_norm = Analyse._boxcar(lsf_norm, oversample)
+
+        lsf_data = {'xvals': xvals, 'yvals': lsf_norm}
 
         mc_start, _ = obs_dict['mc_bounds']
         pd_tags, model_tags = ['perfect', 'design'], []
-        lsf_data['fwhm_lin'], lsf_data['xl'], lsf_data['xr'] = [], [], []
+        lsf_data['fwhm_lin'], lsf_data['xl_lin'], lsf_data['xr_lin'] = [], [], []
+        lsf_data['fwhm_gau'], lsf_data['xl_gau'], lsf_data['xr_gau'], lsf_data['amp_gau'] = [], [], [], []
+
         for i, image in enumerate(image_list):
             key = "MC_{:03d}".format(mc_start + i) if i > 1 else pd_tags[i]
             model_tags.append(key)
 
             gauss, linear = Analyse.find_fwhm(image, axis=axis, debug=True)
-            _, fwhm_per_lin, _, xl, xr, yh = linear
-            lsf_data['fwhm_lin'].append(fwhm_per_lin)
-            lsf_data['xl'].append(xl)
-            lsf_data['xr'].append(xr)
+            _, fwhm_per_lin, _, xl_lin, xr_lin, _ = linear
+            _, (amp_gau, fwhm_per_gau, xcen_gau), covar = gauss
+            xl_gau = xcen_gau - 0.5 * fwhm_per_gau
+            xr_gau = xcen_gau + 0.5 * fwhm_per_gau
+            # Scale to detector pixels and write to data dictionary
+            lsf_data['fwhm_lin'].append(fwhm_per_lin / oversample)
+            lsf_data['xl_lin'].append(xl_lin / oversample)
+            lsf_data['xr_lin'].append(xr_lin / oversample)
+            lsf_data['fwhm_gau'].append(fwhm_per_gau / oversample)
+            lsf_data['xl_gau'].append(xl_gau / oversample)
+            lsf_data['xr_gau'].append(xr_gau / oversample)
+            lsf_data['amp_gau'].append(amp_gau)
 
         return lsf_data
 
