@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
+from lms_filer import Filer
 
 
 class Plot:
@@ -65,6 +66,7 @@ class Plot:
         title = kwargs.get('title', '')
         pane_titles = kwargs.get('pane_titles', None)
         colourbar = kwargs.get('colourbar', True)
+        vlim = kwargs.get('vlim', None)
 
         n_rows, n_cols = nrowcol
         difference = kwargs.get('difference', False)
@@ -93,14 +95,15 @@ class Plot:
         pane, row, col = 0, 0, 0
         do_log = kwargs.get('do_log', True)
         do_half = False
-        vmin, vmax = kwargs.get('vmin', None), kwargs.get('vmax', None)
-        if vmin is None:
+        if vlim is None:
             vmin, vmax = np.finfo('float').max, np.finfo('float').min
             for img in images:
                 vmin = vmin if vmin < np.amin(img) else np.amin(img)
                 vmax = vmax if vmax > np.amax(img) else np.amax(img)
+        else:
+            vmin, vmax = vlim[0], vlim[1]
 
-        for i, image in enumerate(images[0:4]):
+        for i, image in enumerate(images):
             ax = ax_list[row, col]
             if pane_titles is not None:
                 pane_title = pane_titles[pane]
@@ -108,7 +111,8 @@ class Plot:
 
             if do_log:
                 lvmax = math.log10(vmax)
-                vmin = vmax / 1000.0
+                if vlim is None:
+                    vmin = vmax / 1000.0
                 lvmin = math.log10(vmin)
                 clipped_image = np.where(image < vmin, vmin, image)
                 log_image = np.log10(clipped_image)
@@ -116,7 +120,7 @@ class Plot:
                                    extent=(c1-0.5, c2-0.5, r1-0.5, r2-0.5),
                                    vmin=lvmin, vmax=lvmax)
             else:
-                if do_half:
+                if do_half and vlim is None:
                     vmax = np.amax(image)
                     vmin = vmax / 2.0
                 im_map = ax.imshow(image[r1:r2, c1:c2],
@@ -183,10 +187,10 @@ class Plot:
 
         wavelength = ds_dict['wavelength']
         data_pars = {'ee': {'title_lead': 'Enslitted energy',
-                            'xlabels': {'spectral': 'aperture height',
-                                        'spatial': 'aperture width',
-                                        'across-slice': 'aperture width',
-                                        'along-slice': 'aperture height'},
+                            'xlabels': {'spectral': 'aperture half-width / pixels',
+                                        'spatial': 'aperture half-height / pixels',
+                                        'across-slice': 'aperture half-width / slices',
+                                        'along-slice': 'aperture height / pixels'},
                             'ylabels': {'spectral': 'EE(x)',
                                         'spatial': 'EE(y)',
                                         'across-slice': 'EE(x)',
@@ -195,12 +199,12 @@ class Plot:
                      'lsf': {'title_lead': 'Line spread function',
                              'xlabels': {'spectral': 'spectral',
                                          'spatial': 'spatial',
-                                         'across-slice': 'across slice',
-                                         'along-slice': 'along slice'},
-                             'ylabels': {'spectral': 'signal',
-                                         'spatial': 'signal',
-                                         'across-slice': 'signal',
-                                         'along-slice': 'signal'},
+                                         'across-slice': 'across slice / slices',
+                                         'along-slice': 'along slice / pixels'},
+                             'ylabels': {'spectral': 'response',
+                                         'spatial': 'response',
+                                         'across-slice': 'response',
+                                         'along-slice': 'response'},
                              }
                      }
         data_par = data_pars[type_key]
@@ -212,8 +216,13 @@ class Plot:
         ax = ax_list
 
         x = data['xvals']
+
         ys = data['yvals']
-        ax_xlabel = data_par['xlabels'][axis]
+        xlabels = data_par['xlabels']
+        ax_xlabel = xlabels[axis]
+        if xlabels == 'along_slice':
+            x /= 4.
+
         ax_xtag = 'w'
 
         y_perfect, y_design = ys[:, 0], ys[:, 1]
@@ -221,7 +230,7 @@ class Plot:
 
         p_label, d_label, mc_label = 'perfect', 'design', '<M-C>'
         if type_key == 'lsf':
-            fwhms = data['fwhm_gau']
+            fwhms = data['lin_fwhm']
             fmt = "{:s} {:4.2f}"
             p_label, d_label = fmt.format(p_label, fwhms[0]), fmt.format(d_label, fwhms[1])
             mc_mean_fwhm = np.mean(fwhms[2:])
@@ -295,77 +304,96 @@ class Plot:
         return y_plots, y_mc_lo, y_mc_hi
 
     @staticmethod
-    def field_series(cube_series, is_spifu, **kwargs):
+    def series(plot_data, **kwargs):
+
+        plot_key = kwargs.get('plot_key', True)
+        key_only = kwargs.get('key_only', False)
         png_path = kwargs.get('png_path', None)
+        nrows, ncols, figsize = kwargs.get('fig_layout', (3, 1, (2, 2)))
         title = kwargs.get('title', '')
-        select = kwargs.get('select', {})
+        ordinate = kwargs.get('ordinate', None)
+        do_srp_rqt = kwargs.get('do_srp_rqt', False)
+        do_fwhm_rqt = kwargs.get('do_fwhm_rqt', False)
         abscissa = kwargs.get('abscissa', ('wavelength', '$\mu$m'))
-        ordinate = kwargs.get('ordinate', ('fwhms', 'pixels'))
         mc_percentiles = kwargs.get('mc_percentiles', None)
-        nvals = len(cube_series['ipc_on'])
-        sel_indices = np.full(nvals, True)
 
-        for key in select:
-            val = select[key]
-            series = np.array(cube_series[key])
-            sel_indices = np.logical_and(sel_indices, series == val)
+        field_rowcols = {1: (1, 1), 2: (0, 1), 3: (2, 1),
+                         4: (1, 0), 5: (0, 0), 6: (2, 0),
+                         7: (1, 2), 8: (0, 2), 9: (2, 2)}
 
-        fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
-        ax = ax_list
-        ax.set_title(title)
-        atext, aunit = abscissa
-        xlabel = atext + ' ' + aunit
-        ax.set_xlabel(xlabel, fontsize=16.0)
-        otext, ounit = ordinate
-        ylabel = otext + ' ' + ounit
-        ax.set_ylabel(ylabel, fontsize=16.0)
+        ykey, ylabel, ylim = ordinate
+        xkey, xlabel, xlim = abscissa
 
-        w_unsorted = np.array(cube_series['wavelength'])[sel_indices]
-        sorted_indices = np.argsort(w_unsorted)
-        plot_series = {}
-        for key in cube_series:
-            cube_array = np.array(cube_series[key])
-            plot_array = cube_array[sel_indices]
-            plot_series[key] = plot_array[sorted_indices]
+        fig, ax_list = Plot.set_plot_area(nrows=nrows, ncols=ncols, figsize=figsize,
+                                          sharex=True, sharey=True,
+                                          xlim=xlim, ylim=ylim)
+        fig.suptitle(title)
+        is_first_plot = True
+        for data_key in plot_data:
+            field_data = plot_data[data_key]
+            field_no = field_data['field_no']
+            field_label = "Field {:d}".format(field_no)
+            ipc_on = field_data['ipc_on']
+            is_spifu = field_data['is_spifu']
+            row, col = field_rowcols[field_no]
+            col = col - 1 if is_spifu else col
+            ax = ax_list[row, col]
+            if row == nrows - 1:
+                ax.set_xlabel(xlabel)
+            if col == 0:
+                ax.set_ylabel(ylabel)
+            ax.set_title(field_label)
+            ax.xaxis.grid()
+            ax.yaxis.grid()
 
-        for tick in ax.yaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
-        for tick in ax.xaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
-        ax.xaxis.grid()
-        ax.yaxis.grid()
+            x_unsort = np.array(field_data['x_values'])
+            indices = np.argsort(x_unsort)
+            ys_unsort = np.array(field_data[ykey])
 
-        x = plot_series['spifu_no'] if is_spifu else plot_series['wavelength']
-        ys = plot_series['strehls'] if otext == 'strehls' else plot_series['fwhms']
+            x = x_unsort[indices]
+            ys = ys_unsort[indices, :]
+            y_perfect, y_design = ys[:, 0], ys[:, 1]
+            y_mcs = ys[:, 2:]
 
-        n_pts, n_profiles = ys.shape
-        if otext == 'srps':
-            dw_dlmspix = plot_series['dw_dlmspix']
-            for i in range(0, n_pts):
-                for j in range(0, n_profiles):
-                    dw = ys[i, j] * dw_dlmspix[i]
-                    ys[i, j] = x[i] * 1000. / dw
+            p_label, d_label, mc_label = 'perfect', 'design', '<M-C>'
+            y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', y_perfect),
+                       'design': (d_label, 'green', 'solid', 1.5, 'x', y_design)}
+            y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(y_mcs, mc_percentiles, y_plots, mc_label)
+            if not key_only:
+                ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
 
-        y_perfect, y_design = ys[:, 0], ys[:, 1]
-        y_mcs = ys[:, 2:]
-
-        p_label, d_label, mc_label = 'perfect', 'design', '<M-C>'
-
-        y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', y_perfect),
-                   'design': (d_label, 'green', 'solid', 1.5, 'x', y_design)}
-        y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(y_mcs, mc_percentiles, y_plots, mc_label)
-        ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
-
-        handles = []
-        for key in y_plots:
-            y_plot = y_plots[key]
-            label, colour, ls, lw, marker, y = y_plot
-            handle, = ax.plot(x, y,
-                              color=colour, marker=marker, mew=2.0,
-                              ls=ls, lw=lw, label=label)
-            if label is not None:
+            handles = []
+            for pkey in y_plots:
+                y_plot = y_plots[pkey]
+                label, colour, ls, lw, marker, y = y_plot
+                if key_only:
+                    x, y = [0.], [0.]
+                handle, = ax.plot(x, y,
+                                  color=colour, marker=marker, mew=2.0,
+                                  ls=ls, lw=lw, label=label)
+                if label is not None:
+                    handles.append(handle)
+            if do_srp_rqt:
+                x_srp = np.array(x)
+                y_srp = np.full(y.shape, 1E5)
+                idx = np.argwhere(x_srp > 4.8)
+                y_srp[idx] = 0.85E5
+                label = 'Rqt. MET-2745 SRP'
+                handle, = ax.plot(x_srp, y_srp,
+                                  color='purple', marker='none', mew=2.0,
+                                  ls='dotted', lw=1.5, label=label)
                 handles.append(handle)
-        ax.legend(handles=handles)
+            if do_fwhm_rqt:
+                x_rqt = np.array(x)
+                y_rqt = np.full(y.shape, 2.0)
+                label = 'Rqt. MET-3739 FWHM'
+                handle, = ax.plot(x_rqt, y_rqt,
+                                  color='purple', marker='none', mew=2.0,
+                                  ls='dotted', lw=1.5, label=label)
+                handles.append(handle)
+            if is_first_plot and (plot_key or key_only):
+                ax.legend(handles=handles)
+                is_first_plot = False
 
         if png_path is not None:
             plt.savefig(png_path, bbox_inches='tight')

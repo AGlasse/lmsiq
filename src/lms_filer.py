@@ -49,7 +49,9 @@ class Filer:
 
     @staticmethod
     def read_pickle(pickle_path):
-        file = open(pickle_path + '.pkl', 'rb')
+        if pickle_path[-4:] != '.pkl':
+            pickle_path += '.pkl'
+        file = open(pickle_path, 'rb')
         python_object = pickle.load(file)
         file.close()
         return python_object
@@ -205,7 +207,6 @@ class Filer:
 
         if set_path is None:
             folder = self.get_folder(self.output_folder + 'profiles')
-
             csv_name = data_type + process_level + ipc_tag
             path = folder + csv_name + '.csv'
         else:

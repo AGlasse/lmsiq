@@ -272,7 +272,7 @@ class Analyse:
         return strehls
 
     @staticmethod
-    def eed(image_list, obs_dict, axis_name, lsf_data, **kwargs):
+    def eed(image_list, obs_dict, axis_name, **kwargs):
         """ Calculate the enslitted energy along an axis.
         :param image_list:              List of imagess
         :param obs_dict            List of parameters associated with image list
@@ -356,12 +356,6 @@ class Analyse:
         xdet = np.divide(radii, oversample)         # Convert x scale to LMS detector pixels
         ees_data = {'xvals': xdet, 'yvals': ees_all,
                     'ees_mc_mean': ees_mc_mean, 'ees_mc_rms': ees_mc_rms}
-
-        # mc_start, mc_end = obs_dict['mc_bounds']
-        # for mc_no in range(mc_start, mc_end + 1):
-        #     mc_tag = "MC_{:04d}".format(mc_no)
-        #     ees_data[mc_tag] = ees_mcs[:, mc_no]
-
         return ees_data
 
     @staticmethod
@@ -411,50 +405,26 @@ class Analyse:
                         cube_out[i, j, row_out, col] = Analyse.exact_rectangular(image, aperture)
         return cube_out
 
-    @staticmethod
-    def strehl(observations):
-        """ Calculate the Strehl ratio as the ratio between the peak amplitude of the mean image and
-        the peak amplitude of the perfect image, where both images have been normalised to have a total
-        signal of unity
-        """
-        perfect_image, _ = observations[0]
-        perfect_flux = np.sum(perfect_image)
-        perfect_peak = np.amax(perfect_image)
-        # Calculate the error on the Strehl from the individual images
-        strehl_list = []
-        for obs in observations:
-            image, params = obs
-            power = np.sum(image)
-            peak = np.amax(image)
-            strehl = (peak * perfect_flux) / (perfect_peak * power)
-            strehl_list.append(strehl)
-        strehl_err = np.std(np.array(strehl_list))
-        strehl_mean = np.mean(np.array(strehl_list))
-        return strehl_mean, strehl_err
-
-    @staticmethod
-    def _get_strehl(image, per_max, per_sum):
-        ima_max = np.amax(image)
-        ima_sum = np.sum(image)
-        strehl = (ima_max * per_sum) / (per_max * ima_sum)
-        return strehl
-
-    @staticmethod
-    def cube_strehls(cube):
-        n_waves, n_obs, n_rows, n_cols = cube.shape
-        all_strehls = np.zeros((n_waves, n_obs))
-        for wave_no in range(0, n_waves):
-            perfect = cube[wave_no, 0, :, :]
-            per_max = np.amax(perfect)
-            per_sum = np.sum(perfect)
-            for i in range(0, n_obs):
-                image = cube[wave_no, i, :, :]
-                all_strehls[wave_no, i] = Analyse._get_strehl(image, per_max, per_sum)
-        strehls = np.zeros((n_waves, 4))
-        strehls[:, 0:2] = all_strehls[:, 0:2]
-        strehls[:, 2] = np.mean(all_strehls[:, 2:], axis=1)
-        strehls[:, 3] = np.std(all_strehls[:, 2:], axis=1)
-        return strehls
+    # @staticmethod
+    # def strehl(observations):
+    #     """ Calculate the Strehl ratio as the ratio between the peak amplitude of the mean image and
+    #     the peak amplitude of the perfect image, where both images have been normalised to have a total
+    #     signal of unity
+    #     """
+    #     perfect_image, _ = observations[0]
+    #     perfect_flux = np.sum(perfect_image)
+    #     perfect_peak = np.amax(perfect_image)
+    #     # Calculate the error on the Strehl from the individual images
+    #     strehl_list = []
+    #     for obs in observations:
+    #         image, params = obs
+    #         power = np.sum(image)
+    #         peak = np.amax(image)
+    #         strehl = (peak * perfect_flux) / (perfect_peak * power)
+    #         strehl_list.append(strehl)
+    #     strehl_err = np.std(np.array(strehl_list))
+    #     strehl_mean = np.mean(np.array(strehl_list))
+    #     return strehl_mean, strehl_err
 
     @staticmethod
     def _boxcar(series_in, box_width):
@@ -483,8 +453,8 @@ class Analyse:
         boxcar = kwargs.get('boxcar', False)        # t=Apply boxcar filter of width = oversample
         v_coadd = kwargs.get('v_coadd', 'all')      # Number of image pixels to coadd orthogonal to profile
         u_radius = kwargs.get('u_radius', 'all')    # Maximum radial size of aperture (a bit less than 1/2 image size)
-        usample = 1.0      # Sample psf once per pixel to avoid steps
-        ustart = 0.0       # Offset from centroid
+        usample = 1.0                               # Sample psf once per pixel to avoid steps
+        ustart = 0.0                                # Offset from centroid
 
         n_rows, n_cols = image_list[0].shape
 
@@ -530,8 +500,8 @@ class Analyse:
 
         mc_start, _ = obs_dict['mc_bounds']
         pd_tags, model_tags = ['perfect', 'design'], []
-        lsf_data['fwhm_lin'], lsf_data['xl_lin'], lsf_data['xr_lin'] = [], [], []
-        lsf_data['fwhm_gau'], lsf_data['xl_gau'], lsf_data['xr_gau'], lsf_data['amp_gau'] = [], [], [], []
+        lsf_data['lin_fwhm'], lsf_data['lin_xl'], lsf_data['lin_xr'] = [], [], []
+        lsf_data['gau_fwhm'], lsf_data['gau_xl'], lsf_data['gau_xr'], lsf_data['gau_amp'] = [], [], [], []
 
         for i, image in enumerate(image_list):
             key = "MC_{:03d}".format(mc_start + i) if i > 1 else pd_tags[i]
@@ -543,13 +513,13 @@ class Analyse:
             xl_gau = xcen_gau - 0.5 * fwhm_per_gau
             xr_gau = xcen_gau + 0.5 * fwhm_per_gau
             # Scale to detector pixels and write to data dictionary
-            lsf_data['fwhm_lin'].append(fwhm_per_lin / oversample)
-            lsf_data['xl_lin'].append(xl_lin / oversample)
-            lsf_data['xr_lin'].append(xr_lin / oversample)
-            lsf_data['fwhm_gau'].append(fwhm_per_gau / oversample)
-            lsf_data['xl_gau'].append(xl_gau / oversample)
-            lsf_data['xr_gau'].append(xr_gau / oversample)
-            lsf_data['amp_gau'].append(amp_gau)
+            lsf_data['lin_fwhm'].append(fwhm_per_lin / oversample)
+            lsf_data['lin_xl'].append(xl_lin / oversample)
+            lsf_data['lin_xr'].append(xr_lin / oversample)
+            lsf_data['gau_fwhm'].append(fwhm_per_gau / oversample)
+            lsf_data['gau_xl'].append(xl_gau / oversample)
+            lsf_data['gau_xr'].append(xr_gau / oversample)
+            lsf_data['gau_amp'].append(amp_gau)
 
         return lsf_data
 

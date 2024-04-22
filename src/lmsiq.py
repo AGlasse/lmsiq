@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import time
 from lms_globals import Globals
 from lms_filer import Filer
 from lms_wcal import Wcal
@@ -33,13 +34,13 @@ nominal_identifier = {'optical_configuration': nominal,
                       'dist_date_stamp': '20240305',
                       'zemax_format': 'new_zemax',
                       'specifu_config_file': None,
-                      'field_bounds': (7, 8, 9),
-                      'cube_slice_bounds': (23, 4),         # {'123': 13, '456': 5, '789': 23}
+                      'field_bounds': (1, 2, 3),
+                      'cube_slice_bounds': (13, 4),         # {'123': 13, '456': 5, '789': 24}
                       }
 spifu_identifier = {'optical_configuration': spifu,
                     'iq_date_stamp': '20240324',
                     'iq_folder_leader': 'psf_',
-                    'mc_bounds': None,                   # Set to speed program when debugging.
+                    'mc_bounds': None,                      # Set to speed program when debugging.
                     'dist_date_stamp': '20240109',
                     'zemax_format': 'new_zemax',
                     'specifu_config_file': None,
@@ -78,7 +79,7 @@ if run_test:
     test = Test()
     test.run(iq_filer)
 
-inter_pixels = [True, False]                        # True = include diffusion kernel convolution
+inter_pixels = [True]                        # True = include diffusion kernel convolution
 mc_bounds = image_manager.model_dict['mc_bounds']
 if data_identifier['mc_bounds'] is not None:
     mc_bounds = data_identifier['mc_bounds']
@@ -86,14 +87,13 @@ process_control = mc_bounds, inter_pixels
 print("\nSetting mc_start={:d}, mc_end={:d}".format(mc_bounds[0], mc_bounds[1]))
 
 # Analyse Zemax data
-process_phase_data = False
+process_phase_data = True
 if process_phase_data:
-    print()
-    print("Processing centroid shift impact for dataset {:s}".format(date_stamp))
+    # Calculate the impact of sub-pixel shifts on photometry and line centroiding.
+    print("\nProcessing centroid shift impact for dataset {:s}".format(date_stamp))
     phase = Phase()                                 # Module for phase (wavelength) shift analysis
     phase.process(data_identifier, process_control, iq_filer, image_manager,
-                  config_nos=[0, 20],       # =[0, 20] for speed, =None to analyse all configs
-                  plot_level=2)
+                  config_nos=[0], field_nos=[2], plot_level=2)
 
 build_cubes = True
 if build_cubes:
@@ -106,28 +106,14 @@ if build_cubes:
     rt_filer = Filer(rt_model_configuration)
     cuber.build(data_identifier, process_control, image_manager, iq_filer)
 
-plot_series = True
-if plot_series:
-    print('Plot cube series data (wavelength/field) and calculate key statistics')
+plot_cubes = True
+if plot_cubes:
+    print('\nPlot cube series data (wavelength/field) and calculate key statistics')
+    print('-----------------------------------------------------')
     cuber = Cuber()
-    cube_pkl_folder = iq_filer.get_folder(iq_filer.cube_folder + 'pkl')
-
-    uni_par = image_manager.unique_parameters
-    field_nos = uni_par['field_nos']
-    cube_series, cubes = {}, []
-    is_first_field = True
-    for field_no in field_nos:
-        field_tag = "field_{:d}_".format(field_no)
-        field_series_path = cube_pkl_folder + 'cube_series_' + field_tag
-        field_series, field_cubes = iq_filer.read_pickle(field_series_path)
-        if is_first_field:
-            for key in field_series:
-                cube_series[key] = []
-                is_first_field = False
-        for key in field_series:
-            cube_series[key] += field_series[key]
-        cubes += field_cubes
-    cube_series_plot = Cuber.remove_configs(cube_series, [21])
-    cuber.plot_series(optical_path, cube_series_plot, iq_filer)
+    cube_packages = cuber.read_pkl_cubes(iq_filer)
+    if optical_path == 'nominal':           # Filter out weird nominal configuration...!
+        cube_packages = Cuber.remove_configs(cube_packages, [0, 20, 21])
+    cuber.plot(optical_path, cube_packages, iq_filer)
 
 print('LMS Repeatability (lmsiq.py) - done')

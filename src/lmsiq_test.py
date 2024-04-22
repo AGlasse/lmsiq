@@ -16,38 +16,30 @@ class Test:
         im_pix_size = 4.5
 
         oversampling = int(Detector.det_pix_size / im_pix_size)
-        im = np.zeros((32, 32))
-        im[5:7, 5:7] = 1.0          # 2x2 artificial source, centred at the boundary between sub-pixel 0 and 1
-        im_det = Detector.measure(im, im_pix_size)
-        im_ipc_on = Ipc.apply(im, oversampling)
-        im_det_ipc_on = Detector.measure(im_ipc_on, im_pix_size)
-        collage = [im, im_det, im_ipc_on, im_det_ipc_on]
+        im_ps = np.zeros((32, 32))
+        im_ps[5:7, 5:7] = 1.0          # 2x2 artificial source, centred at the boundary between sub-pixel 0 and 1
+        im_ipc_ps = Ipc.apply(im_ps, oversampling)
+        im_det_ps = Detector.measure(im_ipc_ps, im_pix_size)
+
+        im_fl = np.zeros((32, 32))
+        im_fl[:, :] = 1.0
+        im_ipc_fl = Ipc.apply(im_fl, oversampling)
+        im_det_fl = Detector.measure(im_ipc_fl, im_pix_size)
+        collage = [im_ps, im_ipc_ps, im_det_ps,
+                   im_fl, im_ipc_fl, im_det_fl]
+        pane_titles = ['Zem point', 'point + diffusion', 'det point',
+                       'Zem flat', 'flat + diffusion', 'det flat']
 
         png_folder = iq_filer.output_folder + '/test'
         png_folder = iq_filer.get_folder(png_folder)
-        png_name = 'test_sub-pixel-illumination'
-        png_path = png_folder + png_name
+        png_name = 'test_illumination'
         title = png_name
-        pane_titles = ['Zemax', 'detector', 'Zem + diffusion', 'det + diffusion']
-        Plot.collage(collage, None,
-                     nrowcol=(2, 2), title=title, shrink=0.25, png_path=png_path,
-                     pane_titles=pane_titles,
-                     aspect='equal')
-
-        im[:, :] = 1.0
-        im_det = Detector.measure(im, im_pix_size)
-        im_ipc_on = Ipc.apply(im, oversampling)
-        im_det_ipc_on = Detector.measure(im_ipc_on, im_pix_size)
-        collage = [im, im_det, im_ipc_on, im_det_ipc_on]
-
-        png_folder = iq_filer.output_folder + '/test'
-        png_folder = iq_filer.get_folder(png_folder)
-        png_name = 'test_flat-illumination'
         png_path = png_folder + png_name
-        title = png_name
-        pane_titles = ['Zemax', 'detector', 'Zem + diffusion', 'det + diffusion']
-        Plot.collage(collage, None,
-                     nrowcol=(2, 2), title=title, shrink=0.25, png_path=png_path,
-                     pane_titles=pane_titles,
-                     aspect='equal')
+        Plot.images(collage,
+                    nrowcol=(2, 3), title=title, pane_titles=pane_titles, aspect='equal',
+                    do_log=False, vlim=[0.95, 1.05], png_path=png_path)
+        png_path = png_folder + png_name + '_log'
+        Plot.images(collage,
+                    nrowcol=(2, 3), title=title, pane_titles=pane_titles, aspect='equal',
+                    do_log=True, png_path=png_path)
         return

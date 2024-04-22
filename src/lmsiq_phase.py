@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from lms_detector import Detector
 from lms_ipc import Ipc
 from lmsiq_plot import Plot
@@ -16,14 +17,23 @@ class Phase:
         """ Read in a Zemax image data set and generate images sampled at the detector with
         or without intra-pixel diffusion applied.
         """
+        field_nos = kwargs.get('field_nos', None)
+        config_nos = kwargs.get('config_nos', None)
+
+        t_start = time.perf_counter()
+
         mc_bounds, inter_pixels = process_control
         _, _, date_stamp, _, _, _ = iq_filer.model_configuration
         tgt_slice_no, slice_radius = data_identifier['cube_slice_bounds']
+        slice_tag = "slice_{:d}".format(tgt_slice_no)
 
         # Set up spectral shifts in detector pixels
         det_shift_start, det_shift_end, det_shift_increment = -1.0, +1.1, 0.1
         det_shifts = np.arange(det_shift_start, det_shift_end, det_shift_increment)
         n_shifts = len(det_shifts)
+
+        png_folder = iq_filer.output_folder + '/phase'
+        png_folder = iq_filer.get_folder(png_folder)
 
         # Dictionary of photometry rms values and centroid phase locations for both ipc settings
         for inter_pixel in inter_pixels:
@@ -35,11 +45,10 @@ class Phase:
             dataset_idx = 0
 
             uni_par = image_manager.unique_parameters
-            config_nos = kwargs.get('config_nos', None)
             if config_nos is None:
                 config_nos = uni_par['config_nos']
-
-            field_nos = uni_par['field_nos']
+            if field_nos is None:
+                field_nos = uni_par['field_nos']
             slice_nos = uni_par['slice_nos']
             spifu_nos = uni_par['spifu_nos']
 
@@ -50,9 +59,13 @@ class Phase:
             Util.print_list('slice numbers ', slice_nos)
             Util.print_list('spifu numbers ', spifu_nos)
 
+            is_first_dataset = True         # Only plot pipeline illustration for first dataset
             for config_no in config_nos:
+                config_tag = "config_{:d}".format(config_no)
                 for field_no in field_nos:
+                    field_tag = "field_{:d}".format(field_no)
                     for tgt_spifu_no in spifu_nos:
+                        spifu_tag = "spifu_{:d}".format(tgt_spifu_no)
                         dataset_indices.append(dataset_idx)
                         dataset_idx += 1
                         selection = {'config_no': config_no,
@@ -65,7 +78,6 @@ class Phase:
                                                                          # xy_shift=(10, -5, -5),
                                                                          debug=False)
                         im_pix_size = ds_dict['im_pix_size']
-
                         n_images = len(image_list)
 
                         phase_labels = ['perfect', 'design']
@@ -86,11 +98,14 @@ class Phase:
                         xfwhm_shift, phot_shift = np.zeros(shape), np.zeros(shape)
                         phot_obs_rms = {}
                         for img_idx, img_in in enumerate(image_list):
+                            t_now = time.perf_counter()
+                            t_min = (t_now - t_start) / 60.
+
                             fmt = "\r- configuration {:d}, field {:d} of {:d}, " +\
-                                  "slice {:d}, spifu {:d}, model {:03d} of {:03d}"
-                            print(fmt.format(config_no,
-                                  field_no, len(field_nos),
-                                  tgt_slice_no, tgt_spifu_no, img_idx + 1, n_images),
+                                  "slice {:d}, spifu {:d}, model {:03d} of {:03d} at t= {:8.3f} min"
+                            print(fmt.format(config_no, field_no, len(field_nos),
+                                  tgt_slice_no, tgt_spifu_no, img_idx + 1, n_images,
+                                  t_min),
                                   end="", flush=True)
                             obs_key = phase_labels[img_idx]
                             for shift_idx, det_shift in enumerate(det_shifts):
@@ -99,6 +114,21 @@ class Phase:
                                                                    resolution=50, debug=False)
                                 im_ipc = Ipc.apply(im_shifted, oversampling) if inter_pixel else im_shifted
                                 im_det = Detector.measure(im_ipc, im_pix_size)
+                                if is_first_dataset and img_idx == 2:
+                                    img_tag = "img_{:d}".format(img_idx)
+                                    fmt = "processed_data_{:s}_{:s}_{:s}_{:s}_{:s}_{:s}"
+                                    png_file = fmt.format(ipc_tag, field_tag, spifu_tag,
+                                                          config_tag, slice_tag, img_tag)
+                                    png_path = png_folder + png_file
+
+                                    title = png_file
+                                    pane_titles = ['Zemax image', 'with detector\ndiffusion',
+                                                   'sampled at\ndetector']
+                                    Plot.images([im_shifted, im_ipc, im_det],
+                                                title=title, pane_titles=pane_titles,
+                                                nrowcol=(1, 3), png_path=png_path)
+
+                                    is_first_dataset = False
 
                                 # Find the FWHM and <signal> in the detector plane
                                 xgauss_ipc, _ = Analyse.find_fwhm(im_ipc, oversample=oversampling,
@@ -137,9 +167,6 @@ class Phase:
                             xcen_obs[obs_key] = xcen_shift / xcen_shift_mean
                             ycen_obs[obs_key] = ycen_shift / ycen_shift_mean
                             xfwhm_obs[obs_key] = xfwhm_shift
-
-                        png_folder = iq_filer.output_folder + '/phase'
-                        png_folder = iq_filer.get_folder(png_folder)
 
                         fmt = "{:s}_{:s}_{:02d}_field{:02d}_tgt_slice{:02d}_spifu_{:02d}"
                         phase_plots = {'xcentroids': xcen_shift, 'ycentroids': ycen_shift,
