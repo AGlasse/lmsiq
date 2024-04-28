@@ -123,6 +123,20 @@ class Analyse:
         return gauss, linear
 
     @staticmethod
+    def find_profile_fwhm(x, y):
+        is_error_gau, fit, covar = Analyse._fit_gaussian(x, y)
+        cv1 = np.array(covar)
+        cv2 = np.diag(cv1)
+        fit_err = np.sqrt(cv2)
+        gauss = is_error_gau, fit, fit_err
+
+        is_error_lin, xl, xr, yh = Analyse._find_fwhm_lin(x, y)
+        fwhm_lin = xr - xl
+        fwhm_lin_err = 0.
+        linear = is_error_lin, fwhm_lin, fwhm_lin_err, xl, xr, yh
+        return gauss, linear
+
+    @staticmethod
     def _fit_gaussian(x, y, **kwargs):
         debug = kwargs.get('debug', False)
         imax = np.argmax(y)
@@ -405,27 +419,6 @@ class Analyse:
                         cube_out[i, j, row_out, col] = Analyse.exact_rectangular(image, aperture)
         return cube_out
 
-    # @staticmethod
-    # def strehl(observations):
-    #     """ Calculate the Strehl ratio as the ratio between the peak amplitude of the mean image and
-    #     the peak amplitude of the perfect image, where both images have been normalised to have a total
-    #     signal of unity
-    #     """
-    #     perfect_image, _ = observations[0]
-    #     perfect_flux = np.sum(perfect_image)
-    #     perfect_peak = np.amax(perfect_image)
-    #     # Calculate the error on the Strehl from the individual images
-    #     strehl_list = []
-    #     for obs in observations:
-    #         image, params = obs
-    #         power = np.sum(image)
-    #         peak = np.amax(image)
-    #         strehl = (peak * perfect_flux) / (perfect_peak * power)
-    #         strehl_list.append(strehl)
-    #     strehl_err = np.std(np.array(strehl_list))
-    #     strehl_mean = np.mean(np.array(strehl_list))
-    #     return strehl_mean, strehl_err
-
     @staticmethod
     def _boxcar(series_in, box_width):
         n_pts, _ = series_in.shape
@@ -463,9 +456,11 @@ class Analyse:
         if axis == 0:
             vcoadd = n_rows - 1 if v_coadd == 'all' else v_coadd
             uradius = (n_cols - 1) / 2.0 if u_radius == 'all' else u_radius
+        if axis == 1:
+            nob = 1
 
         uvals = np.arange(ustart - uradius, ustart + uradius + 1., usample)
-        n_points = uvals.shape[0]
+        n_points, = uvals.shape
 
         n_files = len(image_list)
         lsf_all = np.zeros((n_points, n_files))
@@ -503,22 +498,23 @@ class Analyse:
         lsf_data['lin_fwhm'], lsf_data['lin_xl'], lsf_data['lin_xr'] = [], [], []
         lsf_data['gau_fwhm'], lsf_data['gau_xl'], lsf_data['gau_xr'], lsf_data['gau_amp'] = [], [], [], []
 
-        for i, image in enumerate(image_list):
+        n_pts, n_profiles = lsf_all.shape
+        for j in range(0, n_profiles):
             key = "MC_{:03d}".format(mc_start + i) if i > 1 else pd_tags[i]
             model_tags.append(key)
 
-            gauss, linear = Analyse.find_fwhm(image, axis=axis, debug=True)
+            gauss, linear = Analyse.find_profile_fwhm(xvals, lsf_norm[:, j])
             _, fwhm_per_lin, _, xl_lin, xr_lin, _ = linear
             _, (amp_gau, fwhm_per_gau, xcen_gau), covar = gauss
             xl_gau = xcen_gau - 0.5 * fwhm_per_gau
             xr_gau = xcen_gau + 0.5 * fwhm_per_gau
             # Scale to detector pixels and write to data dictionary
-            lsf_data['lin_fwhm'].append(fwhm_per_lin / oversample)
-            lsf_data['lin_xl'].append(xl_lin / oversample)
-            lsf_data['lin_xr'].append(xr_lin / oversample)
-            lsf_data['gau_fwhm'].append(fwhm_per_gau / oversample)
-            lsf_data['gau_xl'].append(xl_gau / oversample)
-            lsf_data['gau_xr'].append(xr_gau / oversample)
+            lsf_data['lin_fwhm'].append(fwhm_per_lin)
+            lsf_data['lin_xl'].append(xl_lin)
+            lsf_data['lin_xr'].append(xr_lin)
+            lsf_data['gau_fwhm'].append(fwhm_per_gau)
+            lsf_data['gau_xl'].append(xl_gau)
+            lsf_data['gau_xr'].append(xr_gau)
             lsf_data['gau_amp'].append(amp_gau)
 
         return lsf_data

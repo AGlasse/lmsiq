@@ -1,7 +1,6 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-from lms_filer import Filer
 
 
 class Plot:
@@ -187,8 +186,8 @@ class Plot:
 
         wavelength = ds_dict['wavelength']
         data_pars = {'ee': {'title_lead': 'Enslitted energy',
-                            'xlabels': {'spectral': 'aperture half-width / pixels',
-                                        'spatial': 'aperture half-height / pixels',
+                            'xlabels': {'spectral': 'aperture half-width / det. pixels',
+                                        'spatial': 'aperture half-height / det. pixels',
                                         'across-slice': 'aperture half-width / slices',
                                         'along-slice': 'aperture height / pixels'},
                             'ylabels': {'spectral': 'EE(x)',
@@ -196,11 +195,11 @@ class Plot:
                                         'across-slice': 'EE(x)',
                                         'along-slice': 'EE(y)'},
                             },
-                     'lsf': {'title_lead': 'Line spread function',
-                             'xlabels': {'spectral': 'spectral',
-                                         'spatial': 'spatial',
+                     'lsf': {'title_lead': 'Line profile',
+                             'xlabels': {'spectral': 'spectral / det. pixels',
+                                         'spatial': 'spatial / det. pixels',
                                          'across-slice': 'across slice / slices',
-                                         'along-slice': 'along slice / pixels'},
+                                         'along-slice': 'along slice / det. pixels'},
                              'ylabels': {'spectral': 'response',
                                          'spatial': 'response',
                                          'across-slice': 'response',
@@ -216,14 +215,9 @@ class Plot:
         ax = ax_list
 
         x = data['xvals']
-
         ys = data['yvals']
         xlabels = data_par['xlabels']
         ax_xlabel = xlabels[axis]
-        if xlabels == 'along_slice':
-            x /= 4.
-
-        ax_xtag = 'w'
 
         y_perfect, y_design = ys[:, 0], ys[:, 1]
         y_mcs = ys[:, 2:]
@@ -232,8 +226,8 @@ class Plot:
         if type_key == 'lsf':
             fwhms = data['lin_fwhm']
             fmt = "{:s} {:4.2f}"
-            p_label, d_label = fmt.format(p_label, fwhms[0]), fmt.format(d_label, fwhms[1])
             mc_mean_fwhm = np.mean(fwhms[2:])
+            p_label, d_label = fmt.format(p_label, fwhms[0]), fmt.format(d_label, fwhms[1])
             mc_label = fmt.format(mc_label, mc_mean_fwhm)
 
         y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', y_perfect),
@@ -246,8 +240,7 @@ class Plot:
             ax_ylabel = "Encircled energy fraction 'EE(r)'"
             ax_xlabel, ax_xtag = 'radius', 'r'
         ax.set_ylabel(ax_ylabel, fontsize=16.0)
-        xunits = '(slices)' if ax_xlabel == 'across-slice' else '(det. pixels)'
-        ax.set_xlabel("{:s} '{:s}' / {:s}".format(ax_xlabel, ax_xtag, xunits), fontsize=16.0)
+        ax.set_xlabel("{:s}".format(ax_xlabel), fontsize=16.0)
         xlim = kwargs.get('xlim', None)
         if xlim is not None:
             ax.set_xlim(xlim)
@@ -270,7 +263,7 @@ class Plot:
                               ls=ls, lw=lw, label=label)
             if label is not None:
                 handles.append(handle)
-        ax.legend(handles=handles)
+        ax.legend(handles=handles, prop={'size': 14.0})
 
         if png_path is not None:
             plt.savefig(png_path, bbox_inches='tight')
@@ -385,7 +378,7 @@ class Plot:
                 handles.append(handle)
             if do_fwhm_rqt:
                 x_rqt = np.array(x)
-                y_rqt = np.full(y.shape, 2.0)
+                y_rqt = np.full(len(x), 2.0)
                 label = 'Rqt. MET-3739 FWHM'
                 handle, = ax.plot(x_rqt, y_rqt,
                                   color='purple', marker='none', mew=2.0,

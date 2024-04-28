@@ -48,7 +48,7 @@ spifu_identifier = {'optical_configuration': spifu,
                     'cube_slice_bounds': (13, 1),
                     }
 
-data_identifier = nominal_identifier
+data_identifier = spifu_identifier
 optical_path = data_identifier['optical_configuration']
 date_stamp = data_identifier['iq_date_stamp']
 is_spifu = optical_path == Globals.spifu
@@ -87,7 +87,7 @@ process_control = mc_bounds, inter_pixels
 print("\nSetting mc_start={:d}, mc_end={:d}".format(mc_bounds[0], mc_bounds[1]))
 
 # Analyse Zemax data
-process_phase_data = True
+process_phase_data = False
 if process_phase_data:
     # Calculate the impact of sub-pixel shifts on photometry and line centroiding.
     print("\nProcessing centroid shift impact for dataset {:s}".format(date_stamp))
@@ -95,7 +95,7 @@ if process_phase_data:
     phase.process(data_identifier, process_control, iq_filer, image_manager,
                   config_nos=[0], field_nos=[2], plot_level=2)
 
-build_cubes = True
+build_cubes = False
 if build_cubes:
     print()
     print('\nReconstructing cubes and analysing slice profile data')
@@ -113,7 +113,8 @@ if plot_cubes:
     cuber = Cuber()
     cube_packages = cuber.read_pkl_cubes(iq_filer)
     if optical_path == 'nominal':           # Filter out weird nominal configuration...!
-        cube_packages = Cuber.remove_configs(cube_packages, [0, 20, 21])
+        cube_packages = Cuber.remove_configs(cube_packages, [21])
+    cuber.write_csv(optical_path, cube_packages, iq_filer)
     cuber.plot(optical_path, cube_packages, iq_filer)
 
 print('LMS Repeatability (lmsiq.py) - done')

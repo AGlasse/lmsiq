@@ -224,9 +224,9 @@ class Plot:
                 if spifu_no != -1:
                     label += "/{:d}".format(int(spifu_no))
                 is_new_label = label not in old_labels
-                if is_new_label:
-                    ax.text(x_label, y_label, label)
-                    old_labels.append(label)
+                # if is_new_label:
+                #     ax.text(x_label, y_label, label)
+                #     old_labels.append(label)
         Plot.show()
         return
 

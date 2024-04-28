@@ -126,10 +126,9 @@ class Cuber:
                             if slice_no == slice_tgt:
 
                                 # Calculate line spread function parameters
-                                axis, axis_name = 0, 'spectral'
-                                lsf_data = Analyse.lsf(ipc_images, ds_dict, axis,
+                                axis_idx, axis_name = 0, 'spectral'
+                                lsf_data = Analyse.lsf(ipc_images, ds_dict, axis_idx,
                                                        oversample=oversampling,
-                                                       boxcar=True,
                                                        debug=False,
                                                        v_coadd=12.0,
                                                        u_radius='all')
@@ -163,7 +162,7 @@ class Cuber:
                             det_strips = Analyse.extract_cube_strips(det_images, oversampling)
                             cube[:, :, col_idx] = det_strips
 
-                        plot_images = True
+                        plot_images = False
                         if plot_images:
                             pane_titles = ['perfect', 'design', 'MC-001', 'MC-002']
                             png_folder = Filer.get_folder(iq_filer.output_folder + 'cube/png')
@@ -194,7 +193,7 @@ class Cuber:
                             lsf_name = 'lsf_' + axis_name + '_' + cube_name
                             lsf_path = lsf_folder + lsf_name
                             lsf_data = Analyse.lsf(cube, ds_dict, axis,
-                                                   oversample=1,
+                                                   oversample=1,        # Cube is in detector pixels...
                                                    debug=False,
                                                    v_coadd=3.0,
                                                    u_radius='all')
@@ -241,52 +240,135 @@ class Cuber:
                 cube_packages_out.append(cube_package)
         return cube_packages_out
 
+    # @staticmethod
+    # def _field_series_to_csv_lines(field_series, is_first_series):
+    #     csv_value_keys = {'prism_angle': (['Prism angle', 'deg.'], '12.4f'),
+    #                       'grating_angle': (['Grating angle', 'deg'], '14.4f'),
+    #                       'grating_order': (['Grating order', '-'], '14d'),
+    #                       'wavelength': (['Wavelength', '-'], '12.6f'),
+    #                       'field_no': (['Field no.', '-'], '11d'),
+    #                       'spifu_no': (['Sp IFU no.', '-'], '12d')
+    #                       }
+    #     csv_array_keys = {'strehls': (['<Strehl>', '-'], '10.3f'),
+    #                       'gau_fwhms': (['<Gauss FWHM>', 'pix.'], '15.3f'),
+    #                       'lin_fwhms': (['<Linear FWHM>', 'pix.'], '15.3f')}
+    #     table_list = ['strehls', 'gau_fwhms', 'lin_fwhms']
+    #     common_cols = ['prism_angle', 'grating_angle', 'grating_order', 'wavelength']
+    #     for key in common_cols:
+    #         waves = field_series['wavelength']
+    #         csv_text = ''
+    #         if is_first_series:
+    #             for i in [0, 1]:
+    #                 line = ''
+    #                 for col in col_list:
+    #                     for key in csv_dict:
+    #                         tokens, token_fmt = csv_dict[key]
+    #                         wid = token_fmt[0:2]
+    #                         fmt = '{:' + wid + 's},'
+    #                         text = fmt.format(tokens[i])
+    #                         line += text
+    #                 csv_text += "\n{:s}".format(line)
+    #         line = ''
+    #         for dict_idx, csv_dict in enumerate([csv_value_keys, csv_array_keys]):
+    #             for key in csv_dict:
+    #                 val = field_series[key]
+    #                 if dict_idx > 0:        # Array data, find the M-C mean
+    #                     val = np.mean(val[2:])
+    #                 _, token_fmt = csv_dict[key]
+    #                 fmt = '{:' + token_fmt + '},'
+    #                 text = fmt.format(val)
+    #                 line += text
+    #         csv_text += "\n{:s}".format(line)
+    #     return csv_text
+
     @staticmethod
-    def _field_series_to_csv_lines(field_series, is_first_series):
+    def write_csv(optical_path, cube_packages, iq_filer, to_csv=True):
         csv_value_keys = {'prism_angle': (['Prism angle', 'deg.'], '12.4f'),
                           'grating_angle': (['Grating angle', 'deg'], '14.4f'),
                           'grating_order': (['Grating order', '-'], '14d'),
                           'wavelength': (['Wavelength', '-'], '12.6f'),
-                          'field_no': (['Field no.', '-'], '11d'),
-                          'spifu_no': (['Sp IFU no.', '-'], '12d')
                           }
+        n_common_cols = len(csv_value_keys)
         csv_array_keys = {'strehls': (['<Strehl>', '-'], '10.3f'),
                           'gau_fwhms': (['<Gauss FWHM>', 'pix.'], '15.3f'),
                           'lin_fwhms': (['<Linear FWHM>', 'pix.'], '15.3f')}
-        csv_text = ''
-        if is_first_series:
-            for i in [0, 1]:
-                line = ''
-                for csv_dict in [csv_value_keys, csv_array_keys]:
-                    for key in csv_dict:
-                        tokens, token_fmt = csv_dict[key]
-                        wid = token_fmt[0:2]
-                        fmt = '{:' + wid + 's},'
-                        text = fmt.format(tokens[i])
-                        line += text
-                csv_text += "\n{:s}".format(line)
-        line = ''
-        for dict_idx, csv_dict in enumerate([csv_value_keys, csv_array_keys]):
-            for key in csv_dict:
-                val = field_series[key]
-                if dict_idx > 0:        # Array data, find the M-C mean
-                    val = np.mean(val[2:])
-                _, token_fmt = csv_dict[key]
-                fmt = '{:' + token_fmt + '},'
-                text = fmt.format(val)
-                line += text
-        csv_text += "\n{:s}".format(line)
-        return csv_text
+
+        uni_field_nos, uni_config_nos, uni_spifu_nos = [], [], []
+        is_spifu = optical_path == 'spifu'
+        # Make array of common values
+        for cube_package in cube_packages:
+            _, _, field_series = cube_package
+            field_no = field_series['field_no']
+            if field_no not in uni_field_nos:
+                uni_field_nos.append(field_no)
+            config_no = field_series['config_no']
+            if config_no not in uni_config_nos:
+                uni_config_nos.append(config_no)
+            spifu_no = field_series['spifu_no']
+            if spifu_no not in uni_spifu_nos:
+                uni_spifu_nos.append(spifu_no)
+
+        n_rows, n_data_cols = len(uni_config_nos), len(uni_field_nos)
+        if is_spifu:
+            n_rows = len(uni_spifu_nos)
+        blocks = {}
+        for key in csv_array_keys:
+            blocks[key] = np.zeros((n_rows, n_common_cols + n_data_cols))
+
+        for cube_package in cube_packages:
+            _, _, field_series = cube_package
+            field_no = field_series['field_no']
+            config_no = field_series['config_no']
+            spifu_no = field_series['spifu_no']
+
+            r = spifu_no - 1 if is_spifu else config_no - 1  # Row in data block
+            for akey in csv_array_keys:
+                block = blocks[akey]
+                block[r, 0] = field_series['prism_angle']
+                block[r, 1] = field_series['grating_angle']
+                block[r, 2] = field_series['grating_order']
+                block[r, 3] = spifu_no if is_spifu else field_series['wavelength']
+
+                vals = field_series[akey]
+                v = np.mean(vals[2:])
+                c = n_common_cols + field_no - 1
+                block[r, c] = v
+
+        common_fmts = ['{:8.4f},', '{:6.1f},', '{:6.0f},', '{:8.3f},']
+        val_fmt = '{:8.3f},'
+        csv_text_block = ''
+        for akey in csv_array_keys:
+            print()
+            print("\n{:s}".format(akey))
+            csv_text_block += "\n{:s}".format(akey)
+            block = blocks[akey]
+            # Sort by wavelength
+            waves = block[:, 3]
+            idx = np.argsort(waves)
+            sblock = block[idx, :]
+            nr, nc = block.shape
+            for r in range(0, nr):
+                row = '\n'
+                for c in range(0, nc):
+                    fmt = common_fmts[c] if c < 4 else val_fmt
+                    row += fmt.format(sblock[r, c])
+                csv_text_block += row
+                print(row)
+
+            csv_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/csv')
+            csv_path = csv_folder + 'series.csv'
+            print("Filer.write_profiles to {:s}".format(csv_path))
+            with open(csv_path, 'w', newline='') as csv_file:
+                print(csv_text_block, file=csv_file)
+        return
 
     @staticmethod
-    def plot(optical_path, cube_packages, iq_filer, to_csv=True):
+    def plot(optical_path, cube_packages, iq_filer):
         """ Plot all series data.  This method extracts and reformats the plot data from the
         cube packages to make 1 plot per field point.
         """
         print()
         png_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/png')
-        csv_text_block = ''
-        is_first_series = True
 
         is_spifu = optical_path == 'spifu'
 
@@ -317,9 +399,6 @@ class Cuber:
                 field_data['srps'].append(srps)
                 x_val = field_series['spifu_no'] if is_spifu else wave
                 field_data['x_values'].append(x_val)
-                csv_text = Cuber._field_series_to_csv_lines(field_series, is_first_series)
-                is_first_series = False
-                csv_text_block += csv_text
 
             abscissae = {'spifu': ('spifu_no', 'Spectral IFU slice no.', [0.5, 6.5]),
                          'nominal': ('wavelength', 'Wavelength $\mu$m', [2.7, 5.1])}
@@ -363,12 +442,4 @@ class Cuber:
                                 do_fwhm_rqt=do_fwhm_rqt, do_srp_rqt=do_srp_rqt,
                                 png_path=png_path)
                     key_only = False
-
-            if to_csv:
-                csv_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/csv')
-                csv_path = csv_folder + 'series.csv'
-                print("Filer.write_profiles to {:s}".format(csv_path))
-                with open(csv_path, 'w', newline='') as csv_file:
-                    print(csv_text_block, file=csv_file)
-
         return

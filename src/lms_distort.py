@@ -9,7 +9,6 @@ from lms_dist_plot import Plot
 from lms_dist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
-import numpy as np
 
 print('lms_distort - Starting')
 
@@ -34,7 +33,7 @@ spifu_config = (analysis_type, spifu, spifu_date_stamp,
 model_configurations = {nominal: nom_config, spifu: spifu_config}
 
 """ SET MODEL CONFIGURATION HERE """
-model_config = model_configurations[nominal]
+model_config = model_configurations[spifu]
 filer = Filer(model_config)
 
 _, optical_path, date_stamp, optical_path_label, coords_in, coords_out = model_config
@@ -65,7 +64,7 @@ st_hdr = "Trace individual"
 rt_text_block = ''
 
 suppress_plots = False  # f = Plot first trace
-generate_transforms = True  # for all Zemax ray trace files and write to lms_dist_buffer.txt
+generate_transforms = False  # for all Zemax ray trace files and write to lms_dist_buffer.txt
 if generate_transforms:
     print()
     print("Generating distortion transforms")
@@ -102,7 +101,7 @@ if generate_transforms:
 # Create an interpolation object to give,
 #   wave = f(order, slice, spifu_slice, prism_angle, ech_angle, det_x, det_y)
 suppress_plots = False
-derive_wcal = False
+derive_wcal = True
 if derive_wcal:
     print()
     print("Generating wavelength calibration file (wavelength <-> echelle angle)")
@@ -114,7 +113,7 @@ if derive_wcal:
             ech_order, slice_no, spifu_no = config
             a, b, ai, bi = matrices
             waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit = rays
-    plot.wavelength_coverage(traces, optical_configuration)
+    plot.wavelength_coverage(traces, optical_path)
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
@@ -163,8 +162,8 @@ if evaluate_transforms:
                 ax.legend(handles=[p1[0], p2[0], p3[0]])
                 Plot.show()
 
-    offset_x = np.array(det_x_fit) - np.array(det_x)
-    offset_y = np.array(det_y_fit) - np.array(det_y)
+    # offset_x = np.array(det_x_fit) - np.array(det_x)
+    # offset_y = np.array(det_y_fit) - np.array(det_y)
 
     # fmt = "Residuals, n_tran_terms={:d}, n_poly_terms={:d}"
     # fig_title = fmt.format(n_terms, poly_order+1)
@@ -178,8 +177,8 @@ if evaluate_transforms:
     # plot.plot_points(ax, wms, y, colour='red', ms=6, mk='+')
     # plot.show()
 
-    stats_data = n_terms, poly_order, offset_x, offset_y
-    util.print_stats(st_file, stats_data)
+    # stats_data = n_terms, poly_order, offset_x, offset_y
+    # util.print_stats(st_file, stats_data)
 
 st_file.close()
 print('lms_distort - Done')
