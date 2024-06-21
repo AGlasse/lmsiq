@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 class Plot:
 
     def __init__(self):
-        plt.rcParams['backend'] = 'AGG'
+        # plt.rcParams['backend'] = 'AGG'
         return
 
     @staticmethod
@@ -185,6 +185,7 @@ class Plot:
         mc_percentiles = kwargs.get('mc_percentiles', None)
 
         wavelength = ds_dict['wavelength']
+        mc_bounds = ds_dict['mc_bounds']
         data_pars = {'ee': {'title_lead': 'Enslitted energy',
                             'xlabels': {'spectral': 'aperture half-width / det. pixels',
                                         'spatial': 'aperture half-height / det. pixels',
@@ -226,14 +227,16 @@ class Plot:
         if type_key == 'lsf':
             fwhms = data['lin_fwhm']
             fmt = "{:s} {:4.2f}"
-            mc_mean_fwhm = np.mean(fwhms[2:])
             p_label, d_label = fmt.format(p_label, fwhms[0]), fmt.format(d_label, fwhms[1])
-            mc_label = fmt.format(mc_label, mc_mean_fwhm)
+            if mc_bounds is not None:
+                mc_mean_fwhm = np.mean(fwhms[2:])
+                mc_label = fmt.format(mc_label, mc_mean_fwhm)
 
-        y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', y_perfect),
-                   'design': (d_label, 'green', 'solid', 1.5, 'x', y_design)}
-        y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(y_mcs, mc_percentiles, y_plots, mc_label)
-        ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
+        y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', x, y_perfect),
+                   'design': (d_label, 'green', 'solid', 1.5, 'x', x, y_design)}
+        if mc_bounds is not None:
+            y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(x, y_mcs, mc_percentiles, y_plots, mc_label)
+            ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
 
         ax_ylabel = data_par['ylabels'][axis]
         if axis == 'radial':
@@ -257,7 +260,7 @@ class Plot:
         fillstyle = 'none'
         handles = []
         for key in y_plots:
-            label, colour, ls, lw, marker, y = y_plots[key]
+            label, colour, ls, lw, marker, x, y = y_plots[key]
             handle, = ax.plot(x, y,
                               color=colour, marker=marker, mew=2.0, fillstyle=fillstyle,
                               ls=ls, lw=lw, label=label)
@@ -272,13 +275,13 @@ class Plot:
         return
 
     @staticmethod
-    def _add_mc_percentile_profiles(y_mcs, mc_percentiles, y_plots, mc_mean_label):
+    def _add_mc_percentile_profiles(x, y_mcs, mc_percentiles, y_plots, mc_mean_label):
         y_mc_lo, y_mc_hi = np.amin(y_mcs, axis=1), np.amax(y_mcs, axis=1)
         y_mc_mean = np.mean(y_mcs, axis=1)
 
-        y_plots['<M-C>'] = mc_mean_label, 'blue', 'solid', 1.5, 'none', y_mc_mean
-        y_plots['pc000'] = None, 'blue', 'solid', 0.5, 'none', y_mc_lo
-        y_plots['pc100'] = None, 'blue', 'solid', 0.5, 'none', y_mc_hi
+        y_plots['<M-C>'] = mc_mean_label, 'blue', 'solid', 1.5, 'none', x, y_mc_mean
+        y_plots['pc000'] = None, 'blue', 'solid', 0.5, 'none', x, y_mc_lo
+        y_plots['pc100'] = None, 'blue', 'solid', 0.5, 'none', x, y_mc_hi
 
         if mc_percentiles is not None:
             y_mcs_sorted = np.sort(y_mcs, axis=1)
@@ -292,42 +295,47 @@ class Plot:
                     y_pcs = y_mcs_sorted[i, :]
                     y_mc_pcs[i] = np.interp(mc_pc, u_pcs, y_pcs)
                 label = "{:d} %ile".format(mc_pc)
-                y_mc_pc_plot = label, 'blue', ls, lw, 'none', y_mc_pcs
+                y_mc_pc_plot = label, 'blue', ls, lw, 'none', x, y_mc_pcs
                 y_plots[label] = y_mc_pc_plot
         return y_plots, y_mc_lo, y_mc_hi
 
     @staticmethod
-    def series(plot_data, **kwargs):
+    def series(data, params):
 
-        plot_key = kwargs.get('plot_key', True)
-        key_only = kwargs.get('key_only', False)
-        png_path = kwargs.get('png_path', None)
-        nrows, ncols, figsize = kwargs.get('fig_layout', (3, 1, (2, 2)))
-        title = kwargs.get('title', '')
-        ordinate = kwargs.get('ordinate', None)
-        do_srp_rqt = kwargs.get('do_srp_rqt', False)
-        do_fwhm_rqt = kwargs.get('do_fwhm_rqt', False)
-        abscissa = kwargs.get('abscissa', ('wavelength', '$\mu$m'))
-        mc_percentiles = kwargs.get('mc_percentiles', None)
+        plot_key = params['plot_key']
+        key_only = params['key_only']
+        png_path = params['png_path']
+        autox = params['xscale'] == 'auto'
+        nrows, ncols, figsize = params['fig_layout']
+        title = params['title']
+        ordinate = params['ordinate']
+        do_srp_rqt = params['do_srp_rqt']
+        do_fwhm_rqt = params['do_fwhm_rqt']
+        abscissa = params['abscissa']
+        is_defocus = abscissa[0] == 'defocus'
+        mc_percentiles = params['mc_percentiles']
 
         field_rowcols = {1: (1, 1), 2: (0, 1), 3: (2, 1),
                          4: (1, 0), 5: (0, 0), 6: (2, 0),
-                         7: (1, 2), 8: (0, 2), 9: (2, 2)}
+                         7: (1, 2), 8: (0, 2), 9: (2, 2),
+                         10: (0, 0), 11: (0, 1), 12: (0, 2)}
 
         ykey, ylabel, ylim = ordinate
         xkey, xlabel, xlim = abscissa
+        if autox:
+            xlim = None
 
         fig, ax_list = Plot.set_plot_area(nrows=nrows, ncols=ncols, figsize=figsize,
                                           sharex=True, sharey=True,
                                           xlim=xlim, ylim=ylim)
         fig.suptitle(title)
         is_first_plot = True
-        for data_key in plot_data:
-            field_data = plot_data[data_key]
+        for data_key in data:
+            field_data = data[data_key]
             field_no = field_data['field_no']
             field_label = "Field {:d}".format(field_no)
-            ipc_on = field_data['ipc_on']
             is_spifu = field_data['is_spifu']
+            mc_bounds = field_data['mc_bounds']
             row, col = field_rowcols[field_no]
             col = col - 1 if is_spifu else col
             ax = ax_list[row, col]
@@ -342,23 +350,39 @@ class Plot:
             x_unsort = np.array(field_data['x_values'])
             indices = np.argsort(x_unsort)
             ys_unsort = np.array(field_data[ykey])
+            fs_unsort = np.array(field_data['focus_shifts'])
 
             x = x_unsort[indices]
             ys = ys_unsort[indices, :]
+            fs = fs_unsort[indices]
             y_perfect, y_design = ys[:, 0], ys[:, 1]
-            y_mcs = ys[:, 2:]
+            if mc_bounds is not None:
+                y_mcs = ys[:, 2:]
 
-            p_label, d_label, mc_label = 'perfect', 'design', '<M-C>'
-            y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', y_perfect),
-                       'design': (d_label, 'green', 'solid', 1.5, 'x', y_design)}
-            y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(y_mcs, mc_percentiles, y_plots, mc_label)
-            if not key_only:
-                ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
+            p_label, d_label = 'perfect', 'design'
+            y_plots = {'perfect': (p_label, 'red', 'solid', 2.0, 'o', x, y_perfect)}
+            if is_defocus:
+                defoci = set(fs)
+                symbols = {0: 'o', 50:'1', 100:'x', 200:'+'}
+                for i, defoc in enumerate(defoci):
+                    indices = np.argwhere(fs == defoc)
+                    y_df = y_design[indices]
+                    x_df = x[indices]
+                    key = "des_defoc_{:d}um".format(defoc)
+                    sym = symbols[defoc]
+                    y_plots[key] = (key, 'green', 'dashed', 1.5, sym, x_df, y_df)
+            else:
+                y_plots['design'] = (d_label, 'green', 'solid', 1.5, '.', x, y_design)
+            if mc_bounds is not None:
+                mc_label = '<M-C>'
+                y_plots, y_mc_lo, y_mc_hi = Plot._add_mc_percentile_profiles(x, y_mcs, mc_percentiles, y_plots, mc_label)
+                if not key_only:
+                    ax.fill_between(x, y_mc_lo, y_mc_hi, color='skyblue')
 
             handles = []
             for pkey in y_plots:
                 y_plot = y_plots[pkey]
-                label, colour, ls, lw, marker, y = y_plot
+                label, colour, ls, lw, marker, x, y = y_plot
                 if key_only:
                     x, y = [0.], [0.]
                 handle, = ax.plot(x, y,

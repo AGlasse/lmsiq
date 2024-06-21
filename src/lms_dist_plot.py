@@ -188,7 +188,7 @@ class Plot:
         return
 
     @staticmethod
-    def wavelength_coverage(traces, optical_configuration):
+    def dispersion(traces, optical_configuration):
         ax_list = Plot.set_plot_area('Wavelength coverage',
                                      xlabel="Wavelength / micron",
                                      ylabel="Prism angle + 0.02 x Echelle angle ")
@@ -211,14 +211,66 @@ class Plot:
             for tf in trace.slice_objects:
                 config, matrices, offset_corrections, rays, wave_bounds = tf
                 label, slice_no, spifu_no = config
-                x = rays[0]
-                y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * rays[4]
-                x_label, y_label = x[0], y[0]
+                waves, _, _, det_x, det_y, _, _ = rays
+                dw_dlmspix = (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])
+                x = waves[1:]
+                y = dw_dlmspix
+
+                # x_label, y_label = x[0], y[0]
 
                 tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
                 colour = config_colour[tag]
                 ax.plot(x, y, color=colour, clip_on=True,
                         fillstyle='none', marker='.', mew=1.0, ms=3, linestyle='None')
+
+                label = "{:d}".format(int(label))
+                if spifu_no != -1:
+                    label += "/{:d}".format(int(spifu_no))
+        Plot.show()
+
+    @staticmethod
+    def series(plot_type, traces, optical_configuration):
+        titles = {'coverage': ('Wavelength coverage', "Prism angle + 0.02 x Echelle angle "),
+                  'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
+        title, ylabel = titles[plot_type]
+        ax_list = Plot.set_plot_area(title,
+                                     xlabel="Wavelength / micron",
+                                     ylabel=ylabel)
+        ax = ax_list[0, 0]
+        ccs4_colours = mcolors.CSS4_COLORS
+        if optical_configuration == Globals.spifu:
+            ccs4_colours = mcolors.TABLEAU_COLORS
+
+        colours = sorted(ccs4_colours,
+                         key=lambda c: tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(c))),
+                         reverse=True)
+        colour_iterator = iter(colours)
+        config_colour = {}
+        old_labels = []
+
+        for trace in traces[0:-1]:
+            ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
+            tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
+            config_colour[tag] = next(colour_iterator, 'black')
+            for tf in trace.slice_objects:
+                config, matrices, offset_corrections, rays, wave_bounds = tf
+                label, slice_no, spifu_no = config
+                waves, _, _, det_x, det_y, _, _ = rays
+                x, y = None, None
+                if plot_type == 'coverage':
+                    x = waves
+                    y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * det_y
+                if plot_type == 'dispersion':
+                    mm_pix = 0.018
+                    nm_micron = 1000.0
+                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])    # um / mm
+                    x = waves[1:]
+                    y = dw_dlmspix
+
+                tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
+                colour = config_colour[tag]
+                ax.plot(x, y, color=colour, clip_on=True,
+                        fillstyle='none', marker='.', mew=1.0, ms=1, linestyle='None')
 
                 label = "{:d}".format(int(label))
                 if spifu_no != -1:

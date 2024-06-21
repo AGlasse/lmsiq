@@ -370,62 +370,7 @@ class Util:
         # Loop through nearest neighbour transforms
         for nn_so in nn_slice_objects:
             nn_config, nn_transforms, nn_corr_polys, nn_rays, _ = nn_so
-
-
-                # waves, efp_x, efp_y = rays[0], rays[]
-
-
-                # print(tgt_ech_order, tgt_slice_no, tgt_spifu_no)
         return 0., 0.
-
-
-#     @staticmethod
-#     def get_transform_fits(traces, poly_order):
-#         """ Find transform matrices where the elements are polynomial fits to the elements for individual
-#         configurations
-#         :param traces:
-#         :param poly_order:
-#         :return:
-#         """
-#         n_configs = len(traces)
-#         prism_angles = np.zeros(n_configs)
-#         is_first_trace = True
-#         transform_configs, transform_terms = None, None
-#         for i_config, trace in enumerate(traces):
-#             prism_angle = trace.parameter['Prism angle']
-#             prism_angles[i_config] = prism_angle
-#             tf_list = trace.tf_list
-#             if is_first_trace:
-#                 _, matrices, offset_corrections, rays, _ = tf_list[0]
-#                 n_transforms = len(tf_list)
-#                 n_matrices = len(matrices)
-#                 n_terms, _ = matrices[0].shape
-#                 transform_configs = np.zeros((n_configs, n_transforms, 2))
-#                 transform_terms = np.zeros((n_configs, n_transforms, n_matrices, n_terms, n_terms))
-#                 is_first_trace = False
-#             for i_tf, tf in enumerate(tf_list):
-#                 config, matrices, offset_corrections, rays, _ = tf
-#                 ech_order, slice_no, spifu_no = config
-# #                a, b, ai, bi = matrices
-#                 transform_configs[i_tf, 0], transform_configs[i_tf, 1] = slice_no, spifu_no
-# #                matrices = [a, b, ai, bi]
-#                 for i_mat, matrix in enumerate(matrices):
-#                     transform_terms[i_config, i_tf, i_mat] = matrix
-#
-#         n_poly_terms = poly_order + 1
-#         transform_fits = np.zeros((n_transforms, n_matrices, n_terms, n_terms, n_poly_terms))
-#         for i_tf in range(0, n_transforms):
-#             for i_mat in range(0, n_matrices):
-#                 for i_row in range(0, n_terms):
-#                     for i_col in range(0, n_terms - i_row):
-#                         z = transform_terms[:, i_tf, i_mat, i_row, i_col]
-#                         poly = np.polyfit(prism_angles, z, poly_order)
-#                         fit = np.poly1d(poly)
-#                         zfit = fit(prism_angles)
-#                         transform_fits[i_tf, i_mat, i_row, i_col, :] = poly
-#
-#         transform_tuple = transform_configs, transform_fits
-#         return transform_tuple
 
     @staticmethod
     def lookup_transform_fit(config, prism_angle, transform_fits):
@@ -443,47 +388,6 @@ class Util:
                     matrix_fit[row, col] = term
             matrix_fits.append(matrix_fit)
         return tuple(matrix_fits)
-
-    # @staticmethod
-    # def write_transform_fit_text(poly_file, ray_trace):
-    #     pf = open(poly_file, 'w')
-    #     configs, transform_fits, coords = ray_trace
-    #     hdr_fmt = "{:3s},{:10s},{:10s},{:10s},{:10s},{:5s},{:5s},{:5s},{:<20s}"
-    #     hdr = hdr_fmt.format('eo', 'ea', 'pa', 'slice_no', 'spifu_no', 'mat', 'row', 'col', 'poly_coeffs')
-    #
-    #     ech_angles = configs[:, 0]
-    #     prism_angles = configs[:, 1]
-    #     ech_orders = configs[:, 2].astype(int)
-    #     slice_nos = configs[:, 3].astype(int)
-    #     spifu_nos = configs[:, 4].astype(int)
-    #
-    #     unique_ech_orders = np.unique(ech_orders)
-    #     unique_slice_nos = np.unique(slice_nos)
-    #     unique_spifu_nos = np.unique(spifu_nos)
-    #     pf.write(hdr + '\n')
-    #
-    #     for ech_order in unique_ech_orders:
-    #         idx_eo = ech_order == ech_orders
-    #         for slice_no in unique_slice_nos:
-    #             idx_sno = slice_no == slice_nos
-    #             idx = np.logical_and(idx_eo, idx_sno)
-    #             for spifu_no in unique_spifu_nos:
-    #                 idx_spifu = spifu_no == spifu_nos
-    #                 idx = np.logical_and(idx, idx_spifu)
-    #                 x = prism_angles[idx]
-    #                 x_eo = ech_orders[idx]
-    #                 x_ea = ech_angles[idx]
-    #                 for matrix in transform_fits[idx]:  # Process A B AI BI in one loop
-    #                     poly_fit = Util.find_polyfit(x, matrix, order=poly_order)
-    #                     for i in range(0, n_terms):
-    #                         for j in range(0, n_terms):
-    #                             fmt = "{:3.0f},{:3.0f},{:3.0f},{:5d},{:3d},{:5d},"
-    #                             line = fmt.format(eo, slice_no, spifu_no, mat_no, i, j)
-    #                             for k in range(0, poly_order + 1):
-    #                                 line = line + "{:15.7e},".format(poly_fit[i, j, k])
-    #                             pf.write(line + "\n")
-    #     pf.close()
-    #     return
 
     @staticmethod
     def print_poly_transform(transform, **kwargs):

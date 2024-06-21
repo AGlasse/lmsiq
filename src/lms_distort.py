@@ -33,7 +33,7 @@ spifu_config = (analysis_type, spifu, spifu_date_stamp,
 model_configurations = {nominal: nom_config, spifu: spifu_config}
 
 """ SET MODEL CONFIGURATION HERE """
-model_config = model_configurations[spifu]
+model_config = model_configurations[nominal]
 filer = Filer(model_config)
 
 _, optical_path, date_stamp, optical_path_label, coords_in, coords_out = model_config
@@ -94,8 +94,6 @@ if generate_transforms:
             suppress_plots = True  # True = Just plot first file/setting
     print(Filer.trace_file)
     filer.write_pickle(filer.trace_file, traces)
-    # stats_data = n_terms, -1, np.array(offset_data_list)
-    # util.print_stats(st_file, stats_data)
 
 # Wavelength calibration -
 # Create an interpolation object to give,
@@ -113,7 +111,8 @@ if derive_wcal:
             ech_order, slice_no, spifu_no = config
             a, b, ai, bi = matrices
             waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit = rays
-    plot.wavelength_coverage(traces, optical_path)
+    plot.series('dispersion', traces, optical_path)
+    plot.series('coverage', traces, optical_path)
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.

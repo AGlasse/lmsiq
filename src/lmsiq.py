@@ -27,29 +27,46 @@ spifu = Globals.spifu
 optics = {nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)', ('phase', 'fp2_x'), ('det_x', 'det_y')),
           spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)', ('phase', 'fp1_x'), ('det_x', 'det_y'))}
 
-nominal_identifier = {'optical_configuration': nominal,
-                      'iq_date_stamp': '20240324',
+data_tags = {'nom': 'nominal', 'ext': 'extended',
+             'tor': 'toroidal M12', 'sph': 'spherical M12',
+             'dfp': 'detector focal plane fields 10-12',
+             'efp': 'entrance focal plane field 1-9'}
+data_descriptor = {'2024032400': ['nom', 'tor', 'efp', 'full L- and M-bands'],
+                   '2024043000': ['nom', 'tor', 'dfp', 'defocus .0,.05,.1 mm, wavelength 2.7 um'],
+                   '2024050700': 'toroidal M12, DFP fields 10-12, defocus .0,.05,.1 mm, wavelength 5.0 um',
+                   '2024060700': 'spherical M12, defocus   0 um',
+                   '2024060705': 'spherical M12, defocus  50 um',
+                   '2024060710': 'spherical M12, defocus 100 um',
+                   '2024060720': 'spherical M12, defocus 200 um',
+
+                   '2024060800': 'spherical M12, EFP fields 1-9, full LM-bands',
+                   '2024061800': 'METIS_sphericalM12_M19manufacture_errors - WFE adjusted',
+                   '2024061801': 'METIS_sphericalM12_M19manufacture_errors - WFE all'
+                   }
+fts_dfp = {10: 1, 11: 13, 12: 28}
+fts_efp = {1: 13, 2: 5, 3: 13, 4: 5, 5: 5, 6: 5, 7: 24, 8: 24, 9: 24}
+
+nominal_identifier = {'optical_path': nominal,
+                      'iq_date_stamp': '2024060800',
                       'iq_folder_leader': 'psf_',
-                      'mc_bounds': None,                    # Set to None to use all M-C data
+                      'mc_bounds': 'all',                    # Set to None, [mlo, mhi] or 'all'
                       'dist_date_stamp': '20240305',
-                      'zemax_format': 'new_zemax',
                       'specifu_config_file': None,
-                      'field_bounds': (1, 2, 3),
-                      'cube_slice_bounds': (13, 4),         # {'123': 13, '456': 5, '789': 24}
+                      'field_tgt_slice': fts_efp,
+                      'slice_radius': 4,
                       }
-spifu_identifier = {'optical_configuration': spifu,
+spifu_identifier = {'optical_path': spifu,
                     'iq_date_stamp': '20240324',
                     'iq_folder_leader': 'psf_',
                     'mc_bounds': None,                      # Set to speed program when debugging.
                     'dist_date_stamp': '20240109',
-                    'zemax_format': 'new_zemax',
-                    'specifu_config_file': None,
-                    'field_bounds': (1, 2, 3),
-                    'cube_slice_bounds': (13, 1),
+                    'specifu_config_file': 'all',
+                    'field_tgt_slice': {1: 13, 2: 13, 3: 13},
+                    'slice_radius': 1,
                     }
 
-data_identifier = spifu_identifier
-optical_path = data_identifier['optical_configuration']
+data_identifier = nominal_identifier
+optical_path = data_identifier['optical_path']
 date_stamp = data_identifier['iq_date_stamp']
 is_spifu = optical_path == Globals.spifu
 
@@ -81,10 +98,12 @@ if run_test:
 
 inter_pixels = [True]                        # True = include diffusion kernel convolution
 mc_bounds = image_manager.model_dict['mc_bounds']
-if data_identifier['mc_bounds'] is not None:
-    mc_bounds = data_identifier['mc_bounds']
+req_mc_bounds = data_identifier['mc_bounds']
+if req_mc_bounds is not None:
+    if req_mc_bounds != 'all':
+        mc_bounds = mc_bounds if req_mc_bounds == 'all' else req_mc_bounds
+        print("\nSetting mc_start={:d}, mc_end={:d}".format(mc_bounds[0], mc_bounds[1]))
 process_control = mc_bounds, inter_pixels
-print("\nSetting mc_start={:d}, mc_end={:d}".format(mc_bounds[0], mc_bounds[1]))
 
 # Analyse Zemax data
 process_phase_data = False
@@ -95,7 +114,7 @@ if process_phase_data:
     phase.process(data_identifier, process_control, iq_filer, image_manager,
                   config_nos=[0], field_nos=[2], plot_level=2)
 
-build_cubes = False
+build_cubes = True
 if build_cubes:
     print()
     print('\nReconstructing cubes and analysing slice profile data')
@@ -104,17 +123,18 @@ if build_cubes:
     rt_date_stamp = '20231009' if is_spifu else '20240109'
     rt_model_configuration = 'distortion', optical_path, rt_date_stamp, None, None, None
     rt_filer = Filer(rt_model_configuration)
-    cuber.build(data_identifier, process_control, image_manager, iq_filer)
+    cuber.build(data_identifier, process_control, image_manager, iq_filer, debug=False)
 
 plot_cubes = True
 if plot_cubes:
-    print('\nPlot cube series data (wavelength/field) and calculate key statistics')
-    print('-----------------------------------------------------')
+    title = '\nPlot cube series data (wavelength/field) and calculate key statistics'
+    print(title)
+    print('-'*len(title))
     cuber = Cuber()
     cube_packages = cuber.read_pkl_cubes(iq_filer)
     if optical_path == 'nominal':           # Filter out weird nominal configuration...!
         cube_packages = Cuber.remove_configs(cube_packages, [21])
-    cuber.write_csv(optical_path, cube_packages, iq_filer)
-    cuber.plot(optical_path, cube_packages, iq_filer)
+    # cuber.write_csv(optical_path, cube_packages, iq_filer)
+    cuber.plot(optical_path, cube_packages, iq_filer, is_defocus=True)
 
 print('LMS Repeatability (lmsiq.py) - done')

@@ -286,10 +286,10 @@ class Analyse:
         return strehls
 
     @staticmethod
-    def eed(image_list, obs_dict, axis_name, **kwargs):
+    def eed(image_list, cube_dict, axis_name, **kwargs):
         """ Calculate the enslitted energy along an axis.
-        :param image_list:              List of imagess
-        :param obs_dict            List of parameters associated with image list
+        :param image_list:              List of imagess comprising cube
+        :param cube_name:               Cube name
         :param axis_name:                    ='spectral' or 'spatial'
         :param kwargs: is_log = True for samples which are uniform in log space
         :return radii: Sampled axis
@@ -326,7 +326,7 @@ class Analyse:
             print()
 
         for j, image in enumerate(image_list):
-            file_name = obs_dict['file_names'][j]
+            # file_name = obs_dict['file_names'][j]
             img_min, img_max = np.amin(image), np.amax(image)
             centroid = centroid_com(image)
             umin, vmin = centroid[0] - r_max, centroid[1] - r_max
@@ -334,8 +334,8 @@ class Analyse:
             is_x_oob = umin < 0 or umax > nx - 1
             is_y_oob = vmin < 0 or vmax > ny - 1
             if debug:
-                fmt = "\r- processing file {:s} into column {:d} {:10.1e} {:10.1e}"
-                print(fmt.format(file_name, j, img_min, img_max))
+                fmt = "\r- Cube {:s}, processing image {:d} {:10.1e} {:10.1e}"
+                print(fmt.format(cube_dict['name'], j, img_min, img_max))
                 if is_x_oob or is_y_oob:
                     txt = "!! U/V out of bounds (signal truncated) !! - "
                     fmt = "u={:5.1f} -{:5.1f}, v={:5.1f} -{:5.1f}"
@@ -364,9 +364,12 @@ class Analyse:
 
         # Rescale x axis from image scale to LMS pixels
         # ees_perfect, ees_design = ees_all[:, 0], ees_all[:, 1]
-        ees_mcs = ees_all[:, 2:]
-        ees_mc_mean = np.mean(ees_mcs, axis=1)
-        ees_mc_rms = np.std(ees_mcs, axis=1)
+        # mc_bounds = obs_dict['mc_bounds']
+        ees_mc_mean, ees_mc_rms = 0., 0.
+        if cube_dict['mc_bounds'] is not None:
+            ees_mcs = ees_all[:, 2:]
+            ees_mc_mean = np.mean(ees_mcs, axis=1)
+            ees_mc_rms = np.std(ees_mcs, axis=1)
         xdet = np.divide(radii, oversample)         # Convert x scale to LMS detector pixels
         ees_data = {'xvals': xdet, 'yvals': ees_all,
                     'ees_mc_mean': ees_mc_mean, 'ees_mc_rms': ees_mc_rms}
@@ -432,7 +435,7 @@ class Analyse:
         return series_out
 
     @staticmethod
-    def lsf(image_list, obs_dict, axis, **kwargs):
+    def lsf(image_list, cube_dict, axis, **kwargs):
         """ Find the normalised line spread function for all image files.  Note that the pixel is centred
         at its index number, so we perform rectangular aperture photometry centred at
         :returns - uvals, pixel scale
@@ -470,9 +473,9 @@ class Analyse:
             centroid = Analyse._find_mean_centroid(image_list)
 
         for j, image in enumerate(image_list):
-            file_name = obs_dict['file_names'][j]
-            if debug:
-                print('Processing file {:s} into column {:d}'.format(file_name, j))
+            # file_name = obs_dict['file_names'][j]
+            # if debug:
+            #     print('Processing file {:s} into column {:d}'.format(file_name, j))
             ap_pos = np.array(centroid)
             ucen = centroid[0] if axis == 0 else centroid[1]
             us = np.add(uvals, ucen)
@@ -492,15 +495,15 @@ class Analyse:
             lsf_norm = Analyse._boxcar(lsf_norm, oversample)
 
         lsf_data = {'xvals': xvals, 'yvals': lsf_norm}
-
-        mc_start, _ = obs_dict['mc_bounds']
+        mc_bounds = cube_dict['mc_bounds']
         pd_tags, model_tags = ['perfect', 'design'], []
         lsf_data['lin_fwhm'], lsf_data['lin_xl'], lsf_data['lin_xr'] = [], [], []
         lsf_data['gau_fwhm'], lsf_data['gau_xl'], lsf_data['gau_xr'], lsf_data['gau_amp'] = [], [], [], []
 
         n_pts, n_profiles = lsf_all.shape
         for j in range(0, n_profiles):
-            key = "MC_{:03d}".format(mc_start + i) if i > 1 else pd_tags[i]
+            mc_tag = '' if mc_bounds is None else "MC_{:03d}".format(mc_bounds[0] + i)
+            key = mc_tag if i > 1 else pd_tags[i]
             model_tags.append(key)
 
             gauss, linear = Analyse.find_profile_fwhm(xvals, lsf_norm[:, j])

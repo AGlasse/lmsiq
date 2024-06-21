@@ -21,9 +21,7 @@ class ImageManager:
         Method 'load_dataset' then returns the images plus a dictionary (obs_dict) containing the single
         values corresponding to the selected data.
         """
-        is_new_zemax = data_identifier['zemax_format'] == 'new_zemax'
-        ImageManager.is_new_zemax = is_new_zemax
-        model_dict = {'optical_configuration': None,
+        model_dict = {'optical_path': None,
                       'im_pix_size': None,
                       'fits_trailer': None,
                       'mc_bounds': None,
@@ -31,6 +29,125 @@ class ImageManager:
         config_dict = {'folders': [],
                        'config_nos': [],
                        'field_nos': [],
+                       'focus_shifts': [],
+                       'slice_tgts': [],
+                       'slice_nos': [], 'spifu_nos': [],
+                       'wavelengths': [],
+                       'prism_angles': [], 'grating_angles': [], 'grating_orders': [],
+                       }
+        mc_code, mc_width = 'det', 4
+        mc_codelen = len(mc_code)
+
+        dataset_folder = iq_filer.data_folder
+        folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
+        folder_codes = {'config': 'config_nos',
+                        'field': 'field_nos',
+                        'defoc': 'focus_shifts'}
+
+        for folder in folder_list:
+            config_dict['folders'].append(folder)
+            for code in folder_codes:       # Add folder-wide values
+                if code in folder:
+                    codelen = len(code)
+                    c1 = folder.rfind(code) + codelen
+                    cfg_key = folder_codes[code]
+                    cfg_tag = folder[c1: c1+3]
+                    config_dict[cfg_key].append(int(cfg_tag))
+
+            field_no = config_dict['field_nos'][-1]
+            fts = data_identifier['field_tgt_slice']
+            slice_tgt = fts[field_no]
+            optical_path = data_identifier['optical_path']
+            model_dict['optical_path'] = optical_path
+            model_dict['im_pix_size'] = 4.5                 # Default image pixel size in microns
+            config_dict['slice_tgts'].append(slice_tgt)
+
+            fits_folder = dataset_folder + folder + '/'
+            par_files = iq_filer.get_file_list(fits_folder, inc_tags=['.txt'])
+            if len(par_files) == 0:
+                print("Text file not found in {:s}".format(fits_folder))
+            par_path = fits_folder + par_files[0]
+            # Note that the slice number information is wrong in the new zemax format (since start of 2024)
+            parameters = ImageManager._read_param_file(par_path)
+            for key in parameters:
+                p = parameters[key]
+                if key in model_dict:
+                    model_dict[key] = p
+                    continue
+                cfg_key = key + 's'
+                if cfg_key in config_dict:
+                    config_dict[cfg_key].append(p)
+                    continue
+                print("Keyword {:s} not found in model_dict or config_dict".format(key))
+
+            inc_tags = ['.fits']
+            exc_tags = ['.txt', 'sli']
+            fits_files = iq_filer.get_file_list(fits_folder,
+                                                inc_tags=inc_tags,
+                                                exc_tags=exc_tags)
+
+            # Read in and decode Monte-Carlo file names and slice/spifu numbers.
+            mc_no_list = []
+            slice_no_list, spifu_no_list = [], []
+            for fits_file in fits_files:
+                file_codes = {'spat': ('slice_no', 2, slice_no_list),
+                              'spec': ('spifu_no', 1, spifu_no_list)
+                              }
+                for code in file_codes:
+                    if code in fits_file:
+                        codelen = len(code)
+                        c1 = fits_file.rfind(code) + codelen
+                        cfg_key, width, val_list = file_codes[code]
+                        val = int(fits_file[c1: c1 + width])
+                        if val not in val_list:
+                            val_list.append(val)
+
+                if 'sli' in fits_file:
+                    continue
+                if ('desi' in fits_file) or ('perf' in fits_file):
+                    continue
+                if mc_code in fits_file:
+                    c1 = fits_file.rfind(mc_code) + mc_codelen
+                    mc_tag = fits_file[c1: c1 + mc_width]
+                    # print(mc_tag)
+                    mc_no = int(mc_tag)
+                    mc_no_list.append(mc_no)
+            if len(mc_no_list) > 0:             # If 'MC' data is included in dataset
+                mc_array = np.array(mc_no_list)
+                mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
+                model_dict['mc_bounds'] = mc_start, mc_end
+            # config_dict['slice_tags'].append(slice_tag_list)
+            config_dict['slice_nos'].append(slice_no_list)
+            # spifu_no_list = [0] if len(spifu_no_list) == 0 else spifu_no_list
+            config_dict['spifu_nos'].append(spifu_no_list)
+
+        ImageManager._find_unique_parameters(config_dict)
+        ImageManager.model_dict = model_dict
+        ImageManager.config_dict = config_dict
+        return
+
+    @staticmethod
+    def make_dictionary_old(data_identifier, iq_filer):
+        """ Make the image table dictionary which describes all data for this model as a dictionary object
+        (config_dict) which has a single entry for each folder/configuration in the model data.  Within a
+        folder there are multiple files ('perfect', 'design' and M-C instances) and may be multiple field
+        positions, spatial and spectral slices, so these are stored as lists.  A 'dataset' is then defined
+        as the unique set of files for a single value of all these parameters,
+        eg, folder/config_a, field_b, spat_slice_c, spec_slice_d.
+        Method 'load_dataset' then returns the images plus a dictionary (obs_dict) containing the single
+        values corresponding to the selected data.
+        """
+        # is_new_zemax = data_identifier['zemax_format'] == 'new_zemax'
+        # ImageManager.is_new_zemax = is_new_zemax
+        model_dict = {'optical_path': None,
+                      'im_pix_size': None,
+                      'fits_trailer': None,
+                      'mc_bounds': None,
+                      }
+        config_dict = {'folders': [],
+                       'config_nos': [],
+                       'field_nos': [],
+                       'focus_shifts': [],
                        'slice_nos': [], 'slice_tags': [], 'slice_tgts': [],
                        'spifu_nos': [],
                        'wavelengths': [],
@@ -38,18 +155,21 @@ class ImageManager:
                        }
         dataset_folder = iq_filer.data_folder
         folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
-        config_no_list, field_no_list = [], []        # specifu_config = iq_filer.read_specifu_config() if is_new_zemax_nominal else None
+        config_no_list, field_no_list = [], []
         for folder in folder_list:
             is_valid_field = False
-            for valid_field_no in data_identifier['field_bounds']:
-                field_text = '_field{:d}'.format(valid_field_no)
-                is_valid_field = True if field_text in folder else is_valid_field
+            slice_fields = data_identifier['slice_fields']
+            for key in slice_fields:
+                field_nos = slice_fields[key]
+                for field_no in field_nos:
+                    field_text = '_field{:d}'.format(field_no)
+                    is_valid_field = True if field_text in folder else is_valid_field
             if not is_valid_field:
                 continue
             print('Folder {:s} included in analysis'.format(folder))
 
-            optical_configuration = data_identifier['optical_configuration']
-            model_dict['optical_configuration'] = optical_configuration
+            optical_path = data_identifier['optical_path']
+            model_dict['optical_path'] = optical_path
             config_dict['folders'].append(folder)
             slice_tgt = 13
             config_dict['slice_tgts'].append(slice_tgt)
@@ -70,13 +190,13 @@ class ImageManager:
                     continue
                 print("Keyword {:s} not found in model_dict or config_dict".format(key))
 
-            if data_identifier['optical_configuration'] == 'spifu':
+            if data_identifier['optical_path'] == 'spifu':
                 config_dict['prism_angles'].append(6.99716)
                 config_dict['grating_angles'].append(0.00000)
                 config_dict['grating_orders'].append(-23)
 
             # Get list of file names for a single run (e.g. identical except for MC run no., 'perfect' or 'design' tags
-            if optical_configuration == 'nominal':
+            if optical_path == 'nominal':
                 exc_tags = ['specslice', 'preslice']
                 fits_trailer = '_MC_spatslice.fits'
             else:
@@ -88,12 +208,14 @@ class ImageManager:
                                                 inc_tags=inc_tags,
                                                 exc_tags=exc_tags)
 
-            # lead = parameters['fits_leader']    # Get configuration and field number
             tokens = folder.split('_')
-            field_no = int(tokens[3][-1:])
+            field_no = int(tokens[3][-2:])
             field_no_list.append(field_no)
             config_no = int(tokens[4][-2:])
             config_no_list.append(config_no)
+            if len(tokens) > 4:     # Defocus data present
+                focus_shift = float(tokens[5][1:4])
+                config_dict['focus_shifts'].append(int(focus_shift))
 
             # Read in and decode Monte-Carlo file names and slice/spifu numbers.
             mc_no_list = []
@@ -103,30 +225,34 @@ class ImageManager:
                 tokens = fits_file.split('_')
                 slice_idx = 3
                 spifu_idx = slice_idx + 1
+                if 'slicer' in fits_file:
+                    continue
                 slice_tag = tokens[slice_idx]
+                slice_no = int(slice_tag)
+                spifu_no = int(tokens[spifu_idx])
+                is_new_slice = slice_tag not in slice_tag_list
+                is_new_spifu = spifu_no not in spifu_no_list
+                if is_new_slice or is_new_spifu:
+                    slice_tag_list.append(slice_tag)
+                    slice_no_list.append(slice_no)
+                    spifu_no_list.append(spifu_no)
 
-                if ('design' in fits_file) or ('perfect' in fits_file) or ('slicer' in fits_file):
+                if ('design' in fits_file) or ('perfect' in fits_file):
                     continue
                 if '_MC_' in fits_file:
-                    slice_no = int(slice_tag)
-                    spifu_no = int(tokens[spifu_idx])
                     mc_idx = spifu_idx + 1
                     mc_tag = tokens[mc_idx]
 
-                    is_new_slice = slice_tag not in slice_tag_list
-                    is_new_spifu = spifu_no not in spifu_no_list
-                    if is_new_slice or is_new_spifu:
-                        slice_tag_list.append(slice_tag)
-                        slice_no_list.append(slice_no)
-                        spifu_no_list.append(spifu_no)
                     if mc_tag.isdigit():
                         mc_no = int(mc_tag)
                         mc_no_list.append(mc_no)
-            mc_array = np.array(mc_no_list)
-            mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
-            model_dict['mc_bounds'] = mc_start, mc_end
+            if len(mc_no_list) > 0:             # If 'MC' data is included in dataset
+                mc_array = np.array(mc_no_list)
+                mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
+                model_dict['mc_bounds'] = mc_start, mc_end
             config_dict['slice_tags'].append(slice_tag_list)
             config_dict['slice_nos'].append(slice_no_list)
+            spifu_no_list = [0] if len(spifu_no_list) == 0 else spifu_no_list
             config_dict['spifu_nos'].append(spifu_no_list)
             config_dict['config_nos'].append(config_no)
             config_dict['field_nos'].append(field_no)
@@ -233,7 +359,7 @@ class ImageManager:
         spifu_no = selection['spifu_no']
 
         # Find the single data set which matches the selection parameters.
-        all_indices = []
+        all_indices = {}
         for kw_key in selection:
             indices = []
             for config_key in config_dict:
@@ -241,61 +367,82 @@ class ImageManager:
                     kw_val = selection[kw_key]
                     cfg_vals = config_dict[config_key]
                     for idx, cfg_val in enumerate(cfg_vals):
-                        if kw_val == cfg_val:
-                            indices.append(idx)
+                        is_list = isinstance(cfg_val, list)
+                        if is_list:
+                            if kw_val in cfg_val:
+                                indices.append(idx)
+                        else:
+                            if kw_val == cfg_val:
+                                indices.append(idx)
             if len(indices) > 0:
-                all_indices.append(indices)
+                all_indices[kw_key] = indices
 
         # Find the index that is common to all 'indices' lists
-        dataset_idx = -1
-        for idx in all_indices[0]:
-            is_common = True
-            for indices in all_indices[1:]:
-                is_common = is_common if idx in indices else False
-            if is_common:
-                dataset_idx = idx
-                break
-        if dataset_idx < 0:
-            print('!! ImageManager.load_dataset - unique data set not found !!')
-            for item in selection:
-                print('-- ', selection[item])
+        common_indices = None
+        for idx_key in all_indices:
+            indices = all_indices[idx_key]
+            if common_indices is None:
+                common_indices = indices
+                continue
+            new_cis = []
+            for cidx in common_indices:
+                if cidx in indices:
+                    new_cis.append(cidx)
+            common_indices = new_cis
+
+        n_cis = len(common_indices)
+        if n_cis != 1:
+            if debug:
+                print('!! ImageManager.load_dataset - unique data set not found !!')
+                for item in selection:
+                    print("{:12s}, {:s}".format(item, str(selection[item])))
+            return None, None
+        dataset_idx = common_indices[0]
 
         # Generate the dictionary for this dataset ('ds') combining config, model and keyword data
         ds_dict = {}
-        slice_nos = np.array(config_dict['slice_nos'][dataset_idx])
-        list_index = np.argwhere(slice_nos == slice_no)[0][0]
         for config_key in config_dict:
             ds_key = config_key[:-1]          # Strip final 's' off keyword (slice_nos -> slice_no etc.)
             ds_value = config_dict[config_key][dataset_idx]
-            if isinstance(ds_value, list):
+            if ds_key == 'slice_no':
+                slice_nos = np.array(config_dict['slice_nos'][dataset_idx])
+                list_index = np.argwhere(slice_nos == slice_no)[0][0]
                 ds_dict[ds_key] = ds_value[list_index]
-            else:
-                ds_dict[ds_key] = ds_value
+                continue
+            if ds_key == 'spifu_no':
+                spifu_nos = np.array(config_dict['spifu_nos'][dataset_idx])
+                list_index = np.argwhere(spifu_nos == spifu_no)[0][0]
+                ds_dict[ds_key] = ds_value[list_index]
+                continue
+            ds_dict[ds_key] = ds_value
         for model_key in model_dict:
             ds_dict[model_key] = model_dict[model_key]
         for kw_key in kwargs:
             ds_dict[kw_key] = kwargs[kw_key]
 
-        config_no = ds_dict['config_no']
-        slice_tag = ds_dict['slice_tag']
         folder = ds_dict['folder']
         fits_folder = iq_filer.data_folder + folder + '/'
 
-        mc_start, mc_end = selection['mc_bounds']
-        obs_tag = "_{:02d}_{:02d}_{:02d}".format(config_no, slice_no, spifu_no)
+        slice_no = ds_dict['slice_no']
+        spifu_no = ds_dict['spifu_no']
+        fmt = "{:s}_spat{:02d}_spec{:01d}_det"
+        obs_tag = fmt.format(folder, slice_no, spifu_no)
 
-        # Load perfect and design images first
-        mc_tags = ['_perfect', '_design']           # Initialise mc tag list for old format
-        for mc_no in range(mc_start, mc_end + 1):
-            mc_tag = "_{:04d}_MC".format(mc_no)
-            mc_tags.append(mc_tag)
+        # Load perfect and design images first, then MC images if requested (mc_bounds is not None)
+        mc_tags = ['perf', 'desi']           # Initialise mc tag list for old format
+        mc_bounds = selection['mc_bounds']
+        if mc_bounds is not None:
+            mc_start, mc_end = mc_bounds
+            for mc_no in range(mc_start, mc_end + 1):
+                mc_tag = "{:04d}".format(mc_no)
+                mc_tags.append(mc_tag)
 
         images, file_names = [], []
         for mc_tag in mc_tags:
             inc_tags = [mc_tag, obs_tag, '.fits']
             file_list = iq_filer.get_file_list(fits_folder,
                                                inc_tags=inc_tags,
-                                               excl_tags=['slicer'])
+                                               exc_tags=['sli'])
             n_files = len(file_list)
             if n_files > 1:
                 print("!! multiple files named {:s} in {:s}".format(file_list[0], folder))
@@ -304,8 +451,8 @@ class ImageManager:
 
             file = file_list[0]
             if debug:
-                fmt = "Reading {:s}, sno_tag={:s}, mc_tag={:s}"
-                print(fmt.format(file, slice_tag, mc_tag))
+                fmt = "Reading {:s}, mc_tag={:s}"
+                print(fmt.format(file, mc_tag))
             path = fits_folder + file
             hdu_list = fits.open(path, mode='readonly')
             hdu = hdu_list[0]
@@ -337,8 +484,6 @@ class ImageManager:
 
     @staticmethod
     def _make_inc_tags(config_no, slice_no, mc_tag):
-        # field_no = kwargs.get('field_no', None)
-        # wave_no = kwargs.get('wave_no', None)
         inc_tags = ['.fits']
         fmt = "{:02d}_{:02d}{:s}"
         id_tag = fmt.format(config_no, slice_no, mc_tag)
