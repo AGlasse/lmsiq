@@ -58,7 +58,7 @@ class Cuber:
             print("no. of optical models (2 + Monte-Carlo instances) = {:d}".format(n_runs))
             slice_radius = data_identifier['slice_radius']
 
-            for field_idx, field_no in enumerate(field_nos[1:]):
+            for field_idx, field_no in enumerate(field_nos):
                 fts = data_identifier['field_tgt_slice']
                 slice_tgt = fts[field_no]
                 field_tag = "field_{:d}".format(field_no)
