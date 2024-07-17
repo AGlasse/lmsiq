@@ -69,6 +69,7 @@ class ImageManager:
             par_path = fits_folder + par_files[0]
             # Note that the slice number information is wrong in the new zemax format (since start of 2024)
             parameters = ImageManager._read_param_file(par_path)
+
             for key in parameters:
                 p = parameters[key]
                 if key in model_dict:
@@ -116,9 +117,7 @@ class ImageManager:
                 mc_array = np.array(mc_no_list)
                 mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
                 model_dict['mc_bounds'] = mc_start, mc_end
-            # config_dict['slice_tags'].append(slice_tag_list)
             config_dict['slice_nos'].append(slice_no_list)
-            # spifu_no_list = [0] if len(spifu_no_list) == 0 else spifu_no_list
             config_dict['spifu_nos'].append(spifu_no_list)
 
         ImageManager._find_unique_parameters(config_dict)
@@ -303,10 +302,15 @@ class ImageManager:
         pf.close()
         # Note, field position format changed from [x, y] to single integer in 20240209 dataset
         param_translator = {'wavelength': ('wavelength', 'fl_fl'),
-                            'prism angle': ('prism_angle', 'fl_fl'), 'grating angle': ('grating_angle', 'fl_fl'),
+                            'prism angle': ('prism_angle', 'fl_fl'),
+                            'grating angle': ('grating_angle', 'fl_fl'),
                             'grating order': ('grating_order', 'fl_int'),
                             'Pixel size (micron)': ('im_pix_size', 'fl_fl')
                             }
+        # Set default parameters for SPIFU mode, they don't appear in spifu parameter files.
+        params['prism_angle'] = 7.0
+        params['grating_angle'] = 0.0
+        params['grating_order'] = -99
         for line in lines:
             if ':' in line:
                 tokens = line.split(':')
@@ -350,11 +354,11 @@ class ImageManager:
 
         debug = kwargs.get('debug', False)
         xy_shift = kwargs.get('xy_shift', None)
-        if xy_shift is None:
-            print()
-            t1 = '  Loading data with xy_shift = None'
-            t2 = ', Zemax sources will be shifted by 0.25 detector pixels from the image centre'
-            print(t1 + t2)
+        # if xy_shift is None:
+        #     print()
+        #     t1 = '  Loading data with xy_shift = None'
+        #     t2 = ', Zemax sources will be shifted by 0.25 detector pixels from the image centre'
+        #     print(t1 + t2)
         slice_no = selection['slice_no']
         spifu_no = selection['spifu_no']
 

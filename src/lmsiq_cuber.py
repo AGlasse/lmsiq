@@ -114,12 +114,13 @@ class Cuber:
                                              'spifu_no': spifu_no,
                                              'mc_bounds': mc_bounds,
                                              }
+
+                                # t1 = time.perf_counter()
                                 images, ds_dict = image_manager.load_dataset(iq_filer,
                                                                              selection,
-                                                                             xy_shift=(10, -5, -5),
+                                                                             # xy_shift=(10, -5, -5),
                                                                              debug=False
                                                                              )
-
                                 if images is None:      # No images found
                                     if debug:
                                         print('No images found, exiting cuber.build')
@@ -366,7 +367,7 @@ class Cuber:
         png_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/png')
 
         is_spifu = optical_path == 'spifu'
-
+        n_plots = len(cube_packages)
         fig_layouts = {'spifu': (3, 1, (6, 8)), 'nominal': (3, 3, (12, 8))}
         fig_layout = fig_layouts[optical_path]
         fig_layout = (1, 3, (12, 8)) if is_defocus else fig_layout
@@ -432,14 +433,14 @@ class Cuber:
 
             for ykey in ordinates:
                 do_fwhm_rqt = ykey == 'lsf_gau_fwhms'
-                do_srp_rqt = ykey == 'srps'
+                do_srp_rqt = ykey == 'srps' and not is_spifu
 
                 ova_tag = "{:s}_v_{:s}".format(ykey, abscissa[0])
                 fmt = "{:s}_{:s}_{:s}"
                 ipc_tag = 'ipc_on' if ipc_on else 'ipc_off'
                 png_file = fmt.format(optical_path, ova_tag, ipc_tag)
                 png_path = png_folder + png_file
-                png_path = None
+                # png_path = None
                 ordinate = ordinates[ykey]
                 fmt = "\r- Plotting diffusion {:s}, spectral IFU= {:s}, to file {:s}"
                 print(fmt.format(str(ipc_on), str(is_spifu), png_file))

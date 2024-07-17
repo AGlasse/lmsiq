@@ -147,10 +147,10 @@ class Analyse:
             fit, covar = curve_fit(Analyse._gauss, x, y,
                                    p0=guess, method='trf', xtol=1E-8)
         except RuntimeError:
-            print('lmsiq_analyse.fit_gaussian !! Runtime error !!')
+            print('lmsiq_analyse._fit_gaussian !! Runtime error !!')
             is_error = True
             order = len(guess) + 1
-            fit, covar = np.zeros(order), np.zeros((order, order))
+            fit, covar = np.zeros(order-1), np.zeros((order, order-1))
         if debug:
             fmt = "{:<8s} - amp={:8.6f} fwhm={:5.2f} xpk={:9.6f}"
             print(fmt.format('Guess', guess_amp, guess_fwhm, guess_xpk))
@@ -459,8 +459,6 @@ class Analyse:
         if axis == 0:
             vcoadd = n_rows - 1 if v_coadd == 'all' else v_coadd
             uradius = (n_cols - 1) / 2.0 if u_radius == 'all' else u_radius
-        if axis == 1:
-            nob = 1
 
         uvals = np.arange(ustart - uradius, ustart + uradius + 1., usample)
         n_points, = uvals.shape
@@ -473,9 +471,6 @@ class Analyse:
             centroid = Analyse._find_mean_centroid(image_list)
 
         for j, image in enumerate(image_list):
-            # file_name = obs_dict['file_names'][j]
-            # if debug:
-            #     print('Processing file {:s} into column {:d}'.format(file_name, j))
             ap_pos = np.array(centroid)
             ucen = centroid[0] if axis == 0 else centroid[1]
             us = np.add(uvals, ucen)
@@ -507,8 +502,9 @@ class Analyse:
             model_tags.append(key)
 
             gauss, linear = Analyse.find_profile_fwhm(xvals, lsf_norm[:, j])
-            _, fwhm_per_lin, _, xl_lin, xr_lin, _ = linear
-            _, (amp_gau, fwhm_per_gau, xcen_gau), covar = gauss
+            # print('Analyse.lsf ', gauss)
+            is_error_lin, fwhm_per_lin, _, xl_lin, xr_lin, _ = linear
+            is_error_gau, (amp_gau, fwhm_per_gau, xcen_gau), covar = gauss
             xl_gau = xcen_gau - 0.5 * fwhm_per_gau
             xr_gau = xcen_gau + 0.5 * fwhm_per_gau
             # Scale to detector pixels and write to data dictionary
@@ -561,6 +557,10 @@ class Analyse:
         c1, r1 = max(0, c1),max(0, r1)
         rmax, cmax = image.shape
         c2, r2 = min(cmax-1, c2), min(rmax-1, r2)
+        # Catch off image apertures
+        if x1 > cmax:
+            return 0.
+
         # Number of rows and columns in subarray, 1 pixel extra to allow sub-pixel fragments.
         nr = r2 - r1 + 1
         nc = c2 - c1 + 1

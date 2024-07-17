@@ -1,4 +1,5 @@
 import os
+import shutil
 from os import listdir
 import numpy as np
 import pickle
@@ -29,6 +30,21 @@ class Filer:
         if analysis_type == 'iq':
             self.cube_folder = self.get_folder(self.output_folder + '/cube')
         return
+
+    # def move_perf(self):
+    #     path = self.data_folder
+    #     file_list = listdir(path)
+    #     file_list = [f for f in file_list if 'detperf.fits' in f]
+    #
+    #     for file_name in file_list:
+    #         print(file_name)
+    #         idx = file_name.index('_spat')
+    #         folder = file_name[:idx]
+    #         srce = path + file_name
+    #         dest = path + folder
+    #         print("Copying {:s} to folder {:s}".format(srce, dest))
+    #         shutil.copy(srce, dest)
+    #     return
 
     def read_specifu_config(self):
         path = self.data_folder + 'SpecIFU_config.csv'
@@ -68,6 +84,9 @@ class Filer:
         inc_tags = kwargs.get('inc_tags', [])
         exc_tags = kwargs.get('exc_tags', [])
         file_list = listdir(folder)
+        n_files = len(file_list)
+        if n_files != 919:
+            print("{:d} files in folder {:s}".format(n_files, folder))
         for tag in inc_tags:
             file_list = [f for f in file_list if tag in f]
         for tag in exc_tags:

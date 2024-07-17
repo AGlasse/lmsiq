@@ -23,8 +23,8 @@ class Plot:
         fontsize = kwargs.get('fontsize', 16)
         plt.rcParams.update({'font.size': fontsize})
 
-        sharex = xlim is not None
-        sharey = ylim is not None
+        sharex = kwargs.get('sharex', xlim is not None)
+        sharey = kwargs.get('sharey', ylim is not None)
         fig, ax_list = plt.subplots(nrows, ncols, figsize=figsize,
                                     sharex=sharex, sharey=sharey,
                                     squeeze=False)
@@ -318,7 +318,9 @@ class Plot:
         field_rowcols = {1: (1, 1), 2: (0, 1), 3: (2, 1),
                          4: (1, 0), 5: (0, 0), 6: (2, 0),
                          7: (1, 2), 8: (0, 2), 9: (2, 2),
-                         10: (0, 0), 11: (0, 1), 12: (0, 2)}
+                         10: (1, 1), 11: (0, 1), 12: (2, 1),
+                         13: (1, 0), 14: (0, 0), 15: (2, 0),
+                         16: (1, 2), 17: (0, 2), 18: (2, 2)}
 
         ykey, ylabel, ylim = ordinate
         xkey, xlabel, xlim = abscissa
@@ -344,8 +346,9 @@ class Plot:
             if col == 0:
                 ax.set_ylabel(ylabel)
             ax.set_title(field_label)
-            ax.xaxis.grid()
-            ax.yaxis.grid()
+            if not key_only:
+                ax.xaxis.grid()
+                ax.yaxis.grid()
 
             x_unsort = np.array(field_data['x_values'])
             indices = np.argsort(x_unsort)
