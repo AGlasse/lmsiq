@@ -5,12 +5,12 @@
 from os import listdir
 from lms_filer import Filer
 from lms_util import Util
-from lms_dist_plot import Plot
-from lms_dist_trace import Trace
+from lmsdist_plot import Plot
+from lmsdist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
 
-print('lms_distort - Starting')
+print('lmsdist, distortion model - Starting')
 
 analysis_type = 'distortion'
 
@@ -33,7 +33,7 @@ spifu_config = (analysis_type, spifu, spifu_date_stamp,
 model_configurations = {nominal: nom_config, spifu: spifu_config}
 
 """ SET MODEL CONFIGURATION HERE """
-model_config = model_configurations[nominal]
+model_config = model_configurations[spifu]
 filer = Filer(model_config)
 
 _, optical_path, date_stamp, optical_path_label, coords_in, coords_out = model_config
@@ -64,7 +64,7 @@ st_hdr = "Trace individual"
 rt_text_block = ''
 
 suppress_plots = False  # f = Plot first trace
-generate_transforms = False  # for all Zemax ray trace files and write to lms_dist_buffer.txt
+generate_transforms = True  # for all Zemax ray trace files and write to lms_dist_buffer.txt
 if generate_transforms:
     print()
     print("Generating distortion transforms")

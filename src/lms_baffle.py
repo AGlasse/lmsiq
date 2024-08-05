@@ -7,7 +7,7 @@ import numpy as np
 from photutils.aperture import RectangularAperture
 from astropy.io import fits
 from lms_filer import Filer
-from lms_dist_plot import Plot
+from lmsdist_plot import Plot
 from lmsiq_analyse import Analyse
 
 print('lms_baffle - Starting')

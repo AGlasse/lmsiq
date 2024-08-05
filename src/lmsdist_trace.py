@@ -12,7 +12,7 @@ from scipy.optimize import least_squares
 from lms_detector import Detector
 from lms_globals import Globals
 from lms_util import Util
-from lms_dist_plot import Plot
+from lmsdist_plot import Plot
 
 
 class Trace:
@@ -667,41 +667,6 @@ class Trace:
             Plot.plot_points(ax, x, y, fs='full', ms=1.0, mk='o', rgb=rgb)
         plot.show()
         return
-
-    # def tfs_to_text(self, tf_list):
-    #     from lms_dist_util import Util
-    #
-    #     util = Util()
-    #     n_terms, _ = tf_list[0][3].shape
-    #     fp_in, fp_out = self.coord_in, self.coord_out
-    #     text = ''
-    #     for tf_idx, tf in enumerate(tf_list):
-    #         eo, sno, spifu_no, a, b, ai, bi = tf
-    #         phase = self.get(fp_in[0], slice=sno, spifu_slice=spifu_no)
-    #         alpha = self.get(fp_in[1], slice=sno, spifu_slice=spifu_no)
-    #         det_x = self.get(fp_out[0], slice=sno, spifu_slice=spifu_no)
-    #         det_y = self.get(fp_out[1], slice=sno, spifu_slice=spifu_no)
-    #
-    #         x, y = util.apply_distortion(phase, alpha, a, b)
-    #         ave_x, rms_x, ave_y, rms_y = self.get_fit_statistics(x, y, det_x, det_y)
-    #         ea, pa, w1, w2, w3, w4 = self._get_parameters()
-    #         for i in range(0, 4):
-    #             mat = tf[i + 3]
-    #             for j in range(0, n_terms):
-    #
-    #                 fmt = "{:3.0f},{:6.3f},{:6.3f},{:6.0f},{:6.0f},"
-    #                 text += fmt.format(eo, ea, pa, sno, spifu_no)
-    #                 fmt = "{:6d},{:6d},{:6d},"
-    #                 text += fmt.format(tf_idx, i, j)
-    #                 fmt = '{:15.7e},'
-    #                 for k in range(0, n_terms):
-    #                     text += fmt.format(mat[j, k])
-    #
-    #                 fmt = "{:8.3f},{:8.3},{:8.3f},{:8.3f},"
-    #                 text += fmt.format(w1, w2, w3, w4)
-    #                 fmt = "{:8.1f},{:8.1f},{:8.1f},{:8.1f}\n"
-    #                 text += fmt.format(ave_x, rms_x, ave_y, rms_y)
-    #     return text
 
     @staticmethod
     def apply_polynomial_distortion(x, y, a, b):

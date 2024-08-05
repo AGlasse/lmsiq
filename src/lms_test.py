@@ -6,7 +6,7 @@ from lms_util import Util
 from lms_wcal import Wcal
 from lms_globals import Globals
 from lms_efficiency import Efficiency
-from lms_dist_plot import Plot
+from lmsdist_plot import Plot
 
 print('lms_test - Starting')
 util = Util()

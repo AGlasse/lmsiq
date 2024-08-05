@@ -3,6 +3,8 @@
 
 @author: achg
 """
+import math
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -229,31 +231,67 @@ class Plot:
         Plot.show()
 
     @staticmethod
+    def _cycle_ijk(ijk, dir):
+        for v in range(0, 3):
+            ijk[v] += dir
+            if ijk[v] < 0:
+                ijk[v] = 2
+            if ijk[v] > 2:
+                ijk[v] = 0
+        return
+
+    @staticmethod
+    def _make_colour_list(n_shades_ramp=1, sat=1.):
+        """ Make a list of colours by tracking around the colour triangle. 
+        """
+        n_triangle_edges = 3
+        n_colours_ramp = n_shades_ramp * n_triangle_edges
+        n_ramps = 2 * n_triangle_edges
+        dcol = n_colours_ramp - 1
+        drgb = sat / dcol                       # Delta colour
+        up = np.arange(0., sat, drgb)
+        down = np.arange(sat, 0., -drgb)
+        n_colours = n_ramps * dcol
+        rgbs = np.zeros((n_colours, 3))         # Array to hold rgb values
+        ijk = [0, 1, 2]
+        c = 0
+        while c < n_colours:
+            [i, j, k] = ijk
+            rgbs[c:c+dcol, i] = sat
+            rgbs[c:c+dcol, j] = up
+            rgbs[c:c+dcol, k] = 0.
+            c += dcol
+            rgbs[c:c+dcol, i] = down
+            rgbs[c:c+dcol, j] = sat
+            rgbs[c:c+dcol, k] = 0.
+            c += dcol
+            Plot._cycle_ijk(ijk, 1)
+
+        colours = tuple(rgbs)
+        return colours
+
+    @staticmethod
     def series(plot_type, traces, optical_configuration):
-        titles = {'coverage': ('Wavelength coverage', "Prism angle + 0.02 x Echelle angle "),
+        titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.02 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
         title, ylabel = titles[plot_type]
         ax_list = Plot.set_plot_area(title,
-                                     xlabel="Wavelength / micron",
+                                     xlabel=r'Wavelength / $\mu$m',
                                      ylabel=ylabel)
         ax = ax_list[0, 0]
-        ccs4_colours = mcolors.CSS4_COLORS
-        if optical_configuration == Globals.spifu:
-            ccs4_colours = mcolors.TABLEAU_COLORS
-
-        colours = sorted(ccs4_colours,
-                         key=lambda c: tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(c))),
-                         reverse=True)
+        colours = Plot._make_colour_list(8, sat=0.9)
         colour_iterator = iter(colours)
         config_colour = {}
         old_labels = []
 
-        for trace in traces[0:-1]:
+        for trace in traces: #        -1]:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
             tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
             config_colour[tag] = next(colour_iterator, 'black')
+            perimeter_upper = []
+            perimeter_lower = []
             for tf in trace.slice_objects:
-                config, matrices, offset_corrections, rays, wave_bounds = tf
+                config, _, _, rays, _ = tf
                 label, slice_no, spifu_no = config
                 waves, _, _, det_x, det_y, _, _ = rays
                 x, y = None, None
@@ -272,13 +310,33 @@ class Plot:
                 ax.plot(x, y, color=colour, clip_on=True,
                         fillstyle='none', marker='.', mew=1.0, ms=1, linestyle='None')
 
-                label = "{:d}".format(int(label))
-                if spifu_no != -1:
-                    label += "/{:d}".format(int(spifu_no))
-                is_new_label = label not in old_labels
+                # Plot perimeter of dot pattern
+                unique_slices = trace.unique_slices
+                unique_waves = np.unique(waves)
+                is_slice_lower = slice_no == unique_slices[0]
+                is_slice_upper = slice_no == unique_slices[-1]
+                if is_slice_lower or is_slice_upper:
+                    for uw in unique_waves:
+                        indices = np.argwhere(x == uw)
+                        yp_unsort = y[indices]
+                        yp = np.sort(yp_unsort)
+                        if is_slice_lower:
+                            perimeter_lower.append([uw, yp[-1][0]])
+                        if is_slice_upper:
+                            perimeter_upper.append([uw, yp[0][0]])
+
+                # label = "{:d}".format(int(label))
+                # if spifu_no != -1:
+                #     label += "/{:d}".format(int(spifu_no))
+                # is_new_label = label not in old_labels
                 # if is_new_label:
                 #     ax.text(x_label, y_label, label)
                 #     old_labels.append(label)
+            perimeter_lower.reverse()
+            xy = perimeter_upper + perimeter_lower + perimeter_upper[0:1]
+            xy = np.array(xy)
+            ax.plot(xy[:, 0], xy[:, 1], color='black', linestyle='solid', lw=0.5)
+
         Plot.show()
         return
 

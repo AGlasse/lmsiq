@@ -17,7 +17,7 @@ class Cuber:
         return
 
     @staticmethod
-    def build(data_identifier, process_control, image_manager, iq_filer, **kwargs):
+    def build(data_identifier, process_control, image_manager, iq_filer, dist_filer, **kwargs):
         """ Build fits cubes (alpha, beta, lambda, configuration, field_position) from the slice images,
         optionally including detector diffusion.
         """
@@ -27,8 +27,6 @@ class Cuber:
         axes = ['across-slice', 'along-slice']
 
         opticon = data_identifier['optical_path']
-        model_configuration = 'distortion', opticon, '20240109', None, None, None
-        dist_filer = Filer(model_configuration)
         traces = dist_filer.read_pickle(dist_filer.trace_file)
 
         profile_folder = iq_filer.get_folder(iq_filer.output_folder + 'profiles')
@@ -58,7 +56,7 @@ class Cuber:
             print("no. of optical models (2 + Monte-Carlo instances) = {:d}".format(n_runs))
             slice_radius = data_identifier['slice_radius']
 
-            for field_idx, field_no in enumerate(field_nos):
+            for field_no in field_nos:
                 fts = data_identifier['field_tgt_slice']
                 slice_tgt = fts[field_no]
                 field_tag = "field_{:d}".format(field_no)
@@ -126,11 +124,9 @@ class Cuber:
                                         print('No images found, exiting cuber.build')
                                     continue
 
-                                fmt = "\r- Diffusion {:s}, field {:2d}, spifu_no {:d}, configuration {:2d}," + \
-                                      " focus {:4d}" + \
-                                      " extracting slice_no {:d} at t= {:7.2f} min"
-                                print(fmt.format(str(inter_pixel), field_no,
-                                                 spifu_no, config_no,
+                                fmt = "\r- diffusion {:s}, field {:02d}, spifu_no {:01d}, configuration {:03d}," + \
+                                      " focus {:03d}," + " extracting slice_no {:02d} at t= {:7.2f} min"
+                                print(fmt.format(str(inter_pixel), field_no, spifu_no, config_no,
                                                  focus, slice_no, t_min),
                                       end="", flush=True)
 
@@ -252,7 +248,7 @@ class Cuber:
         cube_pkl_folder = iq_filer.get_folder(iq_filer.cube_folder + 'pkl')
         file_list = iq_filer.get_file_list(cube_pkl_folder,
                                            inc_tags=inc_tags,
-                                           excl_tags=['slicer'])
+                                           exc_tags=['slicer'])
         cube_packages = []
         for file in file_list:
             file_path = cube_pkl_folder + file
@@ -271,89 +267,60 @@ class Cuber:
         return cube_packages_out
 
     @staticmethod
-    def write_csv(optical_path, cube_packages, iq_filer):
-        csv_value_keys = {'prism_angle': (['Prism angle', 'deg.'], '12.4f'),
-                          'grating_angle': (['Grating angle', 'deg'], '14.4f'),
-                          'grating_order': (['Grating order', '-'], '14d'),
-                          'wavelength': (['Wavelength', '-'], '12.6f'),
-                          }
-        n_common_cols = len(csv_value_keys)
-        csv_array_keys = {'strehls': (['<Strehl>', '-'], '10.3f'),
-                          'gau_fwhms': (['<Gauss FWHM>', 'pix.'], '15.3f'),
-                          'lin_fwhms': (['<Linear FWHM>', 'pix.'], '15.3f')}
-
-        uni_field_nos, uni_config_nos, uni_spifu_nos = [], [], []
+    def write_csv(image_manager, cube_packages, iq_filer):
+        model_dict = image_manager.model_dict
+        optical_path = model_dict['optical_path']
         is_spifu = optical_path == 'spifu'
-        # Make array of common values
-        field_no_min, field_no_max = 1000, -1000
+        unique_parameters = image_manager.unique_parameters
+        n_fields = len(unique_parameters['field_nos'])
+        n_wavelengths = len(unique_parameters['config_nos'])
 
-        for cube_package in cube_packages:
-            _, _, field_series = cube_package
-            field_no = field_series['field_no']
-            if field_no not in uni_field_nos:
-                uni_field_nos.append(field_no)
-                field_no_min = field_no_min if field_no_min < field_no else field_no
-                field_no_max = field_no_max if field_no_max > field_no else field_no
-            config_no = field_series['config_no']
-            if config_no not in uni_config_nos:
-                uni_config_nos.append(config_no)
-            spifu_no = field_series['spifu_no']
-            if spifu_no not in uni_spifu_nos:
-                uni_spifu_nos.append(spifu_no)
+        field_col_idx = 4
+        n_rows = n_wavelengths
+        n_cols = n_fields + field_col_idx
+        values = np.zeros((n_rows, n_cols))
+        csv_array_keys = {'strehls': (['<Strehl>', '-'], '10.3f'),
+                          'lsf_gau_fwhms': (['<Gauss FWHM>', 'pix.'], '15.3f'),
+                          'lsf_lin_fwhms': (['<Linear FWHM>', 'pix.'], '15.3f')}
 
-        n_rows, n_data_cols = len(uni_config_nos), len(uni_field_nos)
-        if is_spifu:
-            n_rows = len(uni_spifu_nos)
-        blocks = {}
-        for key in csv_array_keys:
-            blocks[key] = np.zeros((n_rows, n_common_cols + n_data_cols))
-
-        for cube_package in cube_packages:
-            _, _, field_series = cube_package
-            field_no = field_series['field_no']
-            field_idx = field_no - field_no_min
-            config_no = field_series['config_no']
-            spifu_no = field_series['spifu_no']
-
-            r = spifu_no - 1 if is_spifu else config_no - 1  # Row in data block
-            for akey in csv_array_keys:
-                block = blocks[akey]
-                block[r, 0] = field_series['prism_angle']
-                block[r, 1] = field_series['grating_angle']
-                block[r, 2] = field_series['grating_order']
-                block[r, 3] = spifu_no if is_spifu else field_series['wavelength']
-
-                vals = field_series[akey]
-                v = np.mean(vals[2:])
-                c = n_common_cols + field_idx - 1
-                block[r, c] = v
-
-        common_fmts = ['{:8.4f},', '{:6.1f},', '{:6.0f},', '{:8.3f},']
-        val_fmt = '{:8.3f},'
         csv_text_block = ''
         for akey in csv_array_keys:
-            print()
-            print("\n{:s}".format(akey))
-            csv_text_block += "\n{:s}".format(akey)
-            block = blocks[akey]
-            # Sort by wavelength
-            waves = block[:, 3]
-            idx = np.argsort(waves)
-            sblock = block[idx, :]
-            nr, nc = block.shape
-            for r in range(0, nr):
-                row = '\n'
-                for c in range(0, nc):
-                    fmt = common_fmts[c] if c < 4 else val_fmt
-                    row += fmt.format(sblock[r, c])
-                csv_text_block += row
-                print(row)
+            for cube_package in cube_packages:
+                _, _, field_series = cube_package
+                field_no = field_series['field_no']
+                col = field_no + field_col_idx - 1
 
-            csv_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/csv')
-            csv_path = csv_folder + 'series.csv'
-            print("Filer.write_profiles to {:s}".format(csv_path))
-            with open(csv_path, 'w', newline='') as csv_file:
-                print(csv_text_block, file=csv_file)
+                config_no = field_series['config_no']
+                spifu_no = field_series['spifu_no']
+                row = spifu_no - 1 if is_spifu else config_no - 1  # Row in data block
+                values[row, 0] = field_series['prism_angle']
+                values[row, 1] = field_series['grating_angle']
+                values[row, 2] = field_series['grating_order']
+                values[row, 3] = spifu_no if is_spifu else field_series['wavelength']
+
+                vals = field_series[akey]
+                val = np.mean(vals[2:])
+                values[row, col] = val
+
+            indices = np.argsort(values[:, 3])
+            values = values[indices, :]
+            common_fmts = ['{:8.4f},', '{:6.1f},', '{:6.0f},', '{:8.3f},']
+            val_fmt = '{:8.3f},'
+            csv_text_block += "\n"
+            csv_text_block += "\n{:s}".format(akey)
+            for row in range(0, n_rows):
+                csv_text_block += "\n"
+                for col in range(0, 4):
+                    csv_text_block += common_fmts[col].format(values[row, col])
+                for col in range(4, n_cols):
+                    csv_text_block += val_fmt.format(values[row, col])
+        print(csv_text_block)
+
+        csv_folder = Filer.get_folder(iq_filer.output_folder + 'cube/series/csv')
+        csv_path = csv_folder + 'series.csv'
+        print("Filer.write_profiles to {:s}".format(csv_path))
+        with open(csv_path, 'w', newline='') as csv_file:
+            print(csv_text_block, file=csv_file)
         return
 
     @staticmethod

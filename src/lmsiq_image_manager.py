@@ -110,7 +110,7 @@ class ImageManager:
                 if mc_code in fits_file:
                     c1 = fits_file.rfind(mc_code) + mc_codelen
                     mc_tag = fits_file[c1: c1 + mc_width]
-                    # print(mc_tag)
+                    # print(folder, mc_tag)
                     mc_no = int(mc_tag)
                     mc_no_list.append(mc_no)
             if len(mc_no_list) > 0:             # If 'MC' data is included in dataset
@@ -346,19 +346,13 @@ class ImageManager:
 
     @staticmethod
     def load_dataset(iq_filer, selection, **kwargs):
-        """ Load a data (sub-)set (perfect, design plus MC images).  Filter = None to read all
-        data in class.
+        """ Load a data (sub-)set (perfect, design plus MC images).
         """
         model_dict = ImageManager.model_dict
         config_dict = ImageManager.config_dict
 
         debug = kwargs.get('debug', False)
         xy_shift = kwargs.get('xy_shift', None)
-        # if xy_shift is None:
-        #     print()
-        #     t1 = '  Loading data with xy_shift = None'
-        #     t2 = ', Zemax sources will be shifted by 0.25 detector pixels from the image centre'
-        #     print(t1 + t2)
         slice_no = selection['slice_no']
         spifu_no = selection['spifu_no']
 
@@ -441,6 +435,17 @@ class ImageManager:
                 mc_tag = "{:04d}".format(mc_no)
                 mc_tags.append(mc_tag)
 
+        # Check no. of files in folder against expectation
+        n_slices = len(slice_nos)
+        n_spifus = len(spifu_nos)
+        n_mcs = mc_bounds[1] - mc_bounds[0] + 3
+        n_text = 1
+        n_expected = n_slices * n_spifus * n_mcs + n_text
+        all_files = iq_filer.get_file_list(fits_folder)
+        n_files = len(all_files)
+        if n_files != n_expected:
+            print("Found {:d} files, {:d} expected in folder {:s}".format(n_files, n_expected, folder))
+
         images, file_names = [], []
         for mc_tag in mc_tags:
             inc_tags = [mc_tag, obs_tag, '.fits']
@@ -481,8 +486,9 @@ class ImageManager:
                         r2, c2 = r1 + sampling, c1 + sampling
                         image[row, col] = np.mean(osim[r1:r2, c1:c2])
 
-            images.append(image)     # Remove first row and column
+            images.append(image)
             file_names.append(file)
+
         ds_dict['file_names'] = file_names
         return images, ds_dict
 
