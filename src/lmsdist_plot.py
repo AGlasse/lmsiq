@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from lms_globals import Globals
+from lmsdist_util import Util
 
 
 class Plot:
@@ -27,7 +28,7 @@ class Plot:
         nrows = kwargs.get('nrows', 1)
         remplots = kwargs.get('remplots', None)
         aspect = kwargs.get('aspect', 'auto')      # 'equal' for aspect = 1.0
-        fontsize = kwargs.get('fontsize', 12)
+        fontsize = kwargs.get('fontsize', 16)
 
         plt.rcParams.update({'font.size': fontsize})
 
@@ -282,18 +283,19 @@ class Plot:
         colours = Plot._make_colour_list(8, sat=0.9)
         colour_iterator = iter(colours)
         config_colour = {}
-        old_labels = []
 
-        for trace in traces: #        -1]:
+        for trace in traces:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
             tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
             config_colour[tag] = next(colour_iterator, 'black')
-            perimeter_upper = []
-            perimeter_lower = []
+            n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
+            perimeter_upper, perimeter_lower = None, None
             for tf in trace.slice_objects:
                 config, _, _, rays, _ = tf
                 label, slice_no, spifu_no = config
                 waves, _, _, det_x, det_y, _, _ = rays
+                rgb = Util.make_rgb_gradient(waves)
+
                 x, y = None, None
                 if plot_type == 'coverage':
                     x = waves
@@ -307,35 +309,42 @@ class Plot:
 
                 tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
                 colour = config_colour[tag]
-                ax.plot(x, y, color=colour, clip_on=True,
-                        fillstyle='none', marker='.', mew=1.0, ms=1, linestyle='None')
+                n_pts = len(x)
+
+                for i in range(0, n_pts):
+                    ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
+                            fillstyle='none', marker='.', mew=1., ms=1, ls='None')
+
+                # ax.plot(x, y, color=colour, clip_on=True,
+                #         fillstyle='none', marker='.', mew=1.0, ms=1, linestyle='None')
 
                 # Plot perimeter of dot pattern
-                unique_slices = trace.unique_slices
                 unique_waves = np.unique(waves)
+                n_waves = len(unique_waves)
+                if perimeter_upper is None:
+                    perimeter_shape = n_spifus, n_waves, 2
+                    perimeter_upper, perimeter_lower = np.zeros(perimeter_shape), np.zeros(perimeter_shape)
+                unique_slices = trace.unique_slices
+                unique_spifus = trace.unique_spifu_slices
+                spifu_idx = np.argwhere(spifu_no == unique_spifus)[0][0]
                 is_slice_lower = slice_no == unique_slices[0]
                 is_slice_upper = slice_no == unique_slices[-1]
-                if is_slice_lower or is_slice_upper:
-                    for uw in unique_waves:
-                        indices = np.argwhere(x == uw)
-                        yp_unsort = y[indices]
-                        yp = np.sort(yp_unsort)
-                        if is_slice_lower:
-                            perimeter_lower.append([uw, yp[-1][0]])
-                        if is_slice_upper:
-                            perimeter_upper.append([uw, yp[0][0]])
+                for wave_idx, uw in enumerate(unique_waves):
+                    indices = np.argwhere(x == uw)
+                    yp_unsort = y[indices]
+                    yp = np.sort(yp_unsort)
+                    if is_slice_lower:
+                        perimeter_lower[spifu_idx, wave_idx] = [uw, yp[-1][0]]
+                    if is_slice_upper:
+                        perimeter_upper[spifu_idx, wave_idx] = [uw, yp[0][0]]
 
-                # label = "{:d}".format(int(label))
-                # if spifu_no != -1:
-                #     label += "/{:d}".format(int(spifu_no))
-                # is_new_label = label not in old_labels
-                # if is_new_label:
-                #     ax.text(x_label, y_label, label)
-                #     old_labels.append(label)
-            perimeter_lower.reverse()
-            xy = perimeter_upper + perimeter_lower + perimeter_upper[0:1]
-            xy = np.array(xy)
-            ax.plot(xy[:, 0], xy[:, 1], color='black', linestyle='solid', lw=0.5)
+            for spifu_idx, spifu_no in enumerate(trace.unique_spifu_slices):
+                xyl = perimeter_lower[spifu_idx]
+                xyu = perimeter_upper[spifu_idx]
+                xyl = np.flip(xyl, axis=0)
+                xy = np.concatenate((xyu, xyl, xyu[0:1]))
+                plt.fill(xy[:, 0], xy[:, 1], color='pink')
+                ax.plot(xy[:, 0], xy[:, 1], color='black', linestyle='solid', lw=0.5)
 
         Plot.show()
         return
@@ -356,7 +365,7 @@ class Plot:
                     fillstyle=fs, marker=mk, mew=mew, ms=ms, linestyle='None')
         else:
             for i in range(0, n_pts):
-                ax.plot(x[i], y[i], color=rgb[:, i], clip_on=True,
+                ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
                         fillstyle=fs, marker=mk, mew=mew, ms=ms)
         return
 

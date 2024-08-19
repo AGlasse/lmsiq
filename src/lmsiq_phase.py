@@ -4,7 +4,7 @@ from lms_detector import Detector
 from lms_ipc import Ipc
 from lmsiq_plot import Plot
 from lmsiq_analyse import Analyse
-from lms_util import Util
+from lmsdist_util import Util
 
 
 class Phase:

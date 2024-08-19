@@ -9,67 +9,29 @@ import numpy as np
 import lmsdist_trace
 
 
-class Filer:
+class Transform:
 
-    analysis_types = ['distortion', 'iq']
-    trace_file, poly_file, wcal_file, stats_file, tf_fit_file = None, None, None, None, None
-    base_results_path = None
-    cube_folder, iq_png_folder = None, None
-    slice_results_path, dataset_results_path = None, None
-    pdp_path, profiles_path, centroids_path = None, None, None
-
-    def __init__(self, model_configuration):
-        analysis_type, optical_path, date_stamp, _, _, _ = model_configuration
-        self.model_configuration = model_configuration
-        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_path, date_stamp)
-        self.data_folder = self.get_folder('../data/' + sub_folder)
-        self.output_folder = self.get_folder('../output/' + sub_folder)
-        file_leader = self.output_folder + sub_folder.replace('/', '_')
-        if analysis_type == 'distortion':
-            self.tf_dir = self.get_folder(self.output_folder + 'fits')
-            self.trace_file = file_leader + '_trace'  # All ray coordinates
-            self.poly_file = file_leader + '_dist_poly.txt'
-            self.wcal_file = file_leader + '_dist_wcal.txt'  # Echelle angle as function of wavelength
-            self.stats_file = file_leader + '_dist_stats.txt'
-            self.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
-        if analysis_type == 'iq':
-            self.cube_folder = self.get_folder(self.output_folder + '/cube')
+    def __init__(self):
+        self.configuration = {}
+        self.matrices = {}
         return
 
-    @staticmethod
-    def get_file_list(folder, inc_tags=[], exc_tags=[]):
-        file_list = listdir(folder)
-        for tag in inc_tags:
-            file_list = [f for f in file_list if tag in f]
-        for tag in exc_tags:
-            file_list = [f for f in file_list if tag not in f]
-        return file_list
-
-    @staticmethod
-    def get_folder(in_path):
-        tokens = in_path.split('/')
-        out_path = ''
-        for token in tokens:
-            out_path = out_path + token + '/'
-            if not os.path.exists(out_path):
-                os.mkdir(out_path)
-        return out_path
-
-    def write_fits_transform(self, trace):
+    def write_fits(self, trace):
         # Create data tables holding transforms for all slices
         par = trace.parameter
         ea = par['Echelle angle']
         pa = par['Prism angle']
-        opticon = trace.opticon
-        trc = Globals.transform_config
-        n_mats = trc['n_mats']
-        mat_order = trc['mat_order']
+        opticon = 'Extended' if trace.is_spifu else 'Nominal'
+        n_mats = Globals.n_mats_transform
+        n_mat_terms = trace.n_mat_terms
 
         primary_cards = [Card('OPTICON', opticon, 'Optical configuration'),
                          Card('ECH_ANG', ea, 'Echelle angle / deg'),
                          Card('PRI_ANG', pa, 'Prism angle / deg'),
                          Card('N_MATS', n_mats, 'A, B, AI, BI transform matrices'),
-                         Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
+                         Card('N_TERMS', n_mat_terms, 'Transform matrix dimensions'),
+                         Card('W_MIN', trace.wmin, 'Short wavelength limit / micron'),
+                         Card('W_MAX', trace.wmax, 'Long wavelength limit / micron')
                          ]
         trace_hdr = fits.Header(primary_cards)        # {'ECH_ANG': ea}
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
@@ -81,12 +43,10 @@ class Filer:
         fits_name = fmt.format(ea_tag, pa_tag)
         fits_path = self.tf_dir + fits_name + '.fits'
         for slice_object in trace.slice_objects:
-            ech_order, slice_no, spifu_no, w_min, w_max = slice_object[0]
+            ech_order, slice_no, spifu_no = slice_object[0]
             cards = [Card('ECH_ORD', ech_order, 'Echelle diffraction order'),
                      Card('SLICE', slice_no, 'Spatial slice number (1 <= slice_no <= 28)'),
-                     Card('SPIFU', spifu_no, 'Spectral IFU slice no.'),
-                     Card('W_MIN', w_min, 'Minimum slice wavelength (micron)'),
-                     Card('W_MAX', w_max, 'Maximum slice wavelength (micron)')]
+                     Card('SPIFU', spifu_no, 'Spectral IFU slice no.')]
 
             a, b, ai, bi = slice_object[1]
             col_a = fits.Column(name='a', array=a.flatten(), format='E')
@@ -109,16 +69,7 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return fits_name
 
-    def read_fits_transforms(self):
-        fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=[], exc_tags=[])
-        transform_list = []
-        for fits_name in fits_file_list:
-            transforms = self.read_fits_transform(fits_name)
-            for transform in transforms:
-                transform_list.append(transform)
-        return transform_list
-
-    def read_fits_transform(self, fits_name):
+    def read_fits(self, fits_name):
         """ Read fits file into a 'trace' object, which
         """
         fits_path = self.tf_dir + fits_name
@@ -128,15 +79,17 @@ class Filer:
         ea = primary_hdr['ECH_ANG']
         pa = primary_hdr['PRI_ANG']
         n_mats = primary_hdr['N_MATS']
-        mat_order = primary_hdr['MAT_ORD']
+        n_mat_terms = primary_hdr['N_TERMS']
+        w_min = primary_hdr['W_MIN']
+        w_max = primary_hdr['W_MAX']
 
         base_config = {'opticon': opticon, 'ech_ang': ea, 'pri_ang': pa,
-                       'n_mats': n_mats, 'mat_order': mat_order}
-        mat_shape = mat_order, mat_order
+                       'n_mats': n_mats, 'n_mat_terms': n_mat_terms,
+                       'w_min': w_min, 'w_max': w_max}
+        mat_shape = n_mat_terms, n_mat_terms
 
         transform_list = []
-        tr_hdr_keys = ['ECH_ORD', 'SLICE', 'SPIFU', 'W_MIN', 'W_MAX',
-                       'XP1', 'XP3', 'XP5', 'YP1', 'YP3', 'YP5']
+        tr_hdr_keys = ['ECH_ORD', 'SLICE', 'SPIFU', 'XP1', 'XP3', 'XP5', 'YP1', 'YP3', 'YP5']
         for hdu in hdu_list[1:]:
             table, hdr = hdu.data, hdu.header
             config = base_config.copy()

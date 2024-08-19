@@ -4,8 +4,10 @@
 
 Update:
 """
+import math
 import numpy as np
 from lms_globals import Globals
+from scipy.optimize import least_squares
 
 
 class Util:
@@ -36,6 +38,45 @@ class Util:
         all_lines = open(text_file, 'r').read().splitlines()
         lines = all_lines[n_hdr_lines:]
         return lines
+
+    @staticmethod
+    def waves_to_phases(waves, ech_orders):
+        d = Globals.rule_spacing * Globals.ge_refractive_index
+        sin_aoi = waves * ech_orders / (2.0 * d)
+        phases = np.arcsin(sin_aoi)
+        return phases
+
+    @staticmethod
+    def phases_to_waves(phases, ech_orders):
+        d = Globals.rule_spacing * Globals.ge_refractive_index
+        sin_aoi = np.sin(phases)
+        waves = sin_aoi * 2.0 * d / ech_orders
+        return waves
+
+    @staticmethod
+    def apply_svd_distortion(x, y, a, b):
+        """
+        @author Alistair Glasse
+        21/2/17   Create to encapsulate distortion transforms
+        Apply a polynomial transform pair (A,B or AI,BI) to an array of points
+        affine = True  Apply an affine version of the transforms (remove all non-linear terms)
+        """
+        dim = a.shape[0]
+        n_pts = len(x)
+
+        exponent = np.array([range(0, dim), ] * n_pts).transpose()
+
+        xmat = np.array([x, ] * dim)
+        xin = np.power(xmat, exponent)
+        ymat = np.array([y, ] * dim)
+        yin = np.power(ymat, exponent)
+
+        xout = np.zeros(n_pts)
+        yout = np.zeros(n_pts)
+        for i in range(0, n_pts):
+            xout[i] = yin[:, i] @ a @ xin[:, i]
+            yout[i] = yin[:, i] @ b @ xin[:, i]
+        return xout, yout
 
     @staticmethod
     def read_raytrace_file(raytrace_file, **kwargs):
@@ -210,7 +251,7 @@ class Util:
                 phases = trace.waves_to_phase(np.array([w1, w2]), np.array([order, order]))
                 alpha_middle = 0.0  # FP2 coordinate
                 alphas = [alpha_middle, alpha_middle]
-                det_x, _ = trace.apply_polynomial_distortion(np.array(phases), np.array(alphas), a, b)
+                det_x, _ = trace.apply_svd_distortion(np.array(phases), np.array(alphas), a, b)
                 dx = det_x[1] - det_x[0]
                 dw_dx = dw / dx  # micron per mm
                 dw_lmspix = dw_dx * Globals.nom_pix_pitch / 1000.0  # micron per (nominal) pixel
@@ -340,37 +381,126 @@ class Util:
         return text
 
     @staticmethod
-    def efp_to_dfp(traces, efp_point, tgt_config):
-        """ Transform a point in the LMS entrance focal plane (w, efp_x, efp_y) onto the
-        detector mosaic (det_x, det_y), given an LMS mechanism configuration by interpolation of
-        nearby points.
-        For the nominal optical path
-        1. Find the IFU slice corresponding to (efp_x, efp_y).
-        2.
+    def efp_y_to_slice(efp_y):
+        """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
+        a fraction of the slice width
         """
-        efp_x, efp_y, wave = efp_point
-        tgt_ech_order, tgt_slice_no, tgt_spifu_no = tgt_config
-        # Find the 4 nearest neighbour traces
-        nn_slice_objects = []
-        for trace in traces:
-            for slice_object in trace.slice_objects:
-                config, transforms, corr_polys, rays, wave_bounds = slice_object
-                order, slice_no, spifu_no = config
-                # print(order, slice_no, spifu_no)
-                is_order = order == tgt_ech_order
-                if not is_order:
-                    continue
-                is_slice_no = slice_no == tgt_slice_no
-                if not is_slice_no:
-                    continue
-                is_spifu_no = spifu_no == tgt_spifu_no
-                if not is_spifu_no:
-                    continue
-                nn_slice_objects.append(slice_object)
-        # Loop through nearest neighbour transforms
-        for nn_so in nn_slice_objects:
-            nn_config, nn_transforms, nn_corr_polys, nn_rays, _ = nn_so
-        return 0., 0.
+        efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
+        n_slices = Globals.n_lms_slices
+        slice_coord = n_slices // 2 + efp_y / efp_slice_width
+        slice_no = n_slices // 2 + int(efp_y / efp_slice_width)
+        phase = slice_coord - slice_no
+        return slice_no, phase
+
+    @staticmethod
+    def slice_to_efp_y(slice_no, phase):
+        efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
+        n_slices = Globals.n_lms_slices
+        slice = slice_no + phase
+        efp_y = (slice - n_slices // 2) * efp_slice_width
+        return efp_y
+
+    @staticmethod
+    def efp_to_dfp(transform, efp_points):
+        """ Transform a point in the LMS entrance focal plane onto the detector mosaic.
+        Note that the transform will normally have been verified as non-vignetting
+        for this point in the EFP.
+        """
+        config = transform['configuration']
+        ech_ord = config['ech_ord']
+
+        alphas, efp_y, efp_w = efp_points['efp_x'], efp_points['efp_y'], efp_points['efp_w']
+        ech_orders = np.full(efp_w.shape, ech_ord)
+        phases = Util.waves_to_phases(efp_w, ech_orders)
+
+        xp1, xp3, xp5 = config['xp1'], config['xp3'], config['xp5']
+        yp1, yp3, yp5 = config['yp1'], config['yp3'], config['yp5']
+        xp = [xp1, xp3, xp5]
+        yp = [yp1, yp3, yp5]
+
+        matrices = transform['matrices']
+        a, b = matrices['a'], matrices['b']
+        det_x_svd, det_y_svd = Util.apply_svd_distortion(phases, alphas, a, b)
+        res_x = Util.offset_error_function(xp, det_x_svd, 0.)
+        res_y = Util.offset_error_function(yp, det_y_svd, 0.)
+        det_x, det_y = det_x_svd + res_x, det_y_svd + res_y
+
+        dfp_points = {'det_x': det_x, 'det_y': det_y}
+        return dfp_points
+
+    @staticmethod
+    def dfp_to_efp(transform, dfp_points, slice_phase=0.):
+        """ Transform a point on the LMS detector (det_x, det_y) (w, efp_x, efp_y) onto the
+        detector mosaic (det_x, det_y).  Note that the transform will normally have been verified as non-vignetting
+        for this point in the EFP.
+        slice_phase: Intra-slice position is degenerate with wavelength. It can be passed explicitly here, with
+                     the default being to assume the centre of the slice in the EFP (slice_phase = 0.).
+        """
+        config = transform['configuration']
+        ech_ord = config['ech_ord']
+        slice_no = config['slice']
+        det_x, det_y = dfp_points['det_x'], dfp_points['det_y']
+
+        xp1, xp3, xp5 = config['xp1'], config['xp3'], config['xp5']
+        yp1, yp3, yp5 = config['yp1'], config['yp3'], config['yp5']
+        xp = [xp1, xp3, xp5]
+        yp = [yp1, yp3, yp5]
+        res_x = Util.offset_error_function(xp, det_x, 0.)
+        res_y = Util.offset_error_function(yp, det_y, 0.)
+
+        det_x_svd, det_y_svd = det_x - res_x, det_y - res_y
+        matrices = transform['matrices']
+        ai, bi = matrices['ai'], matrices['bi']
+        phases, alphas = Util.apply_svd_distortion(det_x_svd, det_y_svd, ai, bi)
+
+        ech_orders = np.full(alphas.shape, ech_ord)
+        waves = Util.phases_to_waves(phases, ech_orders)
+
+        efp_y_val = Util.slice_to_efp_y(slice_no, slice_phase)
+        efp_y = np.full(alphas.shape, efp_y_val)
+
+        efp_points = {'efp_x': alphas, 'efp_y': efp_y, 'efp_w': waves}
+        return efp_points
+
+    @staticmethod
+    def is_det_hit(det_x, det_y):
+        """ Check if a detector x, y coordinate (mm) falls on a light sensitive pixel.  Will be supreceded when
+        we have a map from det_x, det_y to pix_col, pix_row
+        """
+        det_lims = Globals.det_lims
+        for det_name in det_lims:
+            x_lim, y_lim = det_lims[det_name]
+            is_x_hit = x_lim[0] <= det_x and det_x < x_lim[1]
+            is_y_hit = y_lim[0] <= det_y and det_y < y_lim[1]
+            is_hit = is_x_hit and is_y_hit
+            if is_hit:
+                return  is_hit, det_name
+        return False, None
+
+    @staticmethod
+    def offset_error_function(p, x, y):
+        """ Polynomial with odd powered terms.
+        """
+        residual = (x * (p[0] + x * x * (p[1] + p[2] * x * x))) - y
+        return residual
+
+    @staticmethod
+    def fit_residual(x_ref, x_in, y_in):
+        _, xy_sort = Util.sort(x_ref, (x_in, y_in))
+        guess_oc = [0.0, 0.0, 0.0]
+        res_lsq = least_squares(Util.offset_error_function, guess_oc, args=xy_sort)
+        offset_correction = res_lsq.x
+        return offset_correction
+
+    @staticmethod
+    def sort(ref, unsort):
+        """ Re-order arrays in list 'unsort' using the index list from sorting array 'ref' in ascending order.
+        """
+        indices = np.argsort(ref)
+        sort = []
+        for array in unsort:
+            sort.append(array[indices])
+        return ref[indices], tuple(sort)
 
     @staticmethod
     def lookup_transform_fit(config, prism_angle, transform_fits):
@@ -446,7 +576,7 @@ class Util:
         return xl, xr, yh
 
     @staticmethod
-    def distortion_fit(x_in, y_in, x_out, y_out, order, inverse=True):
+    def solve_svd_distortion(x_in, y_in, x_out, y_out, order, inverse=False):
         # @author Tea Temim
         # Converted to python from Ronayette's original IDL code (Temim)
         # 21/2/17
@@ -507,3 +637,19 @@ class Util:
             ech_order, slice_no, spifu_no, a, b, ai, bi = tf
             u, v = Util.apply_distortion(x, y, ai, bi)
         return u, v
+
+    @staticmethod
+    def make_rgb_gradient(vals):
+        n_pts = len(vals)
+        rgb = np.zeros((n_pts, 3))
+
+        w_min = np.amin(vals)
+        w_max = np.amax(vals)
+        r_min, r_max = 0., 1.
+        b_min, b_max = 1., 0.
+
+        f = (vals - w_min) / (w_max - w_min)
+        rgb[:, 0] = r_min + f * (r_max - r_min)
+        rgb[:, 1] = np.sin(f * math.pi)
+        rgb[:, 2] = b_min + f * (b_max - b_min)
+        return rgb

@@ -2,7 +2,7 @@ import numpy as np
 import time
 from lmsiq_fitsio import FitsIo
 from lms_wcal import Wcal
-from lms_util import Util
+from lmsdist_util import Util
 from lms_filer import Filer
 from lms_detector import Detector
 from lms_ipc import Ipc

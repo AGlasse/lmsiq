@@ -13,7 +13,7 @@ from lmsiq_phase import Phase
 from lmsiq_cuber import Cuber
 from lmsiq_summariser import Summariser
 from lmsiq_image_manager import ImageManager
-from lms_util import Util
+from lmsdist_util import Util
 from lmsiq_test import Test
 
 print('LMS Repeatability (lmsiq.py) - started')
@@ -116,7 +116,7 @@ if process_phase_data:
     phase.process(data_identifier, process_control, iq_filer, image_manager,
                   config_nos=[0], field_nos=[2], plot_level=2)
 
-build_cubes = False
+build_cubes = True
 if build_cubes:
     print()
     print('\nReconstructing cubes and analysing slice profile data')

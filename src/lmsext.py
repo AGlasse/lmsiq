@@ -2,7 +2,7 @@ from lmsiq_analyse import Analyse
 from lmsiq_fitsio import FitsIo
 from lmsiq_plot import Plot
 from lmsiq_phase import Phase
-from lms_util import Util
+from lmsdist_util import Util
 from lms_wcal import Wcal
 from lms_ipc import Ipc
 from lms_detector import Detector
