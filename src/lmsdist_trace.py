@@ -11,13 +11,12 @@ import matplotlib.patches as mpatches
 from lms_detector import Detector
 from lms_globals import Globals
 from lmsdist_util import Util
-from lms_transform import Transform
 from lmsdist_plot import Plot
 
 
 class Trace:
 
-    common_series_names = {'ech_order': 'int', 'slice': 'int', 'sp_slice': 'int',
+    common_series_names = {'ech_order': 'int', 'slice_no': 'int', 'sp_slice': 'int',
                            'slicer_x': 'float', 'slicer_y': 'float', 'ifu_x': 'float', 'ifu_y': 'float'}
     nominal_efp_map = {'efp_x': 'fp2_x', 'efp_y': 'fp2_y'}
     nominal_series_names = {'slit_x': 'float', 'slit_y': 'float'}
@@ -31,32 +30,32 @@ class Trace:
                           'IFU': ('ifu_x', 'ifu_y'), 'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
                           'Detector': ('det_x', 'det_y')}
 
-    def __init__(self, path, coord_in, coord_out, **kwargs):
+    affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
+
+    def __init__(self, path, model_config, **kwargs):
         """ Read in Zemax ray trace data for a specific LMS configuration (echelle and prism angle, spectral IFU
         selected or not).
         @author: Alistair Glasse
         Read Zemax ray trace data
         """
+        _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
+        self.is_spifu = opticon == Globals.spifu
+        self.model_config = model_config
         self.transforms = None                              # Replacement for slice_objects
-        self.slice_objects, self.ray_trace = None, None
+        self.slices, self.ray_trace = None, None
         self.offset_data = None
+        self.a_rms = 0.                          # RMS transform errorfor trace (microns)
         self.n_mat_terms = None
-        self.coord_in = coord_in
-        self.coord_out = coord_out
-        self.opticon = kwargs.get('opticon', False)
-        is_spifu = self.opticon == Globals.spifu
-        # fp_dict = Trace.spifu_focal_planes if self.is_spifu else Trace.nominal_focal_planes
         silent = kwargs.get('silent', False)
         if not silent:
             print('Reading Zemax model data from ' + path)
-        efp_map = Trace.spifu_efp_map if is_spifu else Trace.nominal_efp_map
-        csv_name, config, series = self._read_csv(path, is_spifu, coord_in, coord_out, efp_map)
-        self.lms_config = {'opticon': self.opticon, 'pri_ang': config['Prism angle'],
+        csv_name, config, series = self._read_csv(path, model_config)
+        self.lms_config = {'opticon': opticon, 'pri_ang': config['Prism angle'],
                            'ech_ang': config['Echelle angle'], 'ech_order': config['Spectral order']}
         self.parameter = config
 
         # For SPIFU data, spifu slices 1,2 -> echelle order 23, 3,4 _> 24, 5,6 -> 25
-        if is_spifu:
+        if self.is_spifu:
             spifus = series['sp_slice']
             spifu_indices = spifus - 1
             ech_orders = np.mod(spifu_indices, 3) + 23
@@ -69,22 +68,49 @@ class Trace:
 
         # Count the number of slices and rays
         self.unique_ech_orders = np.unique(ech_orders)
-        slices = series['slice']
-        self.unique_slices = np.unique(slices)
+        slice_nos = series['slice_no']
+        self.unique_slices = np.unique(slice_nos)
         spifus = series['sp_slice']
         self.unique_spifu_slices = np.unique(spifus)
         self.unique_waves = np.unique(waves)
-        self.n_rays, = slices.shape
+        self.n_rays, = slice_nos.shape
 
         self._create_mask(silent)
+        Trace.model_configuration = model_config
+        Trace.create_affine_transforms()
         return
 
     def __str__(self):
         fmt = "{:s}, EA={:6.3f} deg, PA={:6.3f} deg, "
-        string = fmt.format(self.opticon, self.parameter['Echelle angle'], self.parameter['Prism angle'])
+        opticon = self.model_config[1]
+        string = fmt.format(opticon, self.parameter['Echelle angle'], self.parameter['Prism angle'])
         smin, smax = self.unique_slices[0], self.unique_slices[-1]
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
         return string
+
+    @staticmethod
+    def create_affine_transforms():
+        """ Create the four (global) matrices which map points in the mosaic focal plane (in units of mm)
+        to pixel row and column positions.
+        """
+        n_dets = 4
+        aff_shape = 2*n_dets, 3, 3
+        affines = np.zeros(aff_shape) * n_dets
+        thetas = [0., 0., 0., 0.]
+        xy_cen = (Globals.det_size + Globals.det_gap) / 2.
+        x_mfp_cens = [-xy_cen, +xy_cen, -xy_cen, +xy_cen]
+        y_mfp_cens = [+xy_cen, +xy_cen, -xy_cen, -xy_cen]
+        pix_mm = 1000. / Globals.nom_pix_pitch
+        scales = [pix_mm] * 4
+        for i in range(0, n_dets):
+            s, theta, x_mfp_cen, y_mfp_cen = scales[i], thetas[i], x_mfp_cens[i], y_mfp_cens[i]
+            cos_theta, sin_theta = math.cos(theta), math.sin(theta)
+            affines[i, 0, :] = [s * cos_theta, -s * sin_theta, x_mfp_cen]
+            affines[i, 1, :] = [s * sin_theta, +s * cos_theta, y_mfp_cen]
+            affines[i, 2, :] = [0., 0., 1.]
+            affines[i+n_dets] = np.linalg.inv(affines[i])
+        Trace.affines = affines
+        return
 
     def create_transforms(self, **kwargs):
         """ Generate transforms to map from phase, across-slice coordinates in the entrance focal plane, to detector
@@ -92,17 +118,15 @@ class Trace:
         """
         n_terms = Globals.transform_config['mat_order']
         debug = kwargs.get('debug', False)
-        self.slice_objects = []
-        off_x2_fits, off_y2_fits = [], []
-        offset_data = []
         slice_order = n_terms - 1
-        fp_in, fp_out = self.coord_in, self.coord_out
+        _, _, _, _, fp_in, fp_out = self.model_config
+        # fp_in, fp_out = self.coord_in, self.coord_out
         is_first = True
-        transforms = []
+        self.slices = []
+        a_rms_list = []
         for ech_order in self.unique_ech_orders:
             for spifu_no in self.unique_spifu_slices:
                 for slice_no in self.unique_slices:
-                    transform = Transform()
 
                     waves = self.get('wavelength', slice_no=slice_no, spifu_no=spifu_no)
                     ech_orders = self.get('ech_order', slice_no=slice_no, spifu_no=spifu_no)
@@ -114,19 +138,10 @@ class Trace:
                     a, b = Util.solve_svd_distortion(phase, alpha, det_x, det_y, slice_order, inverse=False)
                     ai, bi = Util.solve_svd_distortion(phase, alpha, det_x, det_y, slice_order, inverse=True)
 
-                    det_x_fit1, det_y_fit1 = Util.apply_svd_distortion(phase, alpha, a, b)
-                    off_x1, off_y1 = det_x - det_x_fit1, det_y - det_y_fit1
-                    x_residual_correction = Util.fit_residual(det_x_fit1, det_x_fit1, off_x1)
-                    y_residual_correction = Util.fit_residual(det_x_fit1, det_x_fit1, off_y1)
-
-                    x_corr = Util.offset_error_function(x_residual_correction, det_x_fit1, 0.)
-                    det_x_fit2 = det_x_fit1 + x_corr
-                    y_corr = Util.offset_error_function(y_residual_correction, det_y_fit1, 0.)
-                    det_y_fit2 = det_y_fit1 + y_corr
-
-                    off_x2, off_y2 = det_x - det_x_fit2, det_y - det_y_fit2
-                    off_x2_fits.append(off_x2)
-                    off_y2_fits.append(off_y2)
+                    det_x_fit, det_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
+                    off_det_x, off_det_y = det_x - det_x_fit, det_y - det_y_fit
+                    off_det_a = np.sqrt(np.square(off_det_x) + np.square(off_det_y))
+                    a_rms_list.append(off_det_a)
 
                     tr_pars = self.lms_config.copy()
                     tr_pars.update(Globals.transform_config)
@@ -134,34 +149,31 @@ class Trace:
 
                     config = ech_order, slice_no, spifu_no, w_min, w_max
                     matrices = a, b, ai, bi
-                    offset_corrections = x_residual_correction, y_residual_correction
-                    rays1 = waves, phase, alpha, det_x, det_y, det_x_fit1, det_y_fit1
-                    tf_inter = config, matrices, offset_corrections, rays1
-                    rays2 = waves, phase, alpha, det_x, det_y, det_x_fit2, det_y_fit2
-                    slice_object = config, matrices, offset_corrections, rays2
-                    self.slice_objects.append(slice_object)
+                    rays = waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit
+                    slice = config, matrices, rays
+                    self.slices.append(slice)
+                    fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
+
                     if debug and is_first:        # Plot intermediate and full fit to data
-                        tlin1 = "Distortion residuals, A,B, polynomial fit \n"
-                        self.plot_scatter(tf_inter, plot_correction=True, tlin1=tlin1)
-                        tlin1 = "Distortion residuals, post-sinusoidal correction \n"
-                        self.plot_scatter(slice_object, tlin1=tlin1)
+                        tlin1 = fmt.format(Globals.svd_cutoff)
+                        self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
                         is_first = False
-                    transforms.append(transform)
-        self.transforms = transforms
-        self.offset_data = offset_data
+        a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
+        self.a_rms = a_rms
         return
 
     def get(self, tag, **kwargs):
         """ Extract a specific coordinate (identified by 'tag') from the trace for rays which pass through
         a specified spatial and (if the spectral IFU is selected) spectral slice.
         """
+        _, opticon, _, _, _, _ = self.model_config
         slice_no = kwargs.get('slice_no', None)
         spifu_no = kwargs.get('spifu_no', None)      # -1 = No Spectral IFU slice set
         a = self.series[tag]
         if slice_no is not None:
-            slices = self.series['slice']
-            idx = slices == slice_no
-            if self.opticon == Globals.spifu:
+            slice_nos = self.series['slice_no']
+            idx = slice_nos == slice_no
+            if opticon == Globals.spifu:
                 spifu_slices = self.series['sp_slice']
                 idx2 = spifu_slices == spifu_no
                 idx = np.logical_and(idx, idx2)
@@ -177,41 +189,81 @@ class Trace:
         plot = Plot()
 
         plotdiffs = kwargs.get('plotdiffs', False)
+        field = kwargs.get('field', False)
+        subset = kwargs.get('subset', False)
         name = self.parameter['name']
         echelle_angle = self.parameter['Echelle angle']
         fig_title = "{:s} ea = {:4.2f}".format(name, echelle_angle)
         # SPIFU 1 column per spatial slice, 1 column
-        n_rows, n_cols = 7, 4       # Nominal 1 slice per pane.
+        n_rows, n_cols = 7, 4
         unique_spifus, unique_slices = self.unique_spifu_slices, self.unique_slices
         spifu_start, slice_start = unique_spifus[0], unique_slices[0]
-        if self.opticon == Globals.spifu:
+        if self.is_spifu:
             n_rows, = unique_spifus.shape
             n_cols, = unique_slices.shape
-        xlim = (None if plotdiffs else [-60.0, 60.0])
+        if subset:
+            n_rows = 3
+            n_cols = 1
+        xlim = (None if plotdiffs else [-40.0, 40.0])
         ax_list = plot.set_plot_area(fig_title,
-                                     fontsize=10.0, sharex=True, sharey=False,
+                                     fontsize=14.0, sharex=True, sharey=False,
                                      nrows=n_rows, ncols=n_cols, xlim=xlim)
-        for tf in self.slice_objects:
-            config, _, _, rays = tf
+        for ifu_slice in self.slices:
+            config, _, rays = ifu_slice
             ech_order, slice_no, spifu_no, _, _ = config
-            _, _, _, x, y, x_fit, y_fit = rays
-            spifu_idx = int(spifu_no - spifu_start)
-            slice_idx = int(slice_no - slice_start)
-            if self.opticon == Globals.spifu:
-                row = spifu_idx
-                col = slice_idx
+            row, col = -1, 0
+            if subset:
+                if self.is_spifu:
+                    select_row = {6: 0, 3: 1, 1: 2}
+                    if slice_no == 12 and spifu_no in select_row:
+                        row = select_row[spifu_no]
+                else:
+                    select_row = {28: 0, 12: 1, 1: 2}
+                if slice_no in select_row:
+                    row = select_row[slice_no]
             else:
-                row = int(slice_idx / n_cols)
-                col = slice_idx % n_cols
+                spifu_idx = int(spifu_no - spifu_start)
+                slice_idx = int(slice_no - slice_start)
+                if self.is_spifu:
+                    row = spifu_idx
+                    col = slice_idx
+                else:
+                    row = int(slice_idx / n_cols)
+                    col = slice_idx % n_cols
+
+            if row < 0:       # Skip plot if the pane row is not valid.
+                continue
             ax = ax_list[row, col]
+            _, _, _, x, y, x_fit, y_fit = rays
+            if field:        # Draw filled polygon around field points.
+                n_uw = len(self.unique_waves)
+                n_pts = 2 * n_uw + 1      # No. of points on perimeter
+                xp, yp = np.zeros(n_pts), np.zeros(n_pts)
+                alphas = rays[2]
+                uni_alphas = np.unique(alphas)
+                idxs = np.argwhere(alphas == uni_alphas[0]).flatten()
+                xp[0:n_uw], yp[0:n_uw] = x[idxs], y[idxs]
+                idxs = np.argwhere(alphas == uni_alphas[-1]).flatten()
+                xp[n_uw:-1], yp[n_uw:-1] = np.flip(x[idxs]), np.flip(y[idxs])
+                xp[-1], yp[-1] = xp[0], yp[0]
+                ax.fill(xp, yp, color='pink')
             if plotdiffs:
                 u, v = x - x_fit, y - y_fit
-                ax.quiver(x, y, u, v, angles='xy')
+                q = ax.quiver(x, y, u, v, angles='xy', width=0.001)      # , scale_units='xy', scale=1000.)
+                if row == 0:
+                    ax.quiverkey(q, X=0.9, Y=1.1, U=0.001,
+                                 label='1 micron', labelpos='N')
             else:
                 plot.plot_points(ax, x_fit, y_fit, ms=1.0, colour='blue')
                 plot.plot_points(ax, x, y, ms=1.0, mk='x')
-            fmt = "slice {:3.0f}, Sp slice {:3.0f}"
-            ax.set_title(fmt.format(slice_no, spifu_no))
+            title = "slice {:3.0f}".format(slice_no)
+            if self.is_spifu:
+                title += ", spectral slice {:3.0f}".format(spifu_no)
+            ax.set_title(title)
+        ax = ax_list[n_rows-1, 0]
+        ax.set_xlabel('x$_{mfp}$ / mm')
+        ax.set_ylabel('y$_{mfp}$ / mm')
+
         plot.show()
         return
 
@@ -227,7 +279,7 @@ class Trace:
             config, _, offset_corrections, rays, wave_coverage = tf
         else:
             config, _, offset_corrections, rays = tf
-        ech_order, slice_no, spifu_no = config
+        ech_order, slice_no, spifu_no, _, _ = config
         off_x_corr, off_y_corr = offset_corrections
         # Create plot area
         ech_angle = self.parameter['Echelle angle']
@@ -355,9 +407,7 @@ class Trace:
 
         fp_plot_mask = {'LMS EFP': False, 'Slicer': False,
                         'IFU': False, 'Slit': True, 'SP slicer': True, 'Detector': True}
-
-        is_spifu = self.opticon == Globals.spifu
-        focal_planes = Trace.spifu_focal_planes if is_spifu else Trace.nominal_focal_planes
+        focal_planes = Trace.spifu_focal_planes if self.is_spifu else Trace.nominal_focal_planes
 
         n_focal_planes = len(focal_planes)
         colour_scheme = kwargs.get('colour_scheme', 'wavelength')
@@ -385,10 +435,12 @@ class Trace:
         plot.show()
         return
 
-    def _read_csv(self, path, is_spifu, coord_in, coord_out, efp_map):
+    def _read_csv(self, path, model_config):
         """ Read trace data in from csv file pointed to by path
         :return:
         """
+        _, _, _, _, coord_in, coord_out = model_config
+        is_spifu = self.is_spifu
         csv_name = path.split('/')[-1]
         name = csv_name.split('.')[0]
         with open(path, 'r') as text_file:
@@ -397,6 +449,7 @@ class Trace:
         line_iter = iter(line_list)
 
         # Read configuration parameters
+        efp_map = Trace.spifu_efp_map if is_spifu else Trace.nominal_efp_map
         efp_x_name = efp_map['efp_x']
         efp_y_name = efp_map['efp_y']
         parameter = {'name': name}
@@ -424,6 +477,8 @@ class Trace:
                 ser_tag = 'efp_x'
             if ser_tag == efp_y_name:
                 ser_tag = 'efp_y'
+            if ser_tag == 'slice':
+                ser_tag = 'slice_no'
             zem_column[ser_tag] = i, zem_tag
 
         series_names = Trace.common_series_names
@@ -448,7 +503,7 @@ class Trace:
                     val = 0 if is_spifu else parameter['Spectral order']
                     series[name].append(val)
                     continue
-                if name == 'spifu_slice':
+                if name == 'sp_slice':
                     val = 0
                     if is_spifu:
                         zem_col, zem_tag = zem_column[name]
@@ -512,7 +567,7 @@ class Trace:
 
     def _create_wave_colours(self, colour_scheme):
 
-        slices = self.series['slice']
+        slice_nos = self.series['slice_no']
         rgb = None
         if colour_scheme == 'wavelength':
             waves = self.series['wavelength']

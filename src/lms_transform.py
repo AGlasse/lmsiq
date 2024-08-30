@@ -42,7 +42,7 @@ class Transform:
         fmt = "lms_dist_ea_{:s}_pa_{:s}"
         fits_name = fmt.format(ea_tag, pa_tag)
         fits_path = self.tf_dir + fits_name + '.fits'
-        for slice_object in trace.slice_objects:
+        for slice_object in trace.slice:
             ech_order, slice_no, spifu_no = slice_object[0]
             cards = [Card('ECH_ORD', ech_order, 'Echelle diffraction order'),
                      Card('SLICE', slice_no, 'Spatial slice number (1 <= slice_no <= 28)'),

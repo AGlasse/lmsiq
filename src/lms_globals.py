@@ -29,6 +29,7 @@ class Globals:
     transform_config = {'n_mats': 4,                        # Four matrices per transform (A, B, AI, BI)
                         'mat_order': 4,                     # No of rows/columns in A, B, AI, BI
                         'res_fit_order': 3}                 # No. of terms in residual fit
+    svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
     nom_pix_pitch = 18.0                                    # LMS pixel pitch in microns
     spatial_scale = 0.0082                                  # Along slice arcsec / pixel
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
@@ -43,7 +44,6 @@ class Globals:
                 '4': ([+xyf, +xyf], [-xyn, -xyn])
                 }
     mosaic_size = 2. * (det_size - margin) + det_gap
-    # n_configs = -1                          # Number of configurations, calculated when lms_dist_buffer is read.
     # Image quality parameters are calculated for three levels of data product
     process_levels = ['raw_zemax', 'proc_zemax', 'proc_detector']
     axes = ['spectral', 'spatial']

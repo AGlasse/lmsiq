@@ -211,7 +211,7 @@ class Plot:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
             tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
             config_colour[tag] = next(colour_iterator, 'black')
-            for tf in trace.slice_objects:
+            for tf in trace.slice:
                 config, matrices, offset_corrections, rays, wave_bounds = tf
                 label, slice_no, spifu_no = config
                 waves, _, _, det_x, det_y, _, _ = rays
@@ -272,7 +272,7 @@ class Plot:
         return colours
 
     @staticmethod
-    def series(plot_type, traces, optical_configuration):
+    def series(plot_type, traces):
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.02 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
         title, ylabel = titles[plot_type]
@@ -290,9 +290,9 @@ class Plot:
             config_colour[tag] = next(colour_iterator, 'black')
             n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
             perimeter_upper, perimeter_lower = None, None
-            for tf in trace.slice_objects:
-                config, _, _, rays, _ = tf
-                label, slice_no, spifu_no = config
+            for slice in trace.slices:
+                config, _, rays = slice
+                label, slice_no, spifu_no, _, _ = config
                 waves, _, _, det_x, det_y, _, _ = rays
                 rgb = Util.make_rgb_gradient(waves)
 
@@ -314,9 +314,6 @@ class Plot:
                 for i in range(0, n_pts):
                     ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
                             fillstyle='none', marker='.', mew=1., ms=1, ls='None')
-
-                # ax.plot(x, y, color=colour, clip_on=True,
-                #         fillstyle='none', marker='.', mew=1.0, ms=1, linestyle='None')
 
                 # Plot perimeter of dot pattern
                 unique_waves = np.unique(waves)

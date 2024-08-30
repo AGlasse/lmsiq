@@ -1,12 +1,10 @@
 import os
 from os import listdir
-import shutil
 import pickle
 from astropy.io import fits
 from astropy.io.fits import Card, HDUList
 from lms_globals import Globals
 import numpy as np
-import lmsdist_trace
 
 
 class Filer:
@@ -55,19 +53,75 @@ class Filer:
                 os.mkdir(out_path)
         return out_path
 
-    def write_fits_transform(self, trace):
+    def write_fits_affine_transform(self, trace):
+        _, _, date_stamp, _, _, _ = trace.model_configuration
+        affines = trace.affines
+        n_fwds, mat_order, _ = affines.shape
+        affine_inverses = np.linalg.inv(affines)
+
+        primary_cards = [Card('N_MATS', 2*n_fwds, 'MFP <-> DFP transform matrices'),
+                         Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
+                         ]
+        trace_hdr = fits.Header(primary_cards)
+        primary_hdu = fits.PrimaryHDU(header=trace_hdr)
+        hdu_list = HDUList([primary_hdu])
+
+        fmt = "lms_dist_mfp_dfp_v{:s}"
+        fits_name = fmt.format(date_stamp)
+        fits_path = self.tf_dir + fits_name + '.fits'
+        cards = []
+
+        col_list = []
+        for m in range(0, n_fwds):
+            col_name = "MFP>D{:d}".format(m)
+            col = fits.Column(name=col_name, array=affines[m].flatten(), format='E')
+            col_list.append(col)
+        for m in range(0, n_fwds):
+            col_name = "D{:d}>MFP".format(m)
+            col = fits.Column(name=col_name, array=affine_inverses[m].flatten(), format='E')
+            col_list.append(col)
+
+        hdr = fits.Header(cards)
+        bintable_hdu = fits.BinTableHDU.from_columns(col_list, header=hdr)
+        hdu_list.append(bintable_hdu)
+        hdu_list.writeto(fits_path, overwrite=True)
+        return
+
+    def read_fits_affine_transform(self, date_stamp):
+        """ Read fits file into a 'trace' object, which
+        """
+        fmt = "lms_dist_mfp_dfp_v{:s}"
+
+        fits_name = fmt.format(date_stamp)
+        fits_path = self.tf_dir + fits_name + '.fits'
+        hdu_list = fits.open(fits_path, mode='readonly')
+        primary_hdr = hdu_list[0].header
+        n_mats = primary_hdr['N_MATS']
+        mat_order = primary_hdr['MAT_ORD']
+        aff_shape = n_mats, mat_order, mat_order
+        affines = np.zeros(aff_shape)
+        hdu = hdu_list[1]
+
+        table, hdr = hdu.data, hdu.header
+        n_cols = len(hdu.columns)
+        for i in range(0, n_cols):
+            col_vals = table.field(i)
+            matrix = np.reshape(col_vals, (mat_order, mat_order))
+            affines[i] = matrix
+        return affines
+
+    def write_fits_svd_transform(self, trace):
         # Create data tables holding transforms for all slices
-        par = trace.parameter
-        ea = par['Echelle angle']
-        pa = par['Prism angle']
-        opticon = trace.opticon
+        pa = trace.parameter['Prism angle']
+        ea = trace.parameter['Echelle angle']
+        _, opticon, date_stamp, _, _, _ = trace.model_config
         trc = Globals.transform_config
         n_mats = trc['n_mats']
         mat_order = trc['mat_order']
 
         primary_cards = [Card('OPTICON', opticon, 'Optical configuration'),
-                         Card('ECH_ANG', ea, 'Echelle angle / deg'),
                          Card('PRI_ANG', pa, 'Prism angle / deg'),
+                         Card('ECH_ANG', ea, 'Echelle angle / deg'),
                          Card('N_MATS', n_mats, 'A, B, AI, BI transform matrices'),
                          Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
                          ]
@@ -75,32 +129,27 @@ class Filer:
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
         hdu_list = HDUList([primary_hdu])
         # Create fits file with primaryHDU only
-        ea_tag = self._make_fits_tag(ea)
-        pa_tag = self._make_fits_tag(pa)
-        fmt = "lms_dist_ea_{:s}_pa_{:s}"
-        fits_name = fmt.format(ea_tag, pa_tag)
+        otag = '_nom' if opticon == 'nominal' else '_ext'
+        ptag = "_pa{:05d}".format(abs(int(10000. * pa)))
+        esign = 'p' if ea > 0. else 'n'
+        etag = "_ea{:s}{:05d}".format(esign, abs(int(10000. * ea)))
+        vtag = "_v{:s}".format(date_stamp)
+        fmt = "lms_efp_mfp{:s}{:s}{:s}{:s}"
+        fits_name = fmt.format(otag, ptag, etag, vtag)
         fits_path = self.tf_dir + fits_name + '.fits'
-        for slice_object in trace.slice_objects:
-            ech_order, slice_no, spifu_no, w_min, w_max = slice_object[0]
+        for ifu_slice in trace.slices:
+            ech_order, slice_no, spifu_no, w_min, w_max = ifu_slice[0]
             cards = [Card('ECH_ORD', ech_order, 'Echelle diffraction order'),
                      Card('SLICE', slice_no, 'Spatial slice number (1 <= slice_no <= 28)'),
                      Card('SPIFU', spifu_no, 'Spectral IFU slice no.'),
                      Card('W_MIN', w_min, 'Minimum slice wavelength (micron)'),
                      Card('W_MAX', w_max, 'Maximum slice wavelength (micron)')]
 
-            a, b, ai, bi = slice_object[1]
+            a, b, ai, bi = ifu_slice[1]
             col_a = fits.Column(name='a', array=a.flatten(), format='E')
             col_b = fits.Column(name='b', array=b.flatten(), format='E')
             col_ai = fits.Column(name='ai', array=ai.flatten(), format='E')
             col_bi = fits.Column(name='bi', array=bi.flatten(), format='E')
-
-            xpoly_corr, ypoly_corr = slice_object[2]            # x and y polynomial correction factors
-            cards.append(Card('XP1', xpoly_corr[0], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('XP3', xpoly_corr[1], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('XP5', xpoly_corr[2], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('YP1', ypoly_corr[0], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
-            cards.append(Card('YP3', ypoly_corr[1], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
-            cards.append(Card('YP5', ypoly_corr[2], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
 
             hdr = fits.Header(cards)
             bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi], header=hdr)
@@ -109,16 +158,7 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return fits_name
 
-    def read_fits_transforms(self):
-        fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=[], exc_tags=[])
-        transform_list = []
-        for fits_name in fits_file_list:
-            transforms = self.read_fits_transform(fits_name)
-            for transform in transforms:
-                transform_list.append(transform)
-        return transform_list
-
-    def read_fits_transform(self, fits_name):
+    def read_fits_svd_transform(self, fits_name):
         """ Read fits file into a 'trace' object, which
         """
         fits_path = self.tf_dir + fits_name
@@ -135,8 +175,7 @@ class Filer:
         mat_shape = mat_order, mat_order
 
         transform_list = []
-        tr_hdr_keys = ['ECH_ORD', 'SLICE', 'SPIFU', 'W_MIN', 'W_MAX',
-                       'XP1', 'XP3', 'XP5', 'YP1', 'YP3', 'YP5']
+        tr_hdr_keys = (['ECH_ORD', 'SLICE', 'SPIFU', 'W_MIN', 'W_MAX'])
         for hdu in hdu_list[1:]:
             table, hdr = hdu.data, hdu.header
             config = base_config.copy()
@@ -156,11 +195,15 @@ class Filer:
         hdu_list.close()
         return transform_list
 
-    def _make_fits_tag(self, val):
-        val_str = "{:5.3f}".format(val)
-        tag = val_str.replace('-', 'm')
-        tag = tag.replace('.','p')
-        return tag
+    def read_fits_svd_transforms(self):
+        inc_tags = ['efp_mfp']
+        fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=[])
+        transform_list = []
+        for fits_name in fits_file_list:
+            transforms = self.read_fits_svd_transform(fits_name)
+            for transform in transforms:
+                transform_list.append(transform)
+        return transform_list
 
     @staticmethod
     def read_pickle(pickle_path):

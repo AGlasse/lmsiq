@@ -42,16 +42,27 @@ class Util:
     @staticmethod
     def waves_to_phases(waves, ech_orders):
         d = Globals.rule_spacing * Globals.ge_refractive_index
-        sin_aoi = waves * ech_orders / (2.0 * d)
-        phases = np.arcsin(sin_aoi)
-        return phases
+        phases = waves * ech_orders / (2.0 * d)
+        return phases      # phases
 
     @staticmethod
     def phases_to_waves(phases, ech_orders):
         d = Globals.rule_spacing * Globals.ge_refractive_index
-        sin_aoi = np.sin(phases)
-        waves = sin_aoi * 2.0 * d / ech_orders
+        waves = phases * 2.0 * d / ech_orders
         return waves
+
+    @staticmethod
+    def apply_affine_transform(x, y, aff):
+        """
+        @author Alistair Glasse
+        """
+        dim = aff.shape[0]
+        n_pts = len(x)
+        unity = np.full(n_pts, 1.)
+
+        xy = np.array([x, y, unity])
+        uv = aff @ xy
+        return uv[0], uv[1]
 
     @staticmethod
     def apply_svd_distortion(x, y, a, b):
@@ -240,7 +251,7 @@ class Util:
             is_slice = slice_no in trace.unique_slices
             if not is_slice:
                 continue
-            for tf in trace.slice_objects:
+            for tf in trace.slice:
                 tf_config, tf_matrices, _, _, _ = tf
                 tf_ech_order, tf_slice_no, tf_spifu_no = tf_config
                 if order != tf_ech_order and slice_no != tf_slice_no:
@@ -294,7 +305,6 @@ class Util:
         """ Filter transform data with matching echelle order and slice number.
         """
         ech_order = kwargs.get('ech_order', -1.)
-#        ech_angle = kwargs.get('ech_angle', -1.)
         slice_no = kwargs.get('slice_no', -1.)
         spifu_no = kwargs.get('spifu_no', -1.)
         idx_eo = all_configs[0] == ech_order
@@ -387,8 +397,9 @@ class Util:
         """
         efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
-        slice_coord = n_slices // 2 + efp_y / efp_slice_width
-        slice_no = n_slices // 2 + int(efp_y / efp_slice_width)
+        y_s = np.array(efp_y) / efp_slice_width
+        slice_coord = n_slices // 2 + y_s
+        slice_no = n_slices // 2 + y_s.astype(int)
         phase = slice_coord - slice_no
         return slice_no, phase
 
@@ -401,7 +412,41 @@ class Util:
         return efp_y
 
     @staticmethod
-    def efp_to_dfp(transform, efp_points):
+    def efp_to_dfp(transform, affines, det_no, efp_points):
+        mfp_points = Util.efp_to_mfp(transform, efp_points)
+        dfp_points = Util.mfp_to_dfp(affines, det_no, mfp_points)
+        return dfp_points
+
+    @staticmethod
+    def mfp_to_dfp(affines, mfp_points):
+        x = mfp_points['mfp_x']
+        y = mfp_points['mfp_y']
+        idx24 = np.argwhere(x > 0.)
+        idx13 = np.argwhere(x < 0.)
+        idx12 = np.argwhere(y > 0.)
+        idx34 = np.argwhere(y < 0.)
+        idx1 = np.intersect1d(idx12, idx13)
+        idx2 = np.intersect1d(idx12, idx24)
+        idx3 = np.intersect1d(idx13, idx34)
+        idx4 = np.intersect1d(idx24, idx34)
+
+        idx_list = [idx1, idx2, idx3, idx4]
+        det_nos, dfp_x, dfp_y = [], [], []
+        for i, idx in enumerate(idx_list):
+            n_idx = len(idx)
+            if n_idx == 0:
+                continue
+            d_nos = [i+1]*n_idx
+            d = affines[i]
+            u, v = Util.apply_affine_transform(x[idx], y[idx], d)
+            det_nos += d_nos
+            dfp_x += list(u)
+            dfp_y += list(v)
+        dfp_points = {'det_nos': det_nos, 'dfp_x': dfp_x, 'dfp_y': dfp_y}
+        return dfp_points
+
+    @staticmethod
+    def efp_to_mfp(transform, efp_points):
         """ Transform a point in the LMS entrance focal plane onto the detector mosaic.
         Note that the transform will normally have been verified as non-vignetting
         for this point in the EFP.
@@ -410,26 +455,17 @@ class Util:
         ech_ord = config['ech_ord']
 
         alphas, efp_y, efp_w = efp_points['efp_x'], efp_points['efp_y'], efp_points['efp_w']
-        ech_orders = np.full(efp_w.shape, ech_ord)
+        ech_orders = np.full(len(efp_w), ech_ord)
         phases = Util.waves_to_phases(efp_w, ech_orders)
-
-        xp1, xp3, xp5 = config['xp1'], config['xp3'], config['xp5']
-        yp1, yp3, yp5 = config['yp1'], config['yp3'], config['yp5']
-        xp = [xp1, xp3, xp5]
-        yp = [yp1, yp3, yp5]
 
         matrices = transform['matrices']
         a, b = matrices['a'], matrices['b']
-        det_x_svd, det_y_svd = Util.apply_svd_distortion(phases, alphas, a, b)
-        res_x = Util.offset_error_function(xp, det_x_svd, 0.)
-        res_y = Util.offset_error_function(yp, det_y_svd, 0.)
-        det_x, det_y = det_x_svd + res_x, det_y_svd + res_y
-
-        dfp_points = {'det_x': det_x, 'det_y': det_y}
-        return dfp_points
+        mfp_x, mfp_y = Util.apply_svd_distortion(phases, alphas, a, b)
+        mfp_points = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
+        return mfp_points
 
     @staticmethod
-    def dfp_to_efp(transform, dfp_points, slice_phase=0.):
+    def mfp_to_efp(transform, mfp_points, slice_phase=0.):
         """ Transform a point on the LMS detector (det_x, det_y) (w, efp_x, efp_y) onto the
         detector mosaic (det_x, det_y).  Note that the transform will normally have been verified as non-vignetting
         for this point in the EFP.
@@ -439,19 +475,11 @@ class Util:
         config = transform['configuration']
         ech_ord = config['ech_ord']
         slice_no = config['slice']
-        det_x, det_y = dfp_points['det_x'], dfp_points['det_y']
+        mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
 
-        xp1, xp3, xp5 = config['xp1'], config['xp3'], config['xp5']
-        yp1, yp3, yp5 = config['yp1'], config['yp3'], config['yp5']
-        xp = [xp1, xp3, xp5]
-        yp = [yp1, yp3, yp5]
-        res_x = Util.offset_error_function(xp, det_x, 0.)
-        res_y = Util.offset_error_function(yp, det_y, 0.)
-
-        det_x_svd, det_y_svd = det_x - res_x, det_y - res_y
         matrices = transform['matrices']
         ai, bi = matrices['ai'], matrices['bi']
-        phases, alphas = Util.apply_svd_distortion(det_x_svd, det_y_svd, ai, bi)
+        phases, alphas = Util.apply_svd_distortion(mfp_x, mfp_y, ai, bi)
 
         ech_orders = np.full(alphas.shape, ech_ord)
         waves = Util.phases_to_waves(phases, ech_orders)
@@ -476,13 +504,6 @@ class Util:
             if is_hit:
                 return  is_hit, det_name
         return False, None
-
-    @staticmethod
-    def offset_error_function(p, x, y):
-        """ Polynomial with odd powered terms.
-        """
-        residual = (x * (p[0] + x * x * (p[1] + p[2] * x * x))) - y
-        return residual
 
     @staticmethod
     def fit_residual(x_ref, x_in, y_in):
@@ -577,9 +598,8 @@ class Util:
 
     @staticmethod
     def solve_svd_distortion(x_in, y_in, x_out, y_out, order, inverse=False):
-        # @author Tea Temim
-        # Converted to python from Ronayette's original IDL code (Temim)
-        # 21/2/17
+        # @author Alistair GlasseTea Temim
+        # Converted to python from Ronayette's original IDL code by Temim, 21/2/17
         #   1. Changed input parameters to allow use with any data set (Glasse)
         # make a polynomial fit of the imaged grid point
         # see note on MIRI calibration
@@ -603,7 +623,7 @@ class Util:
             yo = yi.copy()
             yi = temp.copy()
 
-        dim = order+1
+        dim = order + 1
 
         ind = np.arange(0, dim*dim)
         rows = np.floor(ind / dim)
@@ -620,10 +640,13 @@ class Util:
         v, w, u = np.linalg.svd(m, full_matrices=False)
         n_w = w.size
         wp = np.zeros((n_w, n_w))
-        w_cutoff = 1.0e-5            # Only use singular values >= w_cutoff
+        svd_cutoff = Globals.svd_cutoff            # Only use singular values >= svd_cutoff
         for k in range(0, n_w):
-            if abs(w[k]) >= w_cutoff:
+            if abs(w[k]) >= svd_cutoff:
                 wp[k, k] = 1.0 / w[k]
+            else:
+                if w[k] > 1.0e-16:
+                    print("!! Clipping singular value = {:5.3e} !!".format(w[k]))
         a = xo @ u.T @ wp @ v.T     # (Was wp.T, but wp is square diagonal)
         amat = np.reshape(a, (dim, dim))
         b = yo @ u.T @ wp @ v.T
