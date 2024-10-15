@@ -26,7 +26,6 @@ class Cuber:
         ds_dict, lsf_data = None, None
         axes = ['across-slice', 'along-slice']
 
-        opticon = data_identifier['optical_path']
         traces = dist_filer.read_pickle(dist_filer.trace_file)
 
         profile_folder = iq_filer.get_folder(iq_filer.output_folder + 'profiles')

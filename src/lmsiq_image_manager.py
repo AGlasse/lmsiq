@@ -345,6 +345,24 @@ class ImageManager:
         return params
 
     @staticmethod
+    def read_zemax_image(path):
+        """ Read in a model zemax image """
+        hdu_list = fits.open(path, mode='readonly')
+        hdu = hdu_list[0]
+        image_in = hdu.data
+        image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
+        return image
+
+    @staticmethod
+    def read_mosaic(path):
+        """ Read in a model zemax image """
+        hdu_list = fits.open(path, mode='readonly')
+        hdu = hdu_list[0]
+        image_in = hdu.data
+        image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
+        return image
+
+    @staticmethod
     def load_dataset(iq_filer, selection, **kwargs):
         """ Load a data (sub-)set (perfect, design plus MC images).
         """

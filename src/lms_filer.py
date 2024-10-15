@@ -2,7 +2,7 @@ import os
 from os import listdir
 import pickle
 from astropy.io import fits
-from astropy.io.fits import Card, HDUList
+from astropy.io.fits import Card, HDUList, ImageHDU, PrimaryHDU
 from lms_globals import Globals
 import numpy as np
 
@@ -35,6 +35,34 @@ class Filer:
         return
 
     @staticmethod
+    def read_fits(path, header_ext=0, data_exts=[0]):
+        """ Read in a model zemax image """
+        hdu_list = fits.open(path, mode='readonly')
+        header = hdu_list[header_ext].header
+        image_list = [hdu_list[i].data for i in data_exts]
+        if len(data_exts) == 1:
+            return header, image_list[0]
+        return header, image_list
+
+    @staticmethod
+    def write_fits(path, header, data):
+        """ Write Zemax image.  Header in hdu[0].  If data is a (3D) image stack, they are written to hdu[1] onwards,
+        while a single image is written to hdu[0]
+        """
+        n_frames = len(data)
+        primary_hdu = PrimaryHDU(header=header)
+        hdu_list = HDUList([primary_hdu])
+        for i in range(0, n_frames):
+            if n_frames == 1:
+                hdu_list[0].data = data
+                break
+            hdu = ImageHDU(data[i])
+            hdu.name = "Detector {:d}".format(i+1)
+            hdu_list.append(hdu)
+        hdu_list.writeto(path, overwrite=True, checksum=True)
+        return
+
+    @staticmethod
     def get_file_list(folder, inc_tags=[], exc_tags=[]):
         file_list = listdir(folder)
         for tag in inc_tags:
@@ -56,10 +84,9 @@ class Filer:
     def write_fits_affine_transform(self, trace):
         _, _, date_stamp, _, _, _ = trace.model_configuration
         affines = trace.affines
-        n_fwds, mat_order, _ = affines.shape
-        affine_inverses = np.linalg.inv(affines)
+        n_mats, mat_order, _ = affines.shape
 
-        primary_cards = [Card('N_MATS', 2*n_fwds, 'MFP <-> DFP transform matrices'),
+        primary_cards = [Card('N_MATS', n_mats, 'MFP <-> DFP transform matrices'),
                          Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
                          ]
         trace_hdr = fits.Header(primary_cards)
@@ -72,13 +99,10 @@ class Filer:
         cards = []
 
         col_list = []
-        for m in range(0, n_fwds):
-            col_name = "MFP>D{:d}".format(m)
+
+        for m in range(0, n_mats):
+            col_name = "MFP>D{:d}".format(m+1) if m < 4 else "D{:d}>MFP".format(m-3)
             col = fits.Column(name=col_name, array=affines[m].flatten(), format='E')
-            col_list.append(col)
-        for m in range(0, n_fwds):
-            col_name = "D{:d}>MFP".format(m)
-            col = fits.Column(name=col_name, array=affine_inverses[m].flatten(), format='E')
             col_list.append(col)
 
         hdr = fits.Header(cards)

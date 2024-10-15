@@ -13,7 +13,6 @@ from lms_globals import Globals
 class Detector:
 
     nom_pix_pitch = Globals.nom_pix_pitch
-
     det_pix_size = nom_pix_pitch
     pix_edge = 2048             # H2RG format
     mosaic_format = 2, 2

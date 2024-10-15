@@ -272,7 +272,7 @@ class Plot:
         return colours
 
     @staticmethod
-    def series(plot_type, traces):
+    def series(plot_type, traces, colour_by='config'):
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.02 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
         title, ylabel = titles[plot_type]
@@ -280,21 +280,27 @@ class Plot:
                                      xlabel=r'Wavelength / $\mu$m',
                                      ylabel=ylabel)
         ax = ax_list[0, 0]
-        colours = Plot._make_colour_list(8, sat=0.9)
-        colour_iterator = iter(colours)
-        config_colour = {}
-
-        for trace in traces:
+        if colour_by == 'slice':
+            slice_rgb = Util.make_rgb_gradient(np.arange(28))
+        if colour_by == 'config':
+            slice_rgb = Util.make_rgb_gradient(np.arange(108))
+        for config_idx, trace in enumerate(traces):
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
-            tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-            config_colour[tag] = next(colour_iterator, 'black')
+            # tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
+            # config_colour[tag] = next(colour_iterator, 'black')
             n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
+            colour = None
             perimeter_upper, perimeter_lower = None, None
             for slice in trace.slices:
                 config, _, rays = slice
                 label, slice_no, spifu_no, _, _ = config
                 waves, _, _, det_x, det_y, _, _ = rays
-                rgb = Util.make_rgb_gradient(waves)
+                if colour_by == 'slice_wave':
+                    rgb = Util.make_rgb_gradient(waves)
+                if colour_by == 'slice':
+                    colour = slice_rgb[slice_no - 1]
+                if colour_by == 'config':
+                    colour = slice_rgb[config_idx]
 
                 x, y = None, None
                 if plot_type == 'coverage':
@@ -308,11 +314,15 @@ class Plot:
                     y = dw_dlmspix
 
                 tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-                colour = config_colour[tag]
+                # colour = config_colour[tag]
                 n_pts = len(x)
 
-                for i in range(0, n_pts):
-                    ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
+                if colour_by == 'slice_wave':
+                    for i in range(0, n_pts):
+                        ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
+                                fillstyle='none', marker='.', mew=1., ms=1, ls='None')
+                else:
+                    ax.plot(x, y, color=colour, clip_on=True,
                             fillstyle='none', marker='.', mew=1., ms=1, ls='None')
 
                 # Plot perimeter of dot pattern

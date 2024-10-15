@@ -96,17 +96,19 @@ class Trace:
         n_dets = 4
         aff_shape = 2*n_dets, 3, 3
         affines = np.zeros(aff_shape) * n_dets
-        thetas = [0., 0., 0., 0.]
-        xy_cen = (Globals.det_size + Globals.det_gap) / 2.
-        x_mfp_cens = [-xy_cen, +xy_cen, -xy_cen, +xy_cen]
-        y_mfp_cens = [+xy_cen, +xy_cen, -xy_cen, -xy_cen]
+        thetas = [0.]*4
+        xy_fc = Globals.det_size + Globals.det_gap / 2.
+        xy_nc = Globals.det_gap / 2.
+        x_mfp_origins = [-xy_fc, +xy_nc, -xy_fc, +xy_nc]
+        y_mfp_origins = [-xy_nc, -xy_nc, +xy_fc, +xy_fc]
         pix_mm = 1000. / Globals.nom_pix_pitch
-        scales = [pix_mm] * 4
+        y_scales = [pix_mm] * 4
+        x_scales = [-pix_mm] * 4
         for i in range(0, n_dets):
-            s, theta, x_mfp_cen, y_mfp_cen = scales[i], thetas[i], x_mfp_cens[i], y_mfp_cens[i]
+            sx, sy, theta, x_mfp_org, y_mfp_org = x_scales[i], y_scales[i], thetas[i], x_mfp_origins[i], y_mfp_origins[i]
             cos_theta, sin_theta = math.cos(theta), math.sin(theta)
-            affines[i, 0, :] = [s * cos_theta, -s * sin_theta, x_mfp_cen]
-            affines[i, 1, :] = [s * sin_theta, +s * cos_theta, y_mfp_cen]
+            affines[i, 0, :] = [sx * cos_theta, -sy * sin_theta, sx * x_mfp_org]
+            affines[i, 1, :] = [sx * sin_theta, +sy * cos_theta, sy * y_mfp_org]
             affines[i, 2, :] = [0., 0., 1.]
             affines[i+n_dets] = np.linalg.inv(affines[i])
         Trace.affines = affines
@@ -131,17 +133,17 @@ class Trace:
                     waves = self.get('wavelength', slice_no=slice_no, spifu_no=spifu_no)
                     ech_orders = self.get('ech_order', slice_no=slice_no, spifu_no=spifu_no)
                     alpha = self.get('efp_x', slice_no=slice_no, spifu_no=spifu_no)
-                    det_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
-                    det_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
+                    mfp_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
+                    mfp_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
 
                     phase = Util.waves_to_phases(waves, ech_orders)
-                    a, b = Util.solve_svd_distortion(phase, alpha, det_x, det_y, slice_order, inverse=False)
-                    ai, bi = Util.solve_svd_distortion(phase, alpha, det_x, det_y, slice_order, inverse=True)
+                    a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
+                    ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
 
-                    det_x_fit, det_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
-                    off_det_x, off_det_y = det_x - det_x_fit, det_y - det_y_fit
-                    off_det_a = np.sqrt(np.square(off_det_x) + np.square(off_det_y))
-                    a_rms_list.append(off_det_a)
+                    mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
+                    off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
+                    off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
+                    a_rms_list.append(off_mfp_a)
 
                     tr_pars = self.lms_config.copy()
                     tr_pars.update(Globals.transform_config)
@@ -149,7 +151,7 @@ class Trace:
 
                     config = ech_order, slice_no, spifu_no, w_min, w_max
                     matrices = a, b, ai, bi
-                    rays = waves, phase, alpha, det_x, det_y, det_x_fit, det_y_fit
+                    rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
                     slice = config, matrices, rays
                     self.slices.append(slice)
                     fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
@@ -249,7 +251,8 @@ class Trace:
                 ax.fill(xp, yp, color='pink')
             if plotdiffs:
                 u, v = x - x_fit, y - y_fit
-                q = ax.quiver(x, y, u, v, angles='xy', width=0.001)      # , scale_units='xy', scale=1000.)
+                q = ax.quiver(x, y, u, v, angles='uv', width=0.001)
+                # qt = ax.quiver([0.], [-33.5], [.01], [.01], angles='uv', width=0.001, color='red')
                 if row == 0:
                     ax.quiverkey(q, X=0.9, Y=1.1, U=0.001,
                                  label='1 micron', labelpos='N')
@@ -275,18 +278,17 @@ class Trace:
         tlin1_default = "Distortion residuals (Zemax - Zemax Fit): \n"
         tlin1 = kwargs.get('tlin1', tlin1_default)
 
-        if len(tf) == 5:
-            config, _, offset_corrections, rays, wave_coverage = tf
+        if len(tf) == 4:
+            config, _, rays, wave_coverage = tf
         else:
-            config, _, offset_corrections, rays = tf
+            config, _, rays = tf
         ech_order, slice_no, spifu_no, _, _ = config
-        off_x_corr, off_y_corr = offset_corrections
         # Create plot area
         ech_angle = self.parameter['Echelle angle']
         prism_angle = self.parameter['Prism angle']
         fmt = "order={:d}, ech. angle={:3.1f}, prism angle={:4.3f}, slice={:d}"
         tlin2 = fmt.format(int(ech_order), ech_angle, prism_angle, int(slice_no))
-        if spifu_no >= 0.:
+        if spifu_no > 0:
             tlin2 += ", spifu={:d}".format(int(spifu_no))
         title = tlin1 + tlin2
 
@@ -307,13 +309,6 @@ class Trace:
             for pane in range(0, 2):
                 ax = ax_list[0, pane]
                 u = det_x if pane == 0 else det_y
-                if plot_correction and pane == 0:
-                    xf = Util.offset_error_function(off_x_corr, det_x, 0.)
-                    yf = Util.offset_error_function(off_y_corr, det_x, 0.)
-                    uf, (vf,) = Util.sort(u, (xf,))
-                    ax.plot(uf, 1000.*vf, ls='solid', lw=1.5, color='salmon')
-                    uf, (vf,) = Util.sort(u, (yf,))
-                    ax.plot(uf, 1000.*vf, ls='solid', lw=1.5, color='olive')
                 ax.plot(u, 1000. * off_det_x, marker='.', ls='none', ms=1.5, color='orangered')
                 ax.plot(u, 1000. * off_det_y, marker='.', ls='none', ms=1.5, color='green')
                 ax.plot(u, 1000. * off_det_a, marker='.', ls='none', ms=1.5, color='blue')
@@ -321,24 +316,25 @@ class Trace:
         # Add the legend to both plots
         x_labels = ['Det x / mm', 'Det y / mm']
         y_labels = ["Residual / micron.", '']
-        fmt = "{:s} residual stdev= {:3.1f} um"
+        fmt = "{:s} residual, $\sigma$ = {:4.2f} $\mu$m"
         for pane in range(0, 2):
             ax = ax_list[0, pane]
             ax.set_xlabel(x_labels[pane])
             ax.set_ylabel(y_labels[pane])
-            off_x_all = np.array(off_det_x_list) * 1000.
-            off_y_all = np.array(off_det_y_list) * 1000.
-            off_a_all = np.array(off_det_a_list) * 1000.
-            off_x_rms = np.std(off_x_all)
-            off_y_rms = np.std(off_y_all)
-            off_a_rms = np.std(off_a_all)
-            label1 = fmt.format('x', off_x_rms)
-            label2 = fmt.format('y', off_y_rms)
-            label3 = fmt.format('a', off_a_rms)
-            patch_x = mpatches.Patch(color='salmon', label=label1)
-            patch_y = mpatches.Patch(color='olive', label=label2)
-            patch_a = mpatches.Patch(color='blue', label=label3)
-            ax.legend(handles=[patch_x, patch_y, patch_a])
+            if pane == 0:       # Only draw the key in pane 0
+                off_x_all = np.array(off_det_x_list) * 1000.
+                off_y_all = np.array(off_det_y_list) * 1000.
+                off_a_all = np.array(off_det_a_list) * 1000.
+                off_x_rms = np.std(off_x_all)
+                off_y_rms = np.std(off_y_all)
+                off_a_rms = np.std(off_a_all)
+                label1 = fmt.format('x', off_x_rms)
+                label2 = fmt.format('y', off_y_rms)
+                label3 = fmt.format('a', off_a_rms)
+                patch_x = mpatches.Patch(color='salmon', label=label1)
+                patch_y = mpatches.Patch(color='olive', label=label2)
+                patch_a = mpatches.Patch(color='blue', label=label3)
+                ax.legend(handles=[patch_x, patch_y, patch_a])
 
         Plot.show()
         return

@@ -19,7 +19,7 @@ class Globals:
     efp_as_mm = 0.303                                       # Plate scale (arcsec/mm) in entrance focal plane
     alpha_fov = 1.0                                         # Set up field of view (arcsec)
     beta_fov = 0.5
-    alpha_mas_pix = 8.7         #
+    alpha_mas_pix = 8.7                                     #
     beta_mas_pix = 20.7
     rule_spacing = 18.2			                            # Echelle rule spacing [um]
     ge_refractive_index = 4.05                              # Refractive index of germanium
@@ -35,7 +35,7 @@ class Globals:
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		            # Unilluminated margin around outer detector edge (pixels)
     margin = pix_margin[0] * nom_pix_pitch / 1000.          # Convert to mm
-    det_size = 4096 * nom_pix_pitch / 1000.
+    det_size = 2048 * nom_pix_pitch / 1000.     # Detector size in mm
     xyn = .5 * det_gap                      # x,y distance from nearest light sensitive pixel to the origin
     xyf = xyn + det_size - margin           # x,y distance from farthest light sensitive pixel to the origin
     det_lims = {'1': ([-xyf, -xyn], [+xyn, +xyf]),

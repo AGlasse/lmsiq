@@ -122,7 +122,6 @@ if build_cubes:
     print('\nReconstructing cubes and analysing slice profile data')
     print('-----------------------------------------------------')
     cuber = Cuber()
-    # dist_date_stamp = '20231009' if is_spifu else '20240109'
     dist_model_configuration = 'distortion', optical_path, dist_date_stamp, None, None, None
     dist_filer = Filer(dist_model_configuration)
     cuber.build(data_identifier, process_control, image_manager, iq_filer, dist_filer, debug=False)

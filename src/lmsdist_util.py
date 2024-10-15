@@ -56,7 +56,6 @@ class Util:
         """
         @author Alistair Glasse
         """
-        dim = aff.shape[0]
         n_pts = len(x)
         unity = np.full(n_pts, 1.)
 
@@ -391,6 +390,27 @@ class Util:
         return text
 
     @staticmethod
+    def find_optimum_transform(tgt_slice_no, wave, svd_transforms):
+        # Start by finding the transform which has the target wavelength at the centre of its range.
+        w_off_min = 1000.                       # Initialise minimum wavelength offset
+        opt_transform = None                    # Optimum transform
+        for svd_transform in svd_transforms:    # Collect all test points served by this transform
+            config = svd_transform['configuration']
+            slice_no = config['slice']
+            if slice_no != tgt_slice_no:
+                continue
+            # Is the ray in the wavelength range covered by the transform?
+            w_min, w_max = config['w_min'], config['w_max']
+            in_wrange = (w_min < wave) and (wave < w_max)
+            if not in_wrange:
+                continue
+            w_off = abs(0.5 * (w_max + w_min) - wave)
+            if w_off < w_off_min:
+                w_off_min = w_off
+                opt_transform = svd_transform
+        return opt_transform
+
+    @staticmethod
     def efp_y_to_slice(efp_y):
         """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
         a fraction of the slice width
@@ -419,12 +439,15 @@ class Util:
 
     @staticmethod
     def mfp_to_dfp(affines, mfp_points):
+        """ Note, mfp increases towards decreasing wavelength.  Det 1/3 are then at a shorter wavelength (larger
+        mfp) than dets 2/4.  Also, slice 1 is at the minimum of mfp_y.
+        """
         x = mfp_points['mfp_x']
         y = mfp_points['mfp_y']
-        idx24 = np.argwhere(x > 0.)
-        idx13 = np.argwhere(x < 0.)
-        idx12 = np.argwhere(y > 0.)
+        idx24 = np.argwhere(x < 0.)
+        idx13 = np.argwhere(x > 0.)
         idx34 = np.argwhere(y < 0.)
+        idx12 = np.argwhere(y > 0.)
         idx1 = np.intersect1d(idx12, idx13)
         idx2 = np.intersect1d(idx12, idx24)
         idx3 = np.intersect1d(idx13, idx34)
