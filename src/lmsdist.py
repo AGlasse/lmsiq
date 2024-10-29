@@ -1,17 +1,19 @@
 #!/usr/bin/env python
 """
-
 """
-from os import listdir
+import math
+import time
 import numpy as np
-# from scipy.signal import decimate
+import scipy.signal
+
+from os import listdir
 from lms_filer import Filer
 from lmsdist_util import Util
 from lmsdist_plot import Plot
 from lmsdist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
-from lmsiq_image_manager import ImageManager
+from lms_toysim import ToySim
 
 print('lmsdist, distortion model - Starting')
 
@@ -21,7 +23,6 @@ coord_in = 'efp_x', 'efp_y', 'wavelength'
 coord_out = 'det_x', 'det_y'
 
 nominal = Globals.nominal
-
 nom_date_stamp = '20240109'
 nom_config = (analysis_type, nominal, nom_date_stamp,
               'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
@@ -122,164 +123,198 @@ if plot_wcal:
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
 evaluate_transforms = True  # performance statistics, for optimising code parameters.
-debug = True
+debug = False
 if evaluate_transforms:
 
-    print('lms_distort - Evaluating transforms')
-
-    # Define EFP coordinates and target wavelength for spectrum
-    efp_x_cen, efp_y_cen, efp_w_cen = 0., 0., 4.65
-    tgt_slice_nos, test_phases = Util.efp_y_to_slice([efp_y_cen])
-    tgt_slice_no = tgt_slice_nos[0]
-
-    # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
-    affines = filer.read_fits_affine_transform(date_stamp)
-    svd_transforms = filer.read_fits_svd_transforms()
-    opt_transform = Util.find_optimum_transform(tgt_slice_no, efp_w_cen, svd_transforms)
-
-    # Check out and back for the wavelength min, max and centre of the spectrum.
-    w_min = opt_transform['configuration']['w_min']
-    w_max = opt_transform['configuration']['w_max']
-
-    n_pts = 80
-    # Create EFP data cube
-    efp_ws = np.linspace(w_min, w_max, n_pts)
-    efp_ys = np.zeros(n_pts)
-    efp_as_mm = Globals.efp_as_mm
-    alpha_fov = Globals.alpha_fov
-    efp_xmax = alpha_fov / efp_as_mm
-    xh = efp_xmax/2.
-    efp_xs = np.linspace(-xh, +xh, n_pts)
-    efp_out = {'efp_x': efp_xs, 'efp_y': efp_ys, 'efp_w': efp_ws}
-
-    test_transforms = []
-
-    config = opt_transform['configuration']
-    slice_no = config['slice']
-    matrices = opt_transform['matrices']
-    mfp_points = Util.efp_to_mfp(opt_transform, efp_out)
-    dfp_points = Util.mfp_to_dfp(affines, mfp_points)
-    mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
-    efp_back = Util.mfp_to_efp(opt_transform, mfp_points)
-    det_nos, dfp_x, dfp_y = dfp_points['det_nos'], dfp_points['dfp_x'], dfp_points['dfp_y']
-    pri_ang = config['pri_ang']
-    ech_ang = config['ech_ang']
-    ech_ord = config['ech_ord']
-
     if debug:
-        fmt = "{:>7s},{:>7s},{:>7s},{:>8s},{:>9s},{:>9s},{:>12s},{:>9s},{:>12s},{:>9s},{:>9s},{:>8s},{:>8s},{:>15s},{:>12s}"
-        print(fmt.format('out', 'out', 'out', 'prism', 'echelle', 'echelle',
-                         'mosaic', 'mosaic', 'det', 'det', 'det', 'back', 'back', 'back-out', 'back-out'))
-        print(fmt.format('efp_x', 'efp_y', 'efp_w', 'angle', 'angle', 'order',
-                         'mfp_x', 'mfp_y', 'no.', 'dfp_x', 'dfp_y', 'efp_x', 'efp_y', 'delta_efp_x', 'delta_efp_y'))
-        print(fmt.format('mm', 'mm', 'micron', 'deg.', 'deg.', '-',
-                         'mm', 'mm', '-', 'pix', 'pix', 'mm', 'mm', 'mm', 'mm'))
-        fmt1 = "{:7.3f},{:7.3f},{:7.3f},{:8.3f},{:9.3f},{:9d},"
-        fmt2 = "{:12.3f},{:9.3f},{:12d},{:9.1f},{:9.1f},{:8.3f},{:8.3f},{:15.3f},{:12.3f}"
-        fmt = fmt1 + fmt2
-        for i in range(0, n_pts):
-            efp_out_x, efp_out_y = efp_out['efp_x'][i], efp_out['efp_y'][i]
-            efp_back_x, efp_back_y = efp_back['efp_x'][i], efp_back['efp_y'][i]
-            delta_efp_x = efp_back_x - efp_out_x
-            delta_efp_y = efp_back_y - efp_out_y
-            print(fmt.format(efp_out_x, efp_out_y, efp_out['efp_w'][i],
-                             pri_ang, ech_ang, ech_ord,
-                             mfp_x[i], mfp_y[i],
-                             det_nos[i], dfp_x[i], dfp_y[i],
-                             efp_back_x, efp_back_y,
-                             delta_efp_x, delta_efp_y))
+        Util.test_out_and_back(filer, date_stamp)
+
+    # Simulate sky emission data etc...
+    # - project EFP slices to detector and write slices to cartoon image
+    # - convolve with PSF per slice.
+    toysim = ToySim()
+    t_start = time.perf_counter()
 
     # Read header and data shape (only) in from the template.
     data_exts = [1, 2, 3, 4]
     hdr_primary, data_list = filer.read_fits('../data/sim_template.fits', data_exts=data_exts)
     det_shape = data_list[0].shape
-    det_imgs = []               # Initialise detector arrays with noise
-    for i in range(4):
-        det_imgs.append(np.random.normal(loc=1.0, scale=0.1, size=det_shape))
+    _, n_det_cols = det_shape
 
-    # Read in PSFs for modelled slices bracketing a target centred on slice 12.
+    # Define one or more (point-like) pinhole masks which will spatially filter the extended source.
+    cfo_pnh = {'name': 'wcupnh', 'efp_x': 0., 'efp_y': 0.}
+
+    pinhole = cfo_pnh
+    pinhole['slice_range'] = -4, 4
+    slice_no_cen, _ = Util.efp_y_to_slice(pinhole['efp_y'])  # Pinhole is centred on this slice
+    pinhole['slice_no_cen'] = slice_no_cen
+
+    use_pinholes = False
+
+    # Add slice extended illumination
+    # Define EFP coordinates and target wavelength for spectrum
+    w_cen = 4.65
+    w_cen_nm = int(w_cen * 1000.)
+    dit = 60.  # Integration time in seconds.
+    ext_source = 'sky'     # Extended source spectrum, may be 'sky', or 'bbTTTT' for a black body
+    pnh_tag = pinhole['name'] if use_pinholes else ''
+    sim_config = "lms_{:s}_{:s}_{:s}_{:d}".format(opticon[0:3], ext_source, pnh_tag, w_cen_nm)
+    print("Running simulation {:s}".format(sim_config))
+
+    # Find EFP bounds
+    efp_xmax = Globals.efp_x_fov_mm
+    xh = efp_xmax / 2.
+    wrange = [w_cen-.1, w_cen+.1]
+
+    # Load high resolution atmospheric or WCU bb spectrum for target wavelength range (units ph/s/m2/as2/um)
+    w_ext, f_ext_in, f_units_ext_in = None, None, None
+    tau_metis = 0.1 * Detector.qe
+    if ext_source[0:2] == 'bb':
+        tau_bb = 0.1 * 1.0                      # Assume 10 % integrating sphere and an attenuation setting
+        tbb = float(ext_source[2:])
+        w_ext, f_bb, f_units_ext_in = toysim.build_bb_emission(wave_range=wrange, tbb=tbb)
+        f_ext_in = tau_metis * tau_bb * f_bb
+    if ext_source == 'sky':
+        w_ext, f_sky, f_units_ext_in = toysim.load_sky_emission(wave_range=wrange)
+        f_ext_in = tau_metis * f_sky
+    if ext_source == 'laser4650':
+        w_ext = np.arange(4.649, 4.651, 0.001)
+        f_las = np.full(w_ext.shape, 10000)
+        f_units_ext_in = 'phot/s/m2/um/arcsec2'
+
+    atel = math.pi * (39. / 2)**2               # ELT collecting area
+    alpha_pix = Globals.alpha_mas_pix / 1000.   # Along slice pixel scale
+    beta_slice = Globals.beta_mas_pix / 1000.   # Slice width
+    delta_w = w_cen / 100000                    # Spectral resolution
+    pix_delta_w = 2.5                           # Pixels per spectral resolution element
+    f_ext = f_ext_in * Detector.qe * atel * alpha_pix * beta_slice * delta_w / pix_delta_w       # el/pixel/second
+    f_units = 'el/s/pix'
+    print('- converted to el/sec/pix')
+
+    w_pnh, f_pnh_in, f_pnh_units = toysim.build_bb_emission(wave_range=wrange, tbb=1000.)
+    tau_wcu_attenuator = 1E-4
+    f_pnh = f_pnh_in * tau_metis * tau_wcu_attenuator * atel * alpha_pix * beta_slice * delta_w / pix_delta_w  # el/pixel/second
+
+    affines = filer.read_fits_affine_transform(date_stamp)
+    svd_transforms = filer.read_fits_svd_transforms()
+    cfg = svd_transforms[0]['configuration']
+    # Load PSF library.  PSFs are sampled at 4x detector resolution so need to be down-sampled.
+    ech_ord = cfg['ech_ord']
+    psf_dict = toysim.load_psf_dict(opticon, ech_ord, downsample=True)
+    _, psf_ext = psf_dict[0]
     oversampling = 4
-    iq_date_stamp = '2024073000'
-    iq_dataset_folder = '../data/iq/nominal/' + iq_date_stamp + '/'
-    config_no = 41 - ech_ord
-    iq_config_str = "_config{:03d}".format(config_no)
-    iq_field_str = "_field{:03d}".format(1)
-    iq_defoc_str = '_defoc000um'
-    iq_config_str = 'lms_' + iq_date_stamp + iq_config_str + iq_field_str + iq_defoc_str
-    # iq_folder = '../data/iq/nominal/' + iq_dataset + '/lms_2024073000_config020_field001_defoc000um/'
-    iq_folder = iq_dataset_folder + iq_config_str + '/'
-    amin, vmin, scale, hw_det_psf = None, None, None, None
-    psf_dict = {}
-    for slice_no in range(9, 18):
-        iq_slice_str = "_spat{:02d}".format(slice_no) + '_spec0_detdesi'
-        iq_filename = iq_config_str + iq_slice_str + '.fits'
-        iq_path = iq_folder + iq_filename
-        hdr, psf = filer.read_fits(iq_path)
-        # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
-        psf_dict[slice_no] = hdr, psf
+    n_det_rows_slice = 256
+    n_psf_rows_slice = n_det_rows_slice * oversampling
+    n_psf_cols_slice = n_det_cols * oversampling
+    slices_on_detector = {1: (15, 28), 2: (15, 28), 3: (1, 14), 4: (1, 14)}
+    w_off = 0.01
+    efp_xy_bs_detector = {1: (-xh, -w_off), 2: (+xh, +w_off), 3: (-xh, -w_off), 4: (+xh, +w_off)}
+    tau_blaze = None
 
-    _, psf_tgt = psf_dict[13]
-    _, n_psfcols = psf_tgt.shape
-    # Rescale so that target PSF has 0. < v < 1.0 for (target) slice 13
-    amin, amax = np.amin(psf_tgt), np.amax(psf_tgt)
-    vmin, vmax = 0., 100.
-    scale = (vmax - vmin) / (amax - amin)
-    # Get PSF dimensions
-    nr_psf, nc_psf = psf_tgt.shape
-    hw_det_psf = nc_psf // (2 * oversampling)  # Half-width of PSF image on detector
+    opt_transforms = Util.find_optimum_transforms(w_cen, svd_transforms)
+    cfg = opt_transforms[1]['configuration']
+    ech_ord = cfg['ech_ord']
+    w_blaze, tau_blaze = toysim.make_tau_blaze(ech_ord)  # Make echelle blaze profile for this order.
 
-    for slice_no in range(9, 18):
-        # # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
-        # affines = filer.read_fits_affine_transform(date_stamp)      # Get distortion transform for each slice
-        # svd_transforms = filer.read_fits_svd_transforms()
-        opt_transform = Util.find_optimum_transform(slice_no, efp_w_cen, svd_transforms)
-        mfp_points = Util.efp_to_mfp(opt_transform, efp_out)
-        dfp_points = Util.mfp_to_dfp(affines, mfp_points)
+    mosaic = []                 # images are cartoons convolved with the PSF
+    for det_no in range(1, 5):
+        mosaic.append(np.zeros(det_shape))
 
-        _, psf = psf_dict[slice_no]
-        print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
+    for slice_no in range(1, 29):
+        # Start by mapping slice centre to detectors to get range of rows illuminated
+        opt_transform = opt_transforms[slice_no]
+        cfg = opt_transform['configuration']
+        w_min, w_max = cfg['w_min'], cfg['w_max']
+        yc = Util.slice_to_efp_y(slice_no, 0.)              # Slice y (beta) coordinate in EFP
+        efp_y = np.array([yc, yc])
+        efp_x = np.array([0., 0.])                        # Slice x (alpha) bounds in EFP, map to dfp_y
+        efp_w = np.array([w_min, w_max])
+        efp_slice = {'efp_y': efp_y, 'efp_x': efp_x, 'efp_w': efp_w}     # Centre of slice for detector
+        mfp_slice = Util.efp_to_mfp(opt_transform, efp_slice)
+        dfp_slice = Util.mfp_to_dfp(affines, mfp_slice)
+        strip_row_min = int(dfp_slice['dfp_y'][0] - 60)      # Bracket slices which typically cover 120 rows..
+        # Generate slice spanning image up-sampled to the psf resolution for
+        strip_row_max = strip_row_min + n_det_rows_slice
+        # Get pinhole PSF to apply to this slice (if a PSF exists)
+        for det_no in dfp_slice['det_nos']:
+            det_idx = det_no - 1
 
-        psf -= amin
-        psf *= scale
-        psf += vmin
-        print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
+            ext_illum = np.zeros((n_det_rows_slice, n_det_cols))
+            psf_illum = np.zeros((n_det_rows_slice, n_det_cols))
 
-        fw_det_psf = 2 * hw_det_psf
-        for i in range(0, n_pts):
-            det_idx = dfp_points['det_nos'][i] - 1
-            det_x = dfp_points['dfp_x'][i]
-            det_y = dfp_points['dfp_y'][i]
-            if det_x < 0. or det_x > 2048.:
-                continue
-            det_img = det_imgs[det_idx]
-            _, n_imcols = det_img.shape
-            # Add the PSF to the image at this location at the PSF resolution (x4 image pix/det pix)
-            r1, c1 = int(det_y - hw_det_psf), int(det_x - hw_det_psf)
-            c1 = 0 if c1 < 0 else c1
-            r2, c2 = r1 + fw_det_psf, c1 + fw_det_psf
-            pc1, pc2 = 0, n_psfcols
-            if c1 >= n_imcols or c2 < 1:
-                continue
-            if c1 < 0:
-                pc1 = -c1 * oversampling
-                c1 = 0
-            if c2 > n_imcols:
-                ncr = c2 - n_imcols
-                pc2 = n_psfcols - ncr * oversampling
-                c2 = n_imcols
-            # det_patch = np.array(det_img[r1:r2, c1:c2])
-            # up-sample detector patch and add psf
-            # det_patch_us1 = np.repeat(det_patch, oversampling, axis=0)
-            # det_patch_us = np.repeat(det_patch_us1, oversampling, axis=1)
-            # det_patch_us += psf[:, pc1:pc2]
-            # down-sample patch and write back into image
-            psf_sub = psf[:, pc1:pc2]
-            nss_rows = psf_sub.shape[0] // oversampling
-            nss_cols = psf_sub.shape[1] // oversampling
-            psf_ds = psf_sub.reshape((nss_rows, oversampling, nss_cols, -1)).mean(axis=3).mean(axis=1)
-            det_imgs[det_idx][r1:r2, c1:c2] += psf_ds
+            dfp_det_nos = np.full(n_det_cols, det_no)
+            dfp_pix_xs = np.arange(n_det_cols)  # Detector column indices
 
-    out_path = '../output/stimage.fits'
-    filer.write_fits(out_path, hdr_primary, det_imgs)
+            n_rows_written = 0
+            for det_row in range(strip_row_min, strip_row_max):
+                dfp_pix_ys = np.full(n_det_cols, det_row)
+                dfp_row = {'dfp_x': dfp_pix_xs, 'dfp_y': dfp_pix_ys, 'det_nos': dfp_det_nos}
+                efp_row = Util.dfp_to_efp(opt_transform, affines, dfp_row)
+                efp_x = efp_row['efp_x']
+                idx_illum = np.argwhere(np.abs(efp_x) < xh)
+                n_ib = len(idx_illum)
+                if n_ib == 0:       # Skip unilluminated rows.
+                    continue
+                # Apply extended spectrum (sky or black body) to illuminated rows
+                strip_row = det_row - strip_row_min
+                efp_w_row = efp_row['efp_w']
+                w_obs = efp_w_row[idx_illum][:]
+                f_ext_obs = np.interp(w_obs, w_ext, f_ext)
+                tau_ext_obs = np.interp(w_obs, w_blaze, tau_blaze)
+                ext_illum[strip_row, idx_illum] = f_ext_obs * tau_ext_obs
+                n_rows_written += 1
 
+            psf_pnh = None
+            if use_pinholes:
+                slice_no_pnh_cen = pinhole['slice_no_cen']
+                slice_no_offset = slice_no - slice_no_pnh_cen
+                if math.fabs(slice_no_offset) < 5:          # Pinhole PSF exists for this slice.
+                    _, psf_pnh = psf_dict[slice_no_offset]
+
+            if psf_pnh is not None:     # Pinhole is visible in this slice.  Find rows it maps onto
+                # Get pinhole trace
+                efp_x_pnh = np.full(n_det_cols, pinhole['efp_x'])
+                efp_y_pnh = np.full(n_det_cols, pinhole['efp_y'])
+                efp_w_pnh = efp_w_row
+
+                efp_pnh = {'efp_x': efp_x_pnh, 'efp_y': efp_y_pnh, 'efp_w': efp_w_pnh}
+                dfp_pnh = Util.efp_to_dfp(opt_transform, affines, det_no, efp_pnh)
+                # Row by row population of psf_illum image
+                dfp_y_pnh = dfp_pnh['dfp_y']
+                dfp_rows_pnh = np.round(dfp_y_pnh).astype(int)
+                det_row_min_psf, det_row_max_psf = np.amin(dfp_rows_pnh), np.amax(dfp_rows_pnh)
+                for det_row in range(det_row_min_psf, det_row_max_psf + 1):
+                    dfp_pix_ys = np.full(n_det_cols, det_row)
+                    idx_illum = np.argwhere(dfp_rows_pnh == det_row)
+                    n_ib = len(idx_illum)
+                    if n_ib == 0:  # Skip unilluminated rows.
+                        continue
+                    # Apply extended spectrum (sky or black body) to illuminated rows
+                    strip_row = det_row - strip_row_min
+                    w_obs = efp_w_row[idx_illum][:]
+                    idx_min, idx_max = np.amin(idx_illum), np.amax(idx_illum)
+                    w_min, w_max = np.amin(w_obs), np.amax(w_obs)
+                    fmt = "Applying pnh spectrum to row= {:d}, cols= {:d}-{:d}, waves= {:8.5f}-{:8.5f}"
+                    print(fmt.format(strip_row, idx_min, idx_max, w_min, w_max))
+                    f_pnh_obs = np.interp(w_obs, w_pnh, f_pnh)
+                    tau_pnh_obs = np.interp(w_obs, w_blaze, tau_blaze)
+                    psf_illum[strip_row, idx_illum] = f_pnh_obs
+
+            frame = mosaic[det_idx]
+            # Now convolve cartoon slice with psf and then add dark current and read noise (Finger, Rauscher)
+            image_slice_ext = scipy.signal.convolve2d(ext_illum, psf_ext, mode='same', boundary='symm')
+            frame[strip_row_min:strip_row_max] += image_slice_ext
+            if psf_pnh is not None:
+                image_slice_psf = scipy.signal.convolve2d(psf_illum, psf_pnh, mode='same', boundary='symm')
+                frame[strip_row_min:strip_row_max] += image_slice_psf
+
+            t_now = time.perf_counter()
+            t_min = (t_now - t_start) / 60.
+            fmt = "\r- simulated, slice {:2d}, detector {:2d}, written {:d} rows at t= {:5.2f} min"  # \r at start
+            print(fmt.format(slice_no, det_no, n_rows_written, t_min), end="", flush=True)
+
+    image_out_path = '../output/' + sim_config + '.fits'
+    filer.write_fits(image_out_path, hdr_primary, mosaic)
+
+print()
 print('lms_distort - Done')

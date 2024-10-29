@@ -526,7 +526,7 @@ class Trace:
         return csv_name, parameter, series
 
     def _create_mask(self, silent):
-        edge = Detector.pix_edge * Detector.det_pix_size / 1000.0
+        edge = Detector.det_size * Detector.det_pix_size / 1000.0
         xy_f = (Globals.det_gap / 2.0) + edge - Globals.margin
         xy_n = (Globals.det_gap / 2.0) + Globals.margin
         xy_bounds = {'BL': [-xy_f, -xy_n, -xy_f, -xy_n], 'TL': [-xy_f, -xy_n,  xy_n,  xy_f],

@@ -134,7 +134,7 @@ class Cuber:
                                 for zem_img in images:
                                     ipc_img = Ipc.apply(zem_img, oversampling) if inter_pixel else zem_img
                                     ipc_images.append(ipc_img)
-                                    det_img = Detector.measure(ipc_img, im_pix_size)
+                                    det_img = Detector.down_sample(ipc_img, im_pix_size)
                                     det_images.append(det_img)
                                 # Find the line widths (perfect, design, mc_mean etc.) for the 'target' slice
                                 if slice_no == slice_tgt:

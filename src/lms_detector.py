@@ -14,11 +14,14 @@ class Detector:
 
     nom_pix_pitch = Globals.nom_pix_pitch
     det_pix_size = nom_pix_pitch
-    pix_edge = 2048             # H2RG format
+    det_size = 2048             # H2RG format
     mosaic_format = 2, 2
     mosaic_gap = 2.23           # Gap in mm
-    detector_edge_mm = 0.001 * pix_edge * det_pix_size
+    detector_edge_mm = 0.001 * det_size * det_pix_size
     mosaic_edge_mm = detector_edge_mm * mosaic_format[0] + mosaic_gap
+    qe = 0.7                                    # QE (el/photon)
+    idark = 0.01  # Dark current approx. (Finger)
+    rnoise = 10.  # Very approx read noise (Finger/Rauscher) Could do much better with sample up ramp.
 
     def __init__(self):
         """ Detector object, mainly used to sample/measure Zemax observations
@@ -31,7 +34,7 @@ class Detector:
     def get_bounds():
         """ Get the bounds of all four detectors in mm.
         """
-        det_edge = Detector.nom_pix_pitch * Detector.pix_edge / 1000.
+        det_edge = Detector.nom_pix_pitch * Detector.det_size / 1000.
         det_gap = Detector.mosaic_gap
         xy_lim = det_edge + det_gap / 2.
         xbl = np.array([-xy_lim, -xy_lim, -xy_lim + det_edge, -xy_lim + det_edge])
@@ -46,31 +49,35 @@ class Detector:
         return x, y
 
     @staticmethod
-    def measure(image_in, im_pix_pitch):
+    def down_sample(image_in, im_pix_pitch):
         """ Measure an observation by rebinning at the detector pixel resolution.
         """
         sampling = int(Detector.det_pix_size / im_pix_pitch)        # Image pixels per detector pixel
         nr, nc = image_in.shape
         n_frame_rows, n_frame_cols = int(nr/sampling), int(nc/sampling)
-        image_out = np.zeros((n_frame_rows, n_frame_cols))
-        for r in range(0, n_frame_rows):
-            r1 = r * sampling
-            r2 = r1 + sampling
-            for c in range(0, n_frame_cols):
-                c1 = c * sampling
-                c2 = c1 + sampling
-                image_out[r, c] = np.mean(image_in[r1:r2, c1:c2])
+        image_out = image_in.reshape(n_frame_rows, sampling, n_frame_cols, -1).mean(axis=3).mean(axis=1)
         return image_out
 
-
-
-
-
     @staticmethod
-    def set_flat(observation):
-        image, params = observation
-        image = np.full(image.shape, 1.0)
-        return image, params
+    def detect(frame, dit):
+        """ Make the mosaic of detector images.
+        :return: mosaic - dictionary containing 2x2 mosaic of images
+                        'images': synthetic realistic detector images, (PSF convolved and noise added)
+                        'cartoons': spatially unresolved image components (illumination map)
+                        'reads': gaussian distributed read noise values
+
+        """
+        det_shape = Detector.det_size, Detector.det_size
+        dark = np.full(det_shape, Detector.idark)
+        frame += dark
+        image = frame * dit             # Convert from photocurrent to quantised charge
+
+        rng = np.random.default_rng()
+        shot = rng.poisson(np.sqrt(image), det_shape)
+        image += shot
+        read = rng.normal(loc=0., scale=Detector.rnoise, size=det_shape)
+        image += read
+        return image
 
     @staticmethod
     def get_tag(det_pix_size):

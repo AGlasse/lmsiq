@@ -135,7 +135,9 @@ class Filer:
         return affines
 
     def write_fits_svd_transform(self, trace):
-        # Create data tables holding transforms for all slices
+        """ Create data tables holding transforms for all slices in a configuration and write them
+        to a fits file.
+        """
         pa = trace.parameter['Prism angle']
         ea = trace.parameter['Echelle angle']
         _, opticon, date_stamp, _, _, _ = trace.model_config
@@ -165,7 +167,7 @@ class Filer:
             ech_order, slice_no, spifu_no, w_min, w_max = ifu_slice[0]
             cards = [Card('ECH_ORD', ech_order, 'Echelle diffraction order'),
                      Card('SLICE', slice_no, 'Spatial slice number (1 <= slice_no <= 28)'),
-                     Card('SPIFU', spifu_no, 'Spectral IFU slice no.'),
+                     Card('SPIFU', spifu_no, 'Spectral IFU slice no. (=0 if not selected'),
                      Card('W_MIN', w_min, 'Minimum slice wavelength (micron)'),
                      Card('W_MAX', w_max, 'Maximum slice wavelength (micron)')]
 
@@ -183,7 +185,7 @@ class Filer:
         return fits_name
 
     def read_fits_svd_transform(self, fits_name):
-        """ Read fits file into a 'trace' object, which
+        """ Read a list of transforms between the EFP and MFP from a fits file.
         """
         fits_path = self.tf_dir + fits_name
         hdu_list = fits.open(fits_path, mode='readonly')

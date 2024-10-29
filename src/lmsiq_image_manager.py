@@ -125,141 +125,141 @@ class ImageManager:
         ImageManager.config_dict = config_dict
         return
 
-    @staticmethod
-    def make_dictionary_old(data_identifier, iq_filer):
-        """ Make the image table dictionary which describes all data for this model as a dictionary object
-        (config_dict) which has a single entry for each folder/configuration in the model data.  Within a
-        folder there are multiple files ('perfect', 'design' and M-C instances) and may be multiple field
-        positions, spatial and spectral slices, so these are stored as lists.  A 'dataset' is then defined
-        as the unique set of files for a single value of all these parameters,
-        eg, folder/config_a, field_b, spat_slice_c, spec_slice_d.
-        Method 'load_dataset' then returns the images plus a dictionary (obs_dict) containing the single
-        values corresponding to the selected data.
-        """
-        # is_new_zemax = data_identifier['zemax_format'] == 'new_zemax'
-        # ImageManager.is_new_zemax = is_new_zemax
-        model_dict = {'optical_path': None,
-                      'im_pix_size': None,
-                      'fits_trailer': None,
-                      'mc_bounds': None,
-                      }
-        config_dict = {'folders': [],
-                       'config_nos': [],
-                       'field_nos': [],
-                       'focus_shifts': [],
-                       'slice_nos': [], 'slice_tags': [], 'slice_tgts': [],
-                       'spifu_nos': [],
-                       'wavelengths': [],
-                       'prism_angles': [], 'grating_angles': [], 'grating_orders': [],
-                       }
-        dataset_folder = iq_filer.data_folder
-        folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
-        config_no_list, field_no_list = [], []
-        for folder in folder_list:
-            is_valid_field = False
-            slice_fields = data_identifier['slice_fields']
-            for key in slice_fields:
-                field_nos = slice_fields[key]
-                for field_no in field_nos:
-                    field_text = '_field{:d}'.format(field_no)
-                    is_valid_field = True if field_text in folder else is_valid_field
-            if not is_valid_field:
-                continue
-            print('Folder {:s} included in analysis'.format(folder))
-
-            optical_path = data_identifier['optical_path']
-            model_dict['optical_path'] = optical_path
-            config_dict['folders'].append(folder)
-            slice_tgt = 13
-            config_dict['slice_tgts'].append(slice_tgt)
-
-            fits_folder = dataset_folder + folder + '/'
-            par_files = iq_filer.get_file_list(fits_folder, inc_tags=['.txt'])
-            par_path = fits_folder + par_files[0]
-            # Note that the slice number information is wrong in the new zemax format (since start of 2024)
-            parameters = ImageManager._read_param_file(par_path)
-            for key in parameters:
-                p = parameters[key]
-                if key in model_dict:
-                    model_dict[key] = p
-                    continue
-                cfg_key = key + 's'
-                if cfg_key in config_dict:
-                    config_dict[cfg_key].append(p)
-                    continue
-                print("Keyword {:s} not found in model_dict or config_dict".format(key))
-
-            if data_identifier['optical_path'] == 'spifu':
-                config_dict['prism_angles'].append(6.99716)
-                config_dict['grating_angles'].append(0.00000)
-                config_dict['grating_orders'].append(-23)
-
-            # Get list of file names for a single run (e.g. identical except for MC run no., 'perfect' or 'design' tags
-            if optical_path == 'nominal':
-                exc_tags = ['specslice', 'preslice']
-                fits_trailer = '_MC_spatslice.fits'
-            else:
-                exc_tags = ['spatslice', 'preslice']
-                fits_trailer = '_MC_specslice.fits'
-            model_dict['fits_trailer'] = fits_trailer
-            inc_tags = ['.fits']
-            fits_files = iq_filer.get_file_list(fits_folder,
-                                                inc_tags=inc_tags,
-                                                exc_tags=exc_tags)
-
-            tokens = folder.split('_')
-            field_no = int(tokens[3][-2:])
-            field_no_list.append(field_no)
-            config_no = int(tokens[4][-2:])
-            config_no_list.append(config_no)
-            if len(tokens) > 4:     # Defocus data present
-                focus_shift = float(tokens[5][1:4])
-                config_dict['focus_shifts'].append(int(focus_shift))
-
-            # Read in and decode Monte-Carlo file names and slice/spifu numbers.
-            mc_no_list = []
-            slice_no_list, slice_tag_list, spifu_no_list = [], [], []
-            for fits_file in fits_files:
-
-                tokens = fits_file.split('_')
-                slice_idx = 3
-                spifu_idx = slice_idx + 1
-                if 'slicer' in fits_file:
-                    continue
-                slice_tag = tokens[slice_idx]
-                slice_no = int(slice_tag)
-                spifu_no = int(tokens[spifu_idx])
-                is_new_slice = slice_tag not in slice_tag_list
-                is_new_spifu = spifu_no not in spifu_no_list
-                if is_new_slice or is_new_spifu:
-                    slice_tag_list.append(slice_tag)
-                    slice_no_list.append(slice_no)
-                    spifu_no_list.append(spifu_no)
-
-                if ('design' in fits_file) or ('perfect' in fits_file):
-                    continue
-                if '_MC_' in fits_file:
-                    mc_idx = spifu_idx + 1
-                    mc_tag = tokens[mc_idx]
-
-                    if mc_tag.isdigit():
-                        mc_no = int(mc_tag)
-                        mc_no_list.append(mc_no)
-            if len(mc_no_list) > 0:             # If 'MC' data is included in dataset
-                mc_array = np.array(mc_no_list)
-                mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
-                model_dict['mc_bounds'] = mc_start, mc_end
-            config_dict['slice_tags'].append(slice_tag_list)
-            config_dict['slice_nos'].append(slice_no_list)
-            spifu_no_list = [0] if len(spifu_no_list) == 0 else spifu_no_list
-            config_dict['spifu_nos'].append(spifu_no_list)
-            config_dict['config_nos'].append(config_no)
-            config_dict['field_nos'].append(field_no)
-
-        ImageManager._find_unique_parameters(config_dict)
-        ImageManager.model_dict = model_dict
-        ImageManager.config_dict = config_dict
-        return
+    # @staticmethod
+    # def make_dictionary_old(data_identifier, iq_filer):
+    #     """ Make the image table dictionary which describes all data for this model as a dictionary object
+    #     (config_dict) which has a single entry for each folder/configuration in the model data.  Within a
+    #     folder there are multiple files ('perfect', 'design' and M-C instances) and may be multiple field
+    #     positions, spatial and spectral slices, so these are stored as lists.  A 'dataset' is then defined
+    #     as the unique set of files for a single value of all these parameters,
+    #     eg, folder/config_a, field_b, spat_slice_c, spec_slice_d.
+    #     Method 'load_dataset' then returns the images plus a dictionary (obs_dict) containing the single
+    #     values corresponding to the selected data.
+    #     """
+    #     # is_new_zemax = data_identifier['zemax_format'] == 'new_zemax'
+    #     # ImageManager.is_new_zemax = is_new_zemax
+    #     model_dict = {'optical_path': None,
+    #                   'im_pix_size': None,
+    #                   'fits_trailer': None,
+    #                   'mc_bounds': None,
+    #                   }
+    #     config_dict = {'folders': [],
+    #                    'config_nos': [],
+    #                    'field_nos': [],
+    #                    'focus_shifts': [],
+    #                    'slice_nos': [], 'slice_tags': [], 'slice_tgts': [],
+    #                    'spifu_nos': [],
+    #                    'wavelengths': [],
+    #                    'prism_angles': [], 'grating_angles': [], 'grating_orders': [],
+    #                    }
+    #     dataset_folder = iq_filer.data_folder
+    #     folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
+    #     config_no_list, field_no_list = [], []
+    #     for folder in folder_list:
+    #         is_valid_field = False
+    #         slice_fields = data_identifier['slice_fields']
+    #         for key in slice_fields:
+    #             field_nos = slice_fields[key]
+    #             for field_no in field_nos:
+    #                 field_text = '_field{:d}'.format(field_no)
+    #                 is_valid_field = True if field_text in folder else is_valid_field
+    #         if not is_valid_field:
+    #             continue
+    #         print('Folder {:s} included in analysis'.format(folder))
+    #
+    #         optical_path = data_identifier['optical_path']
+    #         model_dict['optical_path'] = optical_path
+    #         config_dict['folders'].append(folder)
+    #         slice_tgt = 13
+    #         config_dict['slice_tgts'].append(slice_tgt)
+    #
+    #         fits_folder = dataset_folder + folder + '/'
+    #         par_files = iq_filer.get_file_list(fits_folder, inc_tags=['.txt'])
+    #         par_path = fits_folder + par_files[0]
+    #         # Note that the slice number information is wrong in the new zemax format (since start of 2024)
+    #         parameters = ImageManager._read_param_file(par_path)
+    #         for key in parameters:
+    #             p = parameters[key]
+    #             if key in model_dict:
+    #                 model_dict[key] = p
+    #                 continue
+    #             cfg_key = key + 's'
+    #             if cfg_key in config_dict:
+    #                 config_dict[cfg_key].append(p)
+    #                 continue
+    #             print("Keyword {:s} not found in model_dict or config_dict".format(key))
+    #
+    #         if data_identifier['optical_path'] == 'spifu':
+    #             config_dict['prism_angles'].append(6.99716)
+    #             config_dict['grating_angles'].append(0.00000)
+    #             config_dict['grating_orders'].append(-23)
+    #
+    #         # Get list of file names for a single run (e.g. identical except for MC run no., 'perfect' or 'design' tags
+    #         if optical_path == 'nominal':
+    #             exc_tags = ['specslice', 'preslice']
+    #             fits_trailer = '_MC_spatslice.fits'
+    #         else:
+    #             exc_tags = ['spatslice', 'preslice']
+    #             fits_trailer = '_MC_specslice.fits'
+    #         model_dict['fits_trailer'] = fits_trailer
+    #         inc_tags = ['.fits']
+    #         fits_files = iq_filer.get_file_list(fits_folder,
+    #                                             inc_tags=inc_tags,
+    #                                             exc_tags=exc_tags)
+    #
+    #         tokens = folder.split('_')
+    #         field_no = int(tokens[3][-2:])
+    #         field_no_list.append(field_no)
+    #         config_no = int(tokens[4][-2:])
+    #         config_no_list.append(config_no)
+    #         if len(tokens) > 4:     # Defocus data present
+    #             focus_shift = float(tokens[5][1:4])
+    #             config_dict['focus_shifts'].append(int(focus_shift))
+    #
+    #         # Read in and decode Monte-Carlo file names and slice/spifu numbers.
+    #         mc_no_list = []
+    #         slice_no_list, slice_tag_list, spifu_no_list = [], [], []
+    #         for fits_file in fits_files:
+    #
+    #             tokens = fits_file.split('_')
+    #             slice_idx = 3
+    #             spifu_idx = slice_idx + 1
+    #             if 'slicer' in fits_file:
+    #                 continue
+    #             slice_tag = tokens[slice_idx]
+    #             slice_no = int(slice_tag)
+    #             spifu_no = int(tokens[spifu_idx])
+    #             is_new_slice = slice_tag not in slice_tag_list
+    #             is_new_spifu = spifu_no not in spifu_no_list
+    #             if is_new_slice or is_new_spifu:
+    #                 slice_tag_list.append(slice_tag)
+    #                 slice_no_list.append(slice_no)
+    #                 spifu_no_list.append(spifu_no)
+    #
+    #             if ('design' in fits_file) or ('perfect' in fits_file):
+    #                 continue
+    #             if '_MC_' in fits_file:
+    #                 mc_idx = spifu_idx + 1
+    #                 mc_tag = tokens[mc_idx]
+    #
+    #                 if mc_tag.isdigit():
+    #                     mc_no = int(mc_tag)
+    #                     mc_no_list.append(mc_no)
+    #         if len(mc_no_list) > 0:             # If 'MC' data is included in dataset
+    #             mc_array = np.array(mc_no_list)
+    #             mc_start, mc_end = np.amin(mc_array), np.amax(mc_array)
+    #             model_dict['mc_bounds'] = mc_start, mc_end
+    #         config_dict['slice_tags'].append(slice_tag_list)
+    #         config_dict['slice_nos'].append(slice_no_list)
+    #         spifu_no_list = [0] if len(spifu_no_list) == 0 else spifu_no_list
+    #         config_dict['spifu_nos'].append(spifu_no_list)
+    #         config_dict['config_nos'].append(config_no)
+    #         config_dict['field_nos'].append(field_no)
+    #
+    #     ImageManager._find_unique_parameters(config_dict)
+    #     ImageManager.model_dict = model_dict
+    #     ImageManager.config_dict = config_dict
+    #     return
 
     @staticmethod
     def _find_new_zemax_parameters(config_no, optical_configuration, date_stamp):
@@ -344,6 +344,27 @@ class ImageManager:
                     params[key] = value.strip()
         return params
 
+    # def read_psf_set(self, iq_filer, ech_ord):
+    #     iq_date_stamp = '2024073000'
+    #     iq_dataset_folder = '../data/iq/nominal/' + iq_date_stamp + '/'
+    #     config_no = 41 - ech_ord
+    #     iq_config_str = "_config{:03d}".format(config_no)
+    #     iq_field_str = "_field{:03d}".format(1)
+    #     iq_defoc_str = '_defoc000um'
+    #     iq_config_str = 'lms_' + iq_date_stamp + iq_config_str + iq_field_str + iq_defoc_str
+    #     # iq_folder = '../data/iq/nominal/' + iq_dataset + '/lms_2024073000_config020_field001_defoc000um/'
+    #     iq_folder = iq_dataset_folder + iq_config_str + '/'
+    #     amin, vmin, scale, hw_det_psf = None, None, None, None
+    #     psf_dict = {}
+    #     for slice_no in range(9, 18):
+    #         iq_slice_str = "_spat{:02d}".format(slice_no) + '_spec0_detdesi'
+    #         iq_filename = iq_config_str + iq_slice_str + '.fits'
+    #         iq_path = iq_folder + iq_filename
+    #         hdr, psf = iq_filer.read_fits(iq_path)
+    #         # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
+    #         psf_dict[slice_no] = hdr, psf
+    #     return psf_dict
+    #
     @staticmethod
     def read_zemax_image(path):
         """ Read in a model zemax image """
@@ -353,15 +374,15 @@ class ImageManager:
         image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
         return image
 
-    @staticmethod
-    def read_mosaic(path):
-        """ Read in a model zemax image """
-        hdu_list = fits.open(path, mode='readonly')
-        hdu = hdu_list[0]
-        image_in = hdu.data
-        image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
-        return image
-
+    # @staticmethod
+    # def read_mosaic(path):
+    #     """ Read in a model zemax image """
+    #     hdu_list = fits.open(path, mode='readonly')
+    #     hdu = hdu_list[0]
+    #     image_in = hdu.data
+    #     image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
+    #     return image
+    #
     @staticmethod
     def load_dataset(iq_filer, selection, **kwargs):
         """ Load a data (sub-)set (perfect, design plus MC images).

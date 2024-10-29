@@ -60,7 +60,6 @@ data_dictionary = {'2024032400': (nominal, 'all', '20240109', fts_efp, 4,
                    }
 
 iq_date_stamp = '2024061403'
-
 optical_path, mc_bounds, dist_date_stamp, field_tgt_slice, slice_radius, data_label = data_dictionary[iq_date_stamp]
 data_identifier = {'optical_path': optical_path,
                    'iq_date_stamp': iq_date_stamp,
