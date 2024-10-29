@@ -19,12 +19,12 @@ class Test:
         im_ps = np.zeros((32, 32))
         im_ps[5:7, 5:7] = 1.0          # 2x2 artificial source, centred at the boundary between sub-pixel 0 and 1
         im_ipc_ps = Ipc.apply(im_ps, oversampling)
-        im_det_ps = Detector.measure(im_ipc_ps, im_pix_size)
+        im_det_ps = Detector.down_sample(im_ipc_ps, im_pix_size)
 
         im_fl = np.zeros((32, 32))
         im_fl[:, :] = 1.0
         im_ipc_fl = Ipc.apply(im_fl, oversampling)
-        im_det_fl = Detector.measure(im_ipc_fl, im_pix_size)
+        im_det_fl = Detector.down_sample(im_ipc_fl, im_pix_size)
         collage = [im_ps, im_ipc_ps, im_det_ps,
                    im_fl, im_ipc_fl, im_det_fl]
         pane_titles = ['Zem point', 'point + diffusion', 'det point',

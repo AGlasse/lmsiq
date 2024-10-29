@@ -113,7 +113,7 @@ class Phase:
                                 im_shifted = Phase.sub_pixel_shift(img_in, 'spectral', im_shift,
                                                                    resolution=50, debug=False)
                                 im_ipc = Ipc.apply(im_shifted, oversampling) if inter_pixel else im_shifted
-                                im_det = Detector.measure(im_ipc, im_pix_size)
+                                im_det = Detector.down_sample(im_ipc, im_pix_size)
                                 if is_first_dataset and img_idx == 2:
                                     img_tag = "img_{:d}".format(img_idx)
                                     fmt = "processed_data_{:s}_{:s}_{:s}_{:s}_{:s}_{:s}"

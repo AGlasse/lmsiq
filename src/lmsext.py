@@ -86,7 +86,7 @@ det_shift = 0.
 im_shift = det_shift * im_oversampling
 obs_2 = phase.sub_pixel_shift(obs_1, 'spectral', im_shift, debug=False)
 obs_3 = ipc.convolve(obs_2) if inter_pixel else obs_2
-obs_4 = detector.measure(obs_3)
+obs_4 = detector.down_sample(obs_3)
 
 img_3, _ = obs_3
 nr, nc = img_3.shape

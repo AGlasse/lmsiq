@@ -16,13 +16,31 @@ class Globals:
     optical_configurations = [nominal, spifu]
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
-    efp_as_mm = 0.303                                       # Plate scale (arcsec/mm) in entrance focal plane
-    alpha_fov = 1.0                                         # Set up field of view (arcsec)
-    beta_fov = 0.5
+
+    # The ray trace data extends over an EFP fov which maps every pixel on the detector, including the intra-slice
+    # gaps.  We therefore subtract a margin efp_y_margin (mm) to implement the intra-slice gap in simulated images.
+    # Inferred from ray trace data (0.171 gives alpha fov = 1.0 as)
+    efp_x_fov_rt_mm, efp_y_fov_rt_mm = 5.842063, 3.208105   # Field x, y size (mm) extrapolated from ray trace data
+    efp_x_fov_margin = 0.8
+    efp_x_fov_mm, efp_y_fov_mm = efp_x_fov_rt_mm - efp_x_fov_margin, efp_y_fov_rt_mm
+    alpha_fov_as = 1.0
+    efp_as_mm = alpha_fov_as / efp_x_fov_mm                 # Plate scale set to give 1.0 arcsec y field
+
+    beta_fov_as = efp_as_mm * efp_y_fov_mm
+    fmt = "Ray trace EFP field of view, alpha, beta = {:7.3f}{:7.3f}"
+    print(fmt.format(efp_x_fov_rt_mm * efp_as_mm, efp_y_fov_rt_mm * efp_as_mm))
+    fmt = "Unvignetted EFP field, alpha, beta = {:7.3f}{:7.3f}"
+    print(fmt.format(alpha_fov_as, beta_fov_as))
+
     alpha_mas_pix = 8.7                                     #
     beta_mas_pix = 20.7
+    # Diffraction grating parameters
     rule_spacing = 18.2			                            # Echelle rule spacing [um]
     ge_refractive_index = 4.05                              # Refractive index of germanium
+    wav_first_order = 2. * rule_spacing * ge_refractive_index
+    wav_first_order = 21 * 5.216  # First order blaze wavelength
+
+    # IFU parameters
     n_lms_slices = 28
     n_lms_spifu_slices = 6
 
@@ -31,7 +49,8 @@ class Globals:
                         'res_fit_order': 3}                 # No. of terms in residual fit
     svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
     nom_pix_pitch = 18.0                                    # LMS pixel pitch in microns
-    spatial_scale = 0.0082                                  # Along slice arcsec / pixel
+    # efp_alpha_size = alpha_fov * nom_pix_pitch / alpha_mas_pix      # EFP along-slice in mm
+    # spatial_scale = 0.0082                                  # Along slice arcsec / pixel
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		            # Unilluminated margin around outer detector edge (pixels)
     margin = pix_margin[0] * nom_pix_pitch / 1000.          # Convert to mm
@@ -47,3 +66,5 @@ class Globals:
     # Image quality parameters are calculated for three levels of data product
     process_levels = ['raw_zemax', 'proc_zemax', 'proc_detector']
     axes = ['spectral', 'spatial']
+    # Zemax PSF image oversampling wrt detector pixels.
+    oversampling = 4

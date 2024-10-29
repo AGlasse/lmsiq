@@ -390,25 +390,25 @@ class Util:
         return text
 
     @staticmethod
-    def find_optimum_transform(tgt_slice_no, wave, svd_transforms):
-        # Start by finding the transform which has the target wavelength at the centre of its range.
-        w_off_min = 1000.                       # Initialise minimum wavelength offset
-        opt_transform = None                    # Optimum transform
-        for svd_transform in svd_transforms:    # Collect all test points served by this transform
+    def find_optimum_transforms(wave, svd_transforms):
+        """ Find the transforms (one per slice) which position a specific wavelength closest to the centre of the
+        detector mosaic.
+        """
+        opt_transforms, w_off_min = {}, {}
+        for slice_no in range(1, 29):
+            opt_transforms[slice_no] = None
+            w_off_min[slice_no] = 1000.                       # Initialise minimum wavelength offset
+        # Select transforms which has the target wavelength at the centre of its range for slice 13.
+        for svd_transform in svd_transforms:
             config = svd_transform['configuration']
             slice_no = config['slice']
-            if slice_no != tgt_slice_no:
-                continue
-            # Is the ray in the wavelength range covered by the transform?
             w_min, w_max = config['w_min'], config['w_max']
-            in_wrange = (w_min < wave) and (wave < w_max)
-            if not in_wrange:
-                continue
             w_off = abs(0.5 * (w_max + w_min) - wave)
-            if w_off < w_off_min:
-                w_off_min = w_off
-                opt_transform = svd_transform
-        return opt_transform
+            if w_off <= w_off_min[slice_no] or opt_transforms[slice_no] is None:
+                opt_transforms[slice_no] = svd_transform
+                w_off_min[slice_no] = w_off
+
+        return opt_transforms
 
     @staticmethod
     def efp_y_to_slice(efp_y):
@@ -425,6 +425,8 @@ class Util:
 
     @staticmethod
     def slice_to_efp_y(slice_no, phase):
+        """ Return the EFP y coordinate of the slice centre (in mm).
+        """
         efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
         slice = slice_no + phase
@@ -434,7 +436,7 @@ class Util:
     @staticmethod
     def efp_to_dfp(transform, affines, det_no, efp_points):
         mfp_points = Util.efp_to_mfp(transform, efp_points)
-        dfp_points = Util.mfp_to_dfp(affines, det_no, mfp_points)
+        dfp_points = Util.mfp_to_dfp(affines, mfp_points)
         return dfp_points
 
     @staticmethod
@@ -460,13 +462,37 @@ class Util:
             if n_idx == 0:
                 continue
             d_nos = [i+1]*n_idx
-            d = affines[i]
-            u, v = Util.apply_affine_transform(x[idx], y[idx], d)
+            affine_fwd = affines[i]
+            u, v = Util.apply_affine_transform(x[idx], y[idx], affine_fwd)
             det_nos += d_nos
             dfp_x += list(u)
             dfp_y += list(v)
-        dfp_points = {'det_nos': det_nos, 'dfp_x': dfp_x, 'dfp_y': dfp_y}
+        dfp_points = {'det_nos': np.array(det_nos), 'dfp_x': np.array(dfp_x), 'dfp_y': np.array(dfp_y)}
         return dfp_points
+
+    @staticmethod
+    def dfp_to_mfp(affines, dfp_points):
+        """ Transform points from detector to the mosaic focal plane.  Note that all points are assumed
+        to come from the same detector (as specified in the first point). """
+        det_nos = dfp_points['det_nos']
+        dfp_x = dfp_points['dfp_x']
+        dfp_y = dfp_points['dfp_y']
+        mfp_x, mfp_y = [], []
+        n_pts, = det_nos.shape
+        for det_idx in range(4):
+            det_no = det_idx + 1
+            det_no_array = np.full(n_pts, det_no)
+            idx, = np.nonzero(np.equal(det_nos, det_no_array))
+            n_idx, = idx.shape
+            if n_idx == 0:
+                continue
+            affine_rev = affines[det_idx + 4]
+            u, v = Util.apply_affine_transform(dfp_x[idx], dfp_y[idx], affine_rev)
+            mfp_x += list(u)
+            mfp_y += list(v)
+
+        mfp_points = {'mfp_x': np.array(mfp_x), 'mfp_y': np.array(mfp_y)}
+        return mfp_points
 
     @staticmethod
     def efp_to_mfp(transform, efp_points):
@@ -486,6 +512,12 @@ class Util:
         mfp_x, mfp_y = Util.apply_svd_distortion(phases, alphas, a, b)
         mfp_points = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
         return mfp_points
+
+    @staticmethod
+    def dfp_to_efp(transform, affines, dfp_points):
+        mfp_points = Util.dfp_to_mfp(affines, dfp_points)
+        efp_points = Util.mfp_to_efp(transform, mfp_points)
+        return efp_points
 
     @staticmethod
     def mfp_to_efp(transform, mfp_points, slice_phase=0.):
@@ -699,3 +731,73 @@ class Util:
         rgb[:, 1] = np.sin(f * math.pi)
         rgb[:, 2] = b_min + f * (b_max - b_min)
         return rgb
+
+    @staticmethod
+    def test_out_and_back(filer, date_stamp):
+        print('lms_distort - Evaluating transforms')
+
+        # Define EFP coordinates and target wavelength for spectrum
+        efp_x_cen, efp_y_cen, efp_w_cen = 0., 0., 4.65
+        tgt_slice_nos, test_phases = Util.efp_y_to_slice([efp_y_cen])
+        tgt_slice_no = tgt_slice_nos[0]
+
+        # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
+        affines = filer.read_fits_affine_transform(date_stamp)
+        svd_transforms = filer.read_fits_svd_transforms()
+        opt_transforms = Util.find_optimum_transforms(efp_w_cen, svd_transforms)
+        opt_transform = opt_transforms[tgt_slice_no]
+
+        # Check out and back for the wavelength min, max and centre of the spectrum.
+        w_min = opt_transform['configuration']['w_min']
+        w_max = opt_transform['configuration']['w_max']
+
+        n_pts = 30  # No. of wavelength samples in EFP
+        # Create EFP data cube for extended/background emission.
+        efp_ws = np.linspace(w_min, w_max, n_pts)
+        efp_ys = np.zeros(n_pts)  # EFP across slice coordinate
+        efp_fs = np.zeros(n_pts)  # Flux values
+        efp_as_mm = Globals.efp_as_mm
+        alpha_fov = Globals.alpha_fov
+        efp_xmax = alpha_fov / efp_as_mm
+        xh = efp_xmax / 2.
+        efp_xs = np.linspace(-xh, +xh, n_pts)
+        efp_out = {'efp_x': efp_xs, 'efp_y': efp_ys, 'efp_w': efp_ws, 'efp_f': efp_fs}
+
+        test_transforms = []
+
+        config = opt_transform['configuration']
+        slice_no = config['slice']
+        matrices = opt_transform['matrices']
+        mfp_points = Util.efp_to_mfp(opt_transform, efp_out)
+        dfp_points = Util.mfp_to_dfp(affines, mfp_points)
+        mfp_back = Util.dfp_to_mfp(affines, dfp_points)
+        efp_back = Util.mfp_to_efp(opt_transform, mfp_back)
+
+        mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
+        det_nos, dfp_x, dfp_y = dfp_points['det_nos'], dfp_points['dfp_x'], dfp_points['dfp_y']
+        pri_ang = config['pri_ang']
+        ech_ang = config['ech_ang']
+        ech_ord = config['ech_ord']
+
+        fmt = "{:>7s},{:>7s},{:>7s},{:>8s},{:>9s},{:>9s},{:>12s},{:>9s},{:>12s},{:>9s},{:>9s},{:>8s},{:>8s},{:>15s},{:>12s}"
+        print(fmt.format('out', 'out', 'out', 'prism', 'echelle', 'echelle',
+                         'mosaic', 'mosaic', 'det', 'det', 'det', 'back', 'back', 'back-out', 'back-out'))
+        print(fmt.format('efp_x', 'efp_y', 'efp_w', 'angle', 'angle', 'order',
+                         'mfp_x', 'mfp_y', 'no.', 'dfp_x', 'dfp_y', 'efp_x', 'efp_y', 'delta_efp_x', 'delta_efp_y'))
+        print(fmt.format('mm', 'mm', 'micron', 'deg.', 'deg.', '-',
+                         'mm', 'mm', '-', 'pix', 'pix', 'mm', 'mm', 'mm', 'mm'))
+        fmt1 = "{:7.3f},{:7.3f},{:7.3f},{:8.3f},{:9.3f},{:9d},"
+        fmt2 = "{:12.3f},{:9.3f},{:12d},{:9.1f},{:9.1f},{:8.3f},{:8.3f},{:15.3f},{:12.3f}"
+        fmt = fmt1 + fmt2
+        for i in range(0, n_pts):
+            efp_out_x, efp_out_y = efp_out['efp_x'][i], efp_out['efp_y'][i]
+            efp_back_x, efp_back_y = efp_back['efp_x'][i], efp_back['efp_y'][i]
+            delta_efp_x = efp_back_x - efp_out_x
+            delta_efp_y = efp_back_y - efp_out_y
+            print(fmt.format(efp_out_x, efp_out_y, efp_out['efp_w'][i],
+                             pri_ang, ech_ang, ech_ord,
+                             mfp_x[i], mfp_y[i],
+                             det_nos[i], dfp_x[i], dfp_y[i],
+                             efp_back_x, efp_back_y,
+                             delta_efp_x, delta_efp_y))
+        return
