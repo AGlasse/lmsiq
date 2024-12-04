@@ -28,12 +28,6 @@ class Wcal:
         model_configuration = 'distortion', optical_configuration, date_stamp
         dist_filer = Filer(model_configuration)
         traces = dist_filer.read_pickle(dist_filer.trace_file)
-
-        # if is_spifu:
-        #     traces = Filer.
-
-
-
         return dw_lms_pix
 
     @staticmethod

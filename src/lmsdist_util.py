@@ -390,25 +390,69 @@ class Util:
         return text
 
     @staticmethod
-    def find_optimum_transforms(wave, svd_transforms):
+    def find_optimum_transforms(wave, opticon, svd_transforms):
         """ Find the transforms (one per slice) which position a specific wavelength closest to the centre of the
-        detector mosaic.
+        detector mosaic.  For the extended mode, this is defined as order 24, slice 13
+
+        Step 1. Find the ~boresight transform for slice 13 (For spifu selected, use spifu = 1 and ech_ord = 24)
         """
-        opt_transforms, w_off_min = {}, {}
-        for slice_no in range(1, 29):
-            opt_transforms[slice_no] = None
-            w_off_min[slice_no] = 1000.                       # Initialise minimum wavelength offset
-        # Select transforms which has the target wavelength at the centre of its range for slice 13.
+        bs_transform = None
+        w_off_min = 1000.
         for svd_transform in svd_transforms:
             config = svd_transform['configuration']
             slice_no = config['slice']
+            if slice_no != 13:
+                continue
+            spifu_no = config['spifu']
+            if spifu_no > 1:        # Catches both nominal and spifu configurations
+                continue
+            # if spifu_no == 1:       # SPIFU Boresight has echelle order 24 on spifu 1
+            #     ech_order = config['ech_ord']
+            #     if ech_order != 24:
+            #         continue
+
             w_min, w_max = config['w_min'], config['w_max']
             w_off = abs(0.5 * (w_max + w_min) - wave)
-            if w_off <= w_off_min[slice_no] or opt_transforms[slice_no] is None:
-                opt_transforms[slice_no] = svd_transform
-                w_off_min[slice_no] = w_off
+            if w_off <= w_off_min:        #  or no_slice:
+                bs_transform = svd_transform
+                w_off_min = w_off
 
-        return opt_transforms
+        # Step 2, select all transforms with same configuration as the boresight. For spifu, use optimum order
+        bs_cfg = bs_transform['configuration']
+        opt_cfg_id = bs_cfg['cfg_id']
+        opt_transforms = {}
+        ech_orders = []             # List of unique echelle orders in optimum transforms
+        for svd_transform in svd_transforms:
+            cfg = svd_transform['configuration']
+            if cfg['cfg_id'] != opt_cfg_id:
+                continue
+            ech_ord = cfg['ech_ord']
+            # Option to only use specific orders for specific spifu_slices
+            spec_order = False
+            if spec_order:
+                if opticon == Globals.spifu:
+                    spifu_no = cfg['spifu']
+                    spifu_slice = {23: (1, 4), 24: (2, 5), 25: (3, 6)}
+                    valid_spifu_nos = spifu_slice[ech_ord]
+                    if spifu_no not in valid_spifu_nos:
+                        continue
+            if ech_ord not in ech_orders:
+                ech_orders.append(ech_ord)
+            slice_no = cfg['slice']
+            spifu_no = cfg['spifu']
+            slice_id = Globals.slice_id_fmt.format(opticon, opt_cfg_id, ech_ord, slice_no, spifu_no)
+            # print('Adding slice_id= ', slice_id)
+            opt_transforms[slice_id] = svd_transform
+        return opt_transforms, ech_orders
+
+    @staticmethod
+    def out_of_bounds(fp_id, x, y):       # Check if out of bounds
+        bounds = Globals.fp_bounds[fp_id]
+        x1, x2, y1, y2 = bounds
+        in_x = np.any(np.logical_and(np.less(x1, x), np.greater(x2, x)))
+        in_y = np.any(np.logical_and(np.less(y1, y), np.greater(y2, y)))
+        in_bounds = in_x and in_y
+        return not in_bounds
 
     @staticmethod
     def efp_y_to_slice(efp_y):
@@ -435,7 +479,7 @@ class Util:
 
     @staticmethod
     def efp_to_dfp(transform, affines, det_no, efp_points):
-        mfp_points = Util.efp_to_mfp(transform, efp_points)
+        mfp_points, _ = Util.efp_to_mfp(transform, efp_points)
         dfp_points = Util.mfp_to_dfp(affines, mfp_points)
         return dfp_points
 
@@ -510,8 +554,9 @@ class Util:
         matrices = transform['matrices']
         a, b = matrices['a'], matrices['b']
         mfp_x, mfp_y = Util.apply_svd_distortion(phases, alphas, a, b)
+        oob = Util.out_of_bounds('mfp', mfp_x, mfp_y)       # Check if out of bounds
         mfp_points = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
-        return mfp_points
+        return mfp_points, oob
 
     @staticmethod
     def dfp_to_efp(transform, affines, dfp_points):

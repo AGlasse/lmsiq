@@ -138,6 +138,7 @@ class Filer:
         """ Create data tables holding transforms for all slices in a configuration and write them
         to a fits file.
         """
+        cfg_id = trace.cfg_id
         pa = trace.parameter['Prism angle']
         ea = trace.parameter['Echelle angle']
         _, opticon, date_stamp, _, _, _ = trace.model_config
@@ -146,6 +147,7 @@ class Filer:
         mat_order = trc['mat_order']
 
         primary_cards = [Card('OPTICON', opticon, 'Optical configuration'),
+                         Card('CFG_ID', cfg_id, 'Optical configuration id'),
                          Card('PRI_ANG', pa, 'Prism angle / deg'),
                          Card('ECH_ANG', ea, 'Echelle angle / deg'),
                          Card('N_MATS', n_mats, 'A, B, AI, BI transform matrices'),
@@ -191,12 +193,13 @@ class Filer:
         hdu_list = fits.open(fits_path, mode='readonly')
         primary_hdr = hdu_list[0].header
         opticon = primary_hdr['OPTICON']
+        cfg_id = primary_hdr['CFG_ID']
         ea = primary_hdr['ECH_ANG']
         pa = primary_hdr['PRI_ANG']
         n_mats = primary_hdr['N_MATS']
         mat_order = primary_hdr['MAT_ORD']
 
-        base_config = {'opticon': opticon, 'ech_ang': ea, 'pri_ang': pa,
+        base_config = {'opticon': opticon, 'cfg_id': cfg_id, 'ech_ang': ea, 'pri_ang': pa,
                        'n_mats': n_mats, 'mat_order': mat_order}
         mat_shape = mat_order, mat_order
 

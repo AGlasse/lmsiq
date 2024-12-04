@@ -29,6 +29,7 @@ class Trace:
     spifu_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'), 'Slicer': ('slicer_x', 'slicer_y'),
                           'IFU': ('ifu_x', 'ifu_y'), 'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
                           'Detector': ('det_x', 'det_y')}
+    cfg_tags, cfg_id_counter = [], 0
 
     affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
 
@@ -50,6 +51,13 @@ class Trace:
         if not silent:
             print('Reading Zemax model data from ' + path)
         csv_name, config, series = self._read_csv(path, model_config)
+        pri_ang = config['Prism angle']
+        ech_ang = config['Echelle angle']
+        # Set unique (LMS mechanism settings) configuration number for this trace.
+        cfg_tag = "{:s}_{:05.3f}_{:05.3f}".format(opticon, ech_ang, pri_ang)
+        if cfg_tag not in Trace.cfg_tags:
+            self.cfg_id = Trace.cfg_id_counter
+            Trace.cfg_id_counter += 1
         self.lms_config = {'opticon': opticon, 'pri_ang': config['Prism angle'],
                            'ech_ang': config['Echelle angle'], 'ech_order': config['Spectral order']}
         self.parameter = config
@@ -58,7 +66,7 @@ class Trace:
         if self.is_spifu:
             spifus = series['sp_slice']
             spifu_indices = spifus - 1
-            ech_orders = np.mod(spifu_indices, 3) + 23
+            ech_orders = spifu_indices // 2 + 23
             series['ech_order'] = ech_orders
 
         waves = series['wavelength']
@@ -126,40 +134,42 @@ class Trace:
         is_first = True
         self.slices = []
         a_rms_list = []
-        for ech_order in self.unique_ech_orders:
-            for spifu_no in self.unique_spifu_slices:
-                for slice_no in self.unique_slices:
+        # for ech_order in self.unique_ech_orders:
+        for spifu_no in self.unique_spifu_slices:
+            for slice_no in self.unique_slices:
 
-                    waves = self.get('wavelength', slice_no=slice_no, spifu_no=spifu_no)
-                    ech_orders = self.get('ech_order', slice_no=slice_no, spifu_no=spifu_no)
-                    alpha = self.get('efp_x', slice_no=slice_no, spifu_no=spifu_no)
-                    mfp_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
-                    mfp_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
+                waves = self.get('wavelength', slice_no=slice_no, spifu_no=spifu_no)
+                ech_orders = self.get('ech_order', slice_no=slice_no, spifu_no=spifu_no)
+                alpha = self.get('efp_x', slice_no=slice_no, spifu_no=spifu_no)
+                mfp_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
+                mfp_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
 
-                    phase = Util.waves_to_phases(waves, ech_orders)
-                    a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
-                    ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
+                phase = Util.waves_to_phases(waves, ech_orders)
+                a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
+                ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
 
-                    mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
-                    off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
-                    off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
-                    a_rms_list.append(off_mfp_a)
+                mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
+                off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
+                off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
+                a_rms_list.append(off_mfp_a)
 
-                    tr_pars = self.lms_config.copy()
-                    tr_pars.update(Globals.transform_config)
-                    w_min, w_max = np.amin(waves), np.amax(waves)
+                tr_pars = self.lms_config.copy()
+                tr_pars.update(Globals.transform_config)
+                w_min, w_max = np.amin(waves), np.amax(waves)
 
-                    config = ech_order, slice_no, spifu_no, w_min, w_max
-                    matrices = a, b, ai, bi
-                    rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
-                    slice = config, matrices, rays
-                    self.slices.append(slice)
-                    fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
+                ech_order = ech_orders[0]       # Assume they're all the same!
+                print('trace.create_transforms eo= ', ech_order)
+                config = ech_order, slice_no, spifu_no, w_min, w_max
+                matrices = a, b, ai, bi
+                rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
+                slice = config, matrices, rays
+                self.slices.append(slice)
+                fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
 
-                    if debug and is_first:        # Plot intermediate and full fit to data
-                        tlin1 = fmt.format(Globals.svd_cutoff)
-                        self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
-                        is_first = False
+                if debug and is_first:        # Plot intermediate and full fit to data
+                    tlin1 = fmt.format(Globals.svd_cutoff)
+                    self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
+                    is_first = False
         a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
         self.a_rms = a_rms
         return
