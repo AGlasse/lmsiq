@@ -34,9 +34,11 @@ class Globals:
     efp_x_fov_mm = alpha_fov_as / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
     efp_y_fov_mm = beta_fov_as / efp_as_mm
 
-    fmt = "{:>30s} = {:5.3f} x {:5.3f} {:s}"
-    print(fmt.format('EFP field of view, alpha, beta', efp_x_fov_mm, efp_y_fov_mm, 'mm'))
-    print(fmt.format('', alpha_fov_as, beta_fov_as, 'arcseconds'))
+    debug = False
+    if debug:
+        fmt = "{:>30s} = {:5.3f} x {:5.3f} {:s}"
+        print(fmt.format('EFP field of view, alpha, beta', efp_x_fov_mm, efp_y_fov_mm, 'mm'))
+        print(fmt.format('', alpha_fov_as, beta_fov_as, 'arcseconds'))
 
     # Diffraction grating parameters
     blaze_angle = 51.23                                     # Echelle blaze angle (deg)

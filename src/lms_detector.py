@@ -20,8 +20,9 @@ class Detector:
     detector_edge_mm = 0.001 * det_size * det_pix_size
     mosaic_edge_mm = detector_edge_mm * mosaic_format[0] + mosaic_gap
     qe = 0.7                                    # QE (el/photon)
-    idark = 0.01  # Dark current approx. (Finger)
-    rnoise = 10.  # Very approx read noise (Finger/Rauscher) Could do much better with sample up ramp.
+    idark = 0.05        # Dark current approx, from Roy. (Finger quotes 0.01)
+    rnoise = 70.        # Very approx read noise (Roy model) (Finger/Rauscher use 10 el.)
+    q_well = 1.E+5      # Well depth (el.)
 
     def __init__(self):
         """ Detector object, mainly used to sample/measure Zemax observations
@@ -59,7 +60,7 @@ class Detector:
         return image_out
 
     @staticmethod
-    def detect(frame, dit):
+    def detect(frame, dit, ndit):
         """ Make the mosaic of detector images.
         :return: mosaic - dictionary containing 2x2 mosaic of images
                         'images': synthetic realistic detector images, (PSF convolved and noise added)
@@ -67,10 +68,11 @@ class Detector:
                         'reads': gaussian distributed read noise values
 
         """
+        t_int = dit * ndit
         det_shape = Detector.det_size, Detector.det_size
         dark = np.full(det_shape, Detector.idark)
         frame += dark
-        image = frame * dit             # Convert from photocurrent to quantised charge
+        image = frame * t_int             # Convert from photocurrent to quantised charge
 
         rng = np.random.default_rng()
         shot = rng.poisson(np.sqrt(image), det_shape)

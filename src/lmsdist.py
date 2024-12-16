@@ -1,10 +1,7 @@
 #!/usr/bin/env python
 """
 """
-# import math
-# import time
 import numpy as np
-# import scipy.signal
 
 from os import listdir
 from lms_filer import Filer
@@ -13,7 +10,6 @@ from lmsdist_plot import Plot
 from lmsdist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
-# from lmssim import ToySim
 
 print('lmsdist, distortion model - Starting')
 
@@ -121,7 +117,7 @@ if plot_wcal:
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
-evaluate_transforms = False  # performance statistics, for optimising code parameters.
+evaluate_transforms = True  # performance statistics, for optimising code parameters.
 if evaluate_transforms:
     Util.test_out_and_back(filer, date_stamp)
 

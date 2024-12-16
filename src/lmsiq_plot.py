@@ -57,7 +57,6 @@ class Plot:
         """ Plot images from the first four observations, perfect, design and as many additional individual
         models as will fit in the grid.
         """
-        # images, obs_dict = observations
         im_map = None
         png_path = kwargs.get('png_path', None)
         nrowcol = kwargs.get('nrowcol', (1, 1))

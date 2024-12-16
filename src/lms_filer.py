@@ -20,7 +20,7 @@ class Filer:
         analysis_type, optical_path, date_stamp, _, _, _ = model_configuration
         self.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_path, date_stamp)
-        self.data_folder = self.get_folder('../data/' + sub_folder)
+        self.data_folder = self.get_folder('../data/model/' + sub_folder)
         self.output_folder = self.get_folder('../output/' + sub_folder)
         file_leader = self.output_folder + sub_folder.replace('/', '_')
         if analysis_type == 'distortion':
