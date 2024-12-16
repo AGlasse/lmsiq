@@ -20,8 +20,9 @@ class Detector:
     detector_edge_mm = 0.001 * det_size * det_pix_size
     mosaic_edge_mm = detector_edge_mm * mosaic_format[0] + mosaic_gap
     qe = 0.7                                    # QE (el/photon)
-    idark = 0.01  # Dark current approx. (Finger)
-    rnoise = 10.  # Very approx read noise (Finger/Rauscher) Could do much better with sample up ramp.
+    idark = 0.05        # Dark current approx, from Roy. (Finger quotes 0.01)
+    rnoise = 70.        # Very approx read noise (Roy model) (Finger/Rauscher use 10 el.)
+    q_well = 1.E+5      # Well depth (el.)
 
     def __init__(self):
         """ Detector object, mainly used to sample/measure Zemax observations
