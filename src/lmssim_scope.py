@@ -62,7 +62,7 @@ class Scope:
         source = w_ext, 100. * f_ext
         efp_x, efp_y = obs_cfg['efp_x'],obs_cfg['efp_y']
         xs, ys, pixel_scale = [-1., 1.], [-1, 1.], .01      # arcsec
-        flux = 1 * u.Jy
+        flux = 100 * u.Jy
         source = sim.source.source_templates.uniform_illumination(xs, ys, pixel_scale,
                                                                   flux=flux, spectrum=spec)
         return cmd, [source]
