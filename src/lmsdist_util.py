@@ -459,7 +459,7 @@ class Util:
         """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
         a fraction of the slice width
         """
-        efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
+        efp_slice_width = .001 * Globals.beta_mas_slice / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
         y_s = np.array(efp_y) / efp_slice_width
         slice_coord = n_slices // 2 + y_s
@@ -471,7 +471,7 @@ class Util:
     def slice_to_efp_y(slice_no, phase):
         """ Return the EFP y coordinate of the slice centre (in mm).
         """
-        efp_slice_width = .001 * Globals.beta_mas_pix / Globals.efp_as_mm
+        efp_slice_width = .001 * Globals.beta_mas_slice / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
         slice = slice_no + phase
         efp_y = (slice - n_slices // 2) * efp_slice_width
@@ -778,7 +778,7 @@ class Util:
         return rgb
 
     @staticmethod
-    def test_out_and_back(filer, date_stamp):
+    def test_out_and_back(filer, opticon, date_stamp):
         print('lms_distort - Evaluating transforms')
 
         # Define EFP coordinates and target wavelength for spectrum
@@ -789,7 +789,7 @@ class Util:
         # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
         affines = filer.read_fits_affine_transform(date_stamp)
         svd_transforms = filer.read_fits_svd_transforms()
-        opt_transforms = Util.find_optimum_transforms(efp_w_cen, svd_transforms)
+        opt_transforms = Util.find_optimum_transforms(efp_w_cen, opticon, svd_transforms)
         opt_transform = opt_transforms[tgt_slice_no]
 
         # Check out and back for the wavelength min, max and centre of the spectrum.

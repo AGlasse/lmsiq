@@ -75,9 +75,9 @@ class Model:
         sed = source['sed']
         tau_qe = source['tau'] * Detector.qe
         if sed == 'bb':
-            tau_bb = 0.1 * 1.0  # Assume 10 % integrating sphere and an attenuation setting
+            tau_bb = 0.05 * 1.0         # From RvBs flux model
             f_bb, f_units_ext_in = Model.build_bb_emission(w_ext, tbb=source['temperature'])
-            f_ext_in = tau_qe * f_bb
+            f_ext_in = tau_qe * tau_bb * f_bb
         if sed == 'sky':
             f_sky, f_units_ext_in = Model.load_sky_emission(w_ext)
             f_ext_in = tau_qe * f_sky
@@ -86,7 +86,7 @@ class Model:
             f_ext_in = tau_qe * f_laser
         atel = math.pi * (39. / 2)**2               # ELT collecting area
         alpha_pix = Globals.alpha_mas_pix / 1000.   # Along slice pixel scale
-        beta_slice = Globals.beta_mas_pix / 1000.   # Slice width
+        beta_slice = Globals.beta_mas_slice / 1000.   # Slice width
         delta_w = wbounds[0] / 100000               # Spectral resolution
         pix_delta_w = 2.5                           # Pixels per spectral resolution element
         f_ext = f_ext_in * atel * alpha_pix * beta_slice * delta_w / pix_delta_w
@@ -112,25 +112,6 @@ class Model:
                 blaze[ech_ord] = {}
             blaze[ech_ord][ech_ang] = wave
         return blaze
-
-
-    # @staticmethod
-    # def make_blaze_dictionary(transforms):
-    #     blaze = {}
-    #     for key in transforms:
-    #         transform = transforms[key]
-    #         cfg = transform['configuration']
-    #         if cfg['slice'] != 13:
-    #             continue
-    #         ech_ang = cfg['ech_ang']
-    #         mfp_bs = {'mfp_x': [0.], 'mfp_y': [0.]}
-    #         ech_ord = cfg['ech_ord']
-    #         efp_bs = Util.mfp_to_efp(transform, mfp_bs)
-    #         wave = efp_bs['efp_w'][0]
-    #         if ech_ord not in blaze:
-    #             blaze[ech_ord] = {}
-    #         blaze[ech_ord][ech_ang] = wave
-    #     return blaze
 
     def get_fp_mask(self, fp_key):
         fp_mask = Model.fp_masks[fp_key]
@@ -211,10 +192,10 @@ class Model:
         delta_w = .0001          # Laser line width (microns)
 
         flux = np.zeros(waves.shape)
-        if laser['nlines'] > 1:
-            line_waves = list(np.linspace(laser['wshort'], laser['wlong'], laser['nlines']))
-        else:
-            line_waves = [laser['wavelength']]
+        # if laser['nlines'] > 1:
+        #     line_waves = list(np.linspace(laser['wshort'], laser['wlong'], laser['nlines']))
+        # else:
+        line_waves = [laser['wavelength']]
         f_laser = laser['flux']
         for line_wave in line_waves:
             woff = np.abs(waves - line_wave / 1000.)

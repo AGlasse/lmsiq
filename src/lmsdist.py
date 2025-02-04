@@ -24,7 +24,7 @@ nom_config = (analysis_type, nominal, nom_date_stamp,
               coord_in, coord_out)
 
 spifu = Globals.spifu
-spifu_date_stamp = '20231009'
+spifu_date_stamp = '20250110'
 spifu_config = (analysis_type, spifu, spifu_date_stamp,
                 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
                 coord_in, coord_out)
@@ -32,7 +32,7 @@ spifu_config = (analysis_type, spifu, spifu_date_stamp,
 model_configurations = {nominal: nom_config, spifu: spifu_config}
 
 """ SET MODEL CONFIGURATION HERE 'nominal' or 'spifu' """
-opticon = spifu
+opticon = nominal
 
 model_config = model_configurations[opticon]
 filer = Filer(model_config)
@@ -63,7 +63,7 @@ st_hdr = "Trace individual"
 rt_text_block = ''
 
 suppress_plots = True                      # f = Plot first trace
-generate_transforms = True                 # for all Zemax ray trace files and write to lms_dist_buffer.txt
+generate_transforms = False                 # for all Zemax ray trace files and write to lms_dist_buffer.txt
 if generate_transforms:
     print()
     print("Generating distortion transforms")
@@ -106,20 +106,21 @@ if generate_transforms:
 # Create an interpolation object to give,
 #   wave = f(order, slice, spifu_slice, prism_angle, ech_angle, det_x, det_y)
 suppress_plots = False
-plot_wcal = False
+plot_wcal = True
 if plot_wcal:
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
     traces = Filer.read_pickle(filer.trace_file)
     wcal = {}
     plot.series('dispersion', traces)
+    plot.series('coverage', traces[0:1])
     plot.series('coverage', traces)
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
-evaluate_transforms = True  # performance statistics, for optimising code parameters.
+evaluate_transforms = False  # performance statistics, for optimising code parameters.
 if evaluate_transforms:
-    Util.test_out_and_back(filer, date_stamp)
+    Util.test_out_and_back(filer, opticon, date_stamp)
 
 print()
 print('lms_distort - Done')

@@ -28,7 +28,6 @@ def make_blaze_dictionary(transforms, opticon):
         blaze[ech_ord][ech_ang] = wave
     return blaze
 
-
 def load_psf_dict(opticon, ech_ord, downsample=False, slice_no_tgt=13):
     analysis_type = 'iq'
 
@@ -97,4 +96,4 @@ def load_psf_dict(opticon, ech_ord, downsample=False, slice_no_tgt=13):
     return psf_dict
 
 engine = Engine()
-engine.run()
+engine.run('lms_opt_01_t3', simulator='ScopeSim')       # or 'ToySim'

@@ -71,10 +71,10 @@ class Trace:
 
         waves = series['wavelength']
         self.wmin, self.wmax = np.amin(waves), np.amax(waves)
-        ech_orders = series['ech_order']
         self.series = series
 
         # Count the number of slices and rays
+        ech_orders = series['ech_order']
         self.unique_ech_orders = np.unique(ech_orders)
         slice_nos = series['slice_no']
         self.unique_slices = np.unique(slice_nos)
@@ -137,39 +137,40 @@ class Trace:
         # for ech_order in self.unique_ech_orders:
         for spifu_no in self.unique_spifu_slices:
             for slice_no in self.unique_slices:
+                for ech_order in self.unique_ech_orders:
+                    kwargs = {'spifu_no': spifu_no, 'slice_no': slice_no, 'ech_order': ech_order}
+                    waves = self.get('wavelength', **kwargs)
+                    ech_orders = self.get('ech_order', **kwargs)
+                    alpha = self.get('efp_x', **kwargs)
+                    mfp_x = self.get(fp_out[0], **kwargs)
+                    mfp_y = self.get(fp_out[1], **kwargs)
 
-                waves = self.get('wavelength', slice_no=slice_no, spifu_no=spifu_no)
-                ech_orders = self.get('ech_order', slice_no=slice_no, spifu_no=spifu_no)
-                alpha = self.get('efp_x', slice_no=slice_no, spifu_no=spifu_no)
-                mfp_x = self.get(fp_out[0], slice_no=slice_no, spifu_no=spifu_no)
-                mfp_y = self.get(fp_out[1], slice_no=slice_no, spifu_no=spifu_no)
+                    phase = Util.waves_to_phases(waves, ech_orders)
+                    a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
+                    ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
 
-                phase = Util.waves_to_phases(waves, ech_orders)
-                a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
-                ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
+                    mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
+                    off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
+                    off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
+                    a_rms_list.append(off_mfp_a)
 
-                mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
-                off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
-                off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
-                a_rms_list.append(off_mfp_a)
+                    tr_pars = self.lms_config.copy()
+                    tr_pars.update(Globals.transform_config)
+                    w_min, w_max = np.amin(waves), np.amax(waves)
 
-                tr_pars = self.lms_config.copy()
-                tr_pars.update(Globals.transform_config)
-                w_min, w_max = np.amin(waves), np.amax(waves)
+                    ech_order = ech_orders[0]       # They should all be the same!
+                    print('trace.create_transforms eo= ', ech_order)
+                    config = ech_order, slice_no, spifu_no, w_min, w_max
+                    matrices = a, b, ai, bi
+                    rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
+                    slice = config, matrices, rays
+                    self.slices.append(slice)
+                    fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
 
-                ech_order = ech_orders[0]       # Assume they're all the same!
-                print('trace.create_transforms eo= ', ech_order)
-                config = ech_order, slice_no, spifu_no, w_min, w_max
-                matrices = a, b, ai, bi
-                rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
-                slice = config, matrices, rays
-                self.slices.append(slice)
-                fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
-
-                if debug and is_first:        # Plot intermediate and full fit to data
-                    tlin1 = fmt.format(Globals.svd_cutoff)
-                    self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
-                    is_first = False
+                    if debug and is_first:        # Plot intermediate and full fit to data
+                        tlin1 = fmt.format(Globals.svd_cutoff)
+                        self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
+                        is_first = False
         a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
         self.a_rms = a_rms
         return

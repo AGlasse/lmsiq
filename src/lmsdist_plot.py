@@ -273,7 +273,7 @@ class Plot:
 
     @staticmethod
     def series(plot_type, traces, colour_by='config'):
-        titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.02 $\theta_{echelle}$ + det(y) / metre'),
+        titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
         title, ylabel = titles[plot_type]
         ax_list = Plot.set_plot_area(title,

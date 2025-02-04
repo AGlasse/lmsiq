@@ -27,10 +27,10 @@ class Globals:
 
     # Plate scale at detector
     alpha_mas_pix = 8.7                                     #
-    beta_mas_pix = 20.7
+    beta_mas_slice = 20.7
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov_as = 0.897
-    beta_fov_as = beta_mas_pix * 28 / 1000.
+    beta_fov_as = beta_mas_slice * 28 / 1000.
     efp_x_fov_mm = alpha_fov_as / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
     efp_y_fov_mm = beta_fov_as / efp_as_mm
 
