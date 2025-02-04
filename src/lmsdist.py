@@ -118,7 +118,7 @@ if plot_wcal:
 
 # Evaluate the transform performance when mapping test data.  The method is to interpolate the
 # coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
-evaluate_transforms = False  # performance statistics, for optimising code parameters.
+evaluate_transforms = True  # performance statistics, for optimising code parameters.
 if evaluate_transforms:
     Util.test_out_and_back(filer, opticon, date_stamp)
 
