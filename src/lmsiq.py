@@ -23,7 +23,7 @@ analysis_type = 'iq'
 
 # Define the optical path, either nominal or with the spectral IFU inserted in the beam.
 nominal = Globals.nominal
-spifu = Globals.spifu
+spifu = Globals.extended
 optics = {nominal: ('Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)', ('phase', 'fp2_x'), ('det_x', 'det_y')),
           spifu: ('Extended spectral coverage (fov = 1.0 x 0.054 arcsec)', ('phase', 'fp1_x'), ('det_x', 'det_y'))}
 
@@ -69,7 +69,7 @@ data_identifier = {'optical_path': optical_path,
                    'slice_radius': slice_radius,
                    'data_label': data_label
                    }
-is_spifu = optical_path == Globals.spifu
+is_spifu = optical_path == Globals.extended
 
 fmt = "Analysing dataset for {:s} optical path, dated {:s}"
 print(fmt.format(optical_path, iq_date_stamp))

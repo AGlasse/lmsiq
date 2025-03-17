@@ -5,17 +5,36 @@ Python object to encapsulate LMS optical constants
 
 29/7/19  Created class (Glasse)
 """
+import math
+from astropy import units as u
 
 
 class Globals:
+    as_deg = 3600.
+    mas_as = 1000.
+    deg_rad = 180. / math.pi
+    mas_deg = as_deg * mas_as
+    rad_per_mas = 4.85E-9
+    sterad_per_mas2 =rad_per_mas * rad_per_mas
+    elt_area = 1350.*u.m*u.m
+
+    pix_spec_res_el = 2.5       # Pixels per spectral resolution element
+
+    u.plam = u.photon / u.s / u.cm / u.cm / u.angstrom / u.steradian
+    u.cm2 = u.cm * u.cm
+
+    # Simulators
+    scopesim, toysim = 'scopesim', 'toysim'
+
+
     zemax_configuration = None
     det_pix_size, im_pix_size = None, None
     # Optical configurations
     nominal = 'nominal'
-    spifu = 'spifu'
-    optical_configurations = [nominal, spifu]
-    slice_no_ranges = {nominal: range(1, 29), spifu: range(12, 15)}
-    spifu_no_ranges = {nominal: range(0, 1), spifu: range(1, 7)}
+    extended = 'spifu'
+    optical_configurations = [nominal, extended]
+    slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
+    spifu_no_ranges = {nominal: range(0, 1), extended: range(1, 7)}
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
 
@@ -23,22 +42,22 @@ class Globals:
 
     # Plate scale at the entrance focal plane.  Defined in LB email 14/11/24 (in ../docs/lb_ps_131124.txt)
     # as efp_as_mm = 350.06 / 1937 = 0.180723
-    efp_as_mm = 0.180723
+    efp_as_mm = 0.180723 * u.arcsec / u.mm
 
     # Plate scale at detector
-    alpha_mas_pix = 8.7                                     #
-    beta_mas_slice = 20.7
+    alpha_pix = 8.7 * u.mas                                   #
+    beta_slice = 20.7 * u.mas
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
-    alpha_fov_as = 0.897
-    beta_fov_as = beta_mas_slice * 28 / 1000.
-    efp_x_fov_mm = alpha_fov_as / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
-    efp_y_fov_mm = beta_fov_as / efp_as_mm
+    alpha_fov = 0.897 * u.arcsec
+    beta_fov = beta_slice.to(u.arcsec) * 28
+    efp_x_fov_mm = alpha_fov / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
+    efp_y_fov_mm = beta_fov / efp_as_mm
 
     debug = False
     if debug:
         fmt = "{:>30s} = {:5.3f} x {:5.3f} {:s}"
         print(fmt.format('EFP field of view, alpha, beta', efp_x_fov_mm, efp_y_fov_mm, 'mm'))
-        print(fmt.format('', alpha_fov_as, beta_fov_as, 'arcseconds'))
+        print(fmt.format('', alpha_fov, beta_fov, 'arcseconds'))
 
     # Diffraction grating parameters
     blaze_angle = 51.23                                     # Echelle blaze angle (deg)
@@ -56,12 +75,10 @@ class Globals:
                         'res_fit_order': 3}                 # No. of terms in residual fit
     svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
     nom_pix_pitch = 18.0                                    # LMS pixel pitch in microns
-    # efp_alpha_size = alpha_fov * nom_pix_pitch / alpha_mas_pix      # EFP along-slice in mm
-    # spatial_scale = 0.0082                                  # Along slice arcsec / pixel
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		            # Unilluminated margin around outer detector edge (pixels)
     margin = pix_margin[0] * nom_pix_pitch / 1000.          # Convert to mm
-    det_size = 2048 * nom_pix_pitch / 1000.     # Detector size in mm
+    det_size = 2048 * nom_pix_pitch / 1000.                 # Detector size in mm
     xyn = .5 * det_gap                      # x,y distance from nearest light sensitive pixel to the origin
     xyf = xyn + det_size - margin           # x,y distance from farthest light sensitive pixel to the origin
     det_lims = {'1': ([-xyf, -xyn], [+xyn, +xyf]),

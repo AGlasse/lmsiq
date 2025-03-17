@@ -60,7 +60,7 @@ class Detector:
         return image_out
 
     @staticmethod
-    def detect(frame, dit, ndit):
+    def detect(frame_in, dit, ndit):
         """ Make the mosaic of detector images.
         :return: mosaic - dictionary containing 2x2 mosaic of images
                         'images': synthetic realistic detector images, (PSF convolved and noise added)
@@ -70,6 +70,7 @@ class Detector:
         """
         t_int = dit * ndit
         det_shape = Detector.det_size, Detector.det_size
+        frame = np.array(frame_in)      # Copy frame
         dark = np.full(det_shape, Detector.idark)
         frame += dark
         image = frame * t_int             # Convert from photocurrent to quantised charge

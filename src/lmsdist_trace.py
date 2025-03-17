@@ -17,17 +17,22 @@ from lmsdist_plot import Plot
 class Trace:
 
     common_series_names = {'ech_order': 'int', 'slice_no': 'int', 'sp_slice': 'int',
-                           'slicer_x': 'float', 'slicer_y': 'float', 'ifu_x': 'float', 'ifu_y': 'float'}
+                           'slicer_x': 'float', 'slicer_y': 'float',
+                           'ifu_x': 'float', 'ifu_y': 'float'}
     nominal_efp_map = {'efp_x': 'fp2_x', 'efp_y': 'fp2_y'}
     nominal_series_names = {'slit_x': 'float', 'slit_y': 'float'}
     spifu_efp_map = {'efp_x': 'fp1_x', 'efp_y': 'fp1_y'}
     spifu_series_names = {'sp_slicer_x': 'float', 'sp_slicer_y': 'float'}
 
-    nominal_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'), 'Slicer': ('slicer_x', 'slicer_y'),
-                            'IFU': ('ifu_x', 'ifu_y'), 'Slit': ('slit_x', 'slit_y'),
+    nominal_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
+                            'Slicer': ('slicer_x', 'slicer_y'),
+                            'IFU': ('ifu_x', 'ifu_y'),
+                            'Slit': ('slit_x', 'slit_y'),
                             'Detector': ('det_x', 'det_y')}
-    spifu_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'), 'Slicer': ('slicer_x', 'slicer_y'),
-                          'IFU': ('ifu_x', 'ifu_y'), 'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
+    spifu_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
+                          'Slicer': ('slicer_x', 'slicer_y'),
+                          'IFU': ('ifu_x', 'ifu_y'),
+                          'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
                           'Detector': ('det_x', 'det_y')}
     cfg_tags, cfg_id_counter = [], 0
 
@@ -40,7 +45,7 @@ class Trace:
         Read Zemax ray trace data
         """
         _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
-        self.is_spifu = opticon == Globals.spifu
+        self.is_spifu = opticon == Globals.extended
         self.model_config = model_config
         self.transforms = None                              # Replacement for slice_objects
         self.slices, self.ray_trace = None, None
@@ -163,13 +168,13 @@ class Trace:
                     config = ech_order, slice_no, spifu_no, w_min, w_max
                     matrices = a, b, ai, bi
                     rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
-                    slice = config, matrices, rays
-                    self.slices.append(slice)
+                    slice_tpl = config, matrices, rays
+                    self.slices.append(slice_tpl)
                     fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
 
                     if debug and is_first:        # Plot intermediate and full fit to data
                         tlin1 = fmt.format(Globals.svd_cutoff)
-                        self.plot_scatter(slice, plot_correction=True, tlin1=tlin1)
+                        self.plot_scatter(slice_tpl, plot_correction=True, tlin1=tlin1)
                         is_first = False
         a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
         self.a_rms = a_rms
@@ -186,7 +191,7 @@ class Trace:
         if slice_no is not None:
             slice_nos = self.series['slice_no']
             idx = slice_nos == slice_no
-            if opticon == Globals.spifu:
+            if opticon == Globals.extended:
                 spifu_slices = self.series['sp_slice']
                 idx2 = spifu_slices == spifu_no
                 idx = np.logical_and(idx, idx2)
@@ -285,7 +290,6 @@ class Trace:
         """ Plot the spread of offsets between ray trace and fit positions on the detector.
         """
         slice_list = kwargs.get('slice_list', None)
-        plot_correction = kwargs.get('plot_correction', False)
         tlin1_default = "Distortion residuals (Zemax - Zemax Fit): \n"
         tlin1 = kwargs.get('tlin1', tlin1_default)
 
@@ -574,22 +578,21 @@ class Trace:
 
     def _create_wave_colours(self, colour_scheme):
 
-        slice_nos = self.series['slice_no']
         rgb = None
         if colour_scheme == 'wavelength':
             waves = self.series['wavelength']
             rgb = Util.make_rgb_gradient(waves)
         return rgb
 
-    def _get_parameters(self):
-        ea = self.parameter['Echelle angle']
-        pa = self.parameter['Prism angle']
-        w1 = np.max(self.w_slice[0, :])
-        w2 = np.min(self.w_slice[1, :])
-        w3 = np.max(self.w_slice[2, :])
-        w4 = np.min(self.w_slice[3, :])
-        return ea, pa, w1, w2, w3, w4
-
+    # def _get_parameters(self):
+    #     ea = self.parameter['Echelle angle']
+    #     pa = self.parameter['Prism angle']
+    #     w1 = np.max(self.w_slice[0, :])
+    #     w2 = np.min(self.w_slice[1, :])
+    #     w3 = np.max(self.w_slice[2, :])
+    #     w4 = np.min(self.w_slice[3, :])
+    #     return ea, pa, w1, w2, w3, w4
+    #
     @staticmethod
     def _find_limits(a, margin):
         amin = min(a)

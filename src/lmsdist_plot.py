@@ -6,6 +6,7 @@
 import math
 
 import numpy as np
+from numpy.polynomial import Polynomial
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from lms_globals import Globals
@@ -57,36 +58,6 @@ class Plot:
                 ax_list[rps[i,0], rps[i, 1]].remove()
         return ax_list
 
-    def pixel_v_mech_rot(self, coverage, **kwargs):
-        suppress = kwargs.get('suppress', False)
-        if suppress:
-            return
-        eas, pas, w1max, w2min, w3max, w4min = coverage
-        n_pix_21 = 2048
-        n_configs = len(eas)
-        xlim = [2.5, 5.5]
-        ylim = [-2.0, 2.0]
-        ax_list = self.set_plot_area('Zemax vXX.YY',
-                                     xlim=xlim, xlabel='Wavelength [um]',
-                                     ylim=ylim, ylabel='Mech. rot. / Image motion [arcsec/pixel]')
-        ax = ax_list[0, 0]
-
-        ea_settings = np.unique(eas)
-        for ea_setting in ea_settings:
-            idx = np.where(eas == ea_setting)
-            pas_vals = pas[idx]
-            w2min_vals = w2min[idx]
-            w1max_vals = w1max[idx]
-            n_vals = len(pas_vals)
-            dw2 = w2min_vals[1:n_vals] - w2min_vals[0:n_vals-1]
-            dw_det = w2min_vals[1:n_vals] - w1max_vals[1:n_vals]
-            dpix = n_pix_21 * dw2 / dw_det
-            drot = (pas_vals[1:n_vals] - pas_vals[0:n_vals-1]) * 3600.0
-            x = w2min_vals[1:n_vals]
-            y = drot / dpix
-            self.plot_points(ax, x, y)
-        self.show()
-
     def efficiency_v_wavelength(self, weoas, **kwargs):
 
         waves, effs, orders, angles = weoas
@@ -122,15 +93,6 @@ class Plot:
         return
 
     @staticmethod
-    def _auto_lim(a, margin):
-        amin = min(a)
-        amax = max(a)
-        arange = amax - amin
-        amargin = margin * arange
-        lim = [amin - amargin, amax + amargin]
-        return lim
-
-    @staticmethod
     def _make_colours(n_colours):
         """ Generate a list of colours """
         colours = []
@@ -146,29 +108,82 @@ class Plot:
         return colours
 
     @staticmethod
-    def _get_text_position(xlim, ylim, **kwargs):
-        pos = kwargs.get('pos', 'tl')
-        inset = kwargs.get('inset', [0.1, 0.1])
-        posdict = {'tl': 0, 'tr': 1}
+    def wxo_fit(slice_fit):
+        """ Plot the polynomial surface fit to wavelength x echeller order as a function of echelle and
+        prism rotation angle.
+        """
+        x = np.array(slice_fit['pri_ang'])
+        y = np.array(slice_fit['ech_ang'])
+        wxo = np.array(slice_fit['w_bs']) * np.array(slice_fit['ech_ord'])
+        wxo_opt = slice_fit['wxo_opt']       # Fit parameters
 
-        xr = xlim[1] - xlim[0]
-        xt = xlim[0] + inset[0] * xr
-        yr = ylim[1] - ylim[0]
-        yt = ylim[1] - inset[1] * yr
-
-        return xt, yt
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
+        ax.scatter(x, y, wxo, color='blue')
+        x_range = np.linspace(5, 8., 50)
+        y_range = np.linspace(-6., 6., 50)
+        xy_grid = np.meshgrid(x_range, y_range)
+        z_grid = Util.surface_model(xy_grid, *wxo_opt)
+        ax.plot_surface(xy_grid[0], xy_grid[1], z_grid, color='red', alpha=0.5)
+        ax.set_xlabel('prism angle')
+        ax.set_ylabel('echelle angle')
+        ax.set_zlabel('wave x order')
+        plt.show()
+        return
 
     @staticmethod
-    def matrix_fit(x, matrices, fit_matrices):
-        n_mat, n_terms, _ = matrices.shape
-        ax_list = Plot.set_plot_area('title',
-                                     xlabel='Prism angle [deg]',
-                                     ylabel="Matrix term",
-                                     ncols=n_terms, nrows=n_terms)
-        for row in range(0, n_terms):
-            for col in range(0, n_terms):
-                ax = ax_list[row, col]
-        return
+    def transform_fit(bs_coord, plot_residuals=False, do_plots=True):
+        pri_ang = np.array(bs_coord['pri_ang'])
+        ech_ang = np.array(bs_coord['ech_ang'])
+        matrices = bs_coord['matrices']
+        slice_no = bs_coord['slice_no']
+
+        if do_plots:
+            fig, ax_list = plt.subplots(subplot_kw={"projection": "3d"}, ncols=4, nrows=4)
+            for row in range(0, 4):
+                for col in range(0, 4):
+                    if row + col > 3:
+                        ax_list[row, col].remove()
+
+            fig.suptitle("slice_no = {:d}".format(slice_no))
+
+        x, y = pri_ang, ech_ang
+
+        f_residuals = {'slice_no': slice_no}
+
+        for mat_tag in ['a']:
+            f_residuals[mat_tag] = {}
+            for row in range(0, 4):
+                f_residuals[mat_tag][row] = {}
+                for col in range(0, 4):
+                    if row + col > 3:
+                        continue
+                    z_term = []
+                    for matrix in matrices:
+                        mat = matrix[mat_tag]
+                        z_term.append(mat[row, col])
+                    z = np.array(z_term)
+
+                    mat_fits = bs_coord['mat_fits']
+                    mat = mat_fits[mat_tag]
+                    term_opt = mat[row, col]
+                    z_model = Util.surface_model((x, y), *term_opt)
+                    f_resid = (z - z_model) / z_model       # Fractional residual (for fit points)
+                    f_residuals[mat_tag][row][col] = f_resid
+                    if not do_plots:
+                        continue
+                    ax = ax_list[row, col]
+                    if plot_residuals:
+                        ax.scatter(x, y, f_resid, color='black', alpha=0.5)
+                        continue
+                    x_range = np.linspace(5, 8., 50)
+                    y_range = np.linspace(-6., 6., 50)
+                    xy_grid = np.meshgrid(x_range, y_range)
+                    z_grid = Util.surface_model(xy_grid, *term_opt)
+                    ax.scatter(x, y, z, color='red', alpha=0.5)
+                    ax.plot_surface(xy_grid[0], xy_grid[1], z_grid, color='grey', alpha=0.5)
+        if do_plots:
+            Plot.show()
+        return f_residuals
 
     @staticmethod
     def round_trip(y_arr, y_rtn_arr, **kwargs):
@@ -197,7 +212,7 @@ class Plot:
                                      ylabel="Prism angle + 0.02 x Echelle angle ")
         ax = ax_list[0, 0]
         ccs4_colours = mcolors.CSS4_COLORS
-        if optical_configuration == Globals.spifu:
+        if optical_configuration == Globals.extended:
             ccs4_colours = mcolors.TABLEAU_COLORS
 
         colours = sorted(ccs4_colours,
@@ -205,7 +220,6 @@ class Plot:
                          reverse=True)
         colour_iterator = iter(colours)
         config_colour = {}
-        old_labels = []
 
         for trace in traces[0:-1]:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
@@ -358,8 +372,8 @@ class Plot:
 
     @staticmethod
     def plot_points(ax, x, y, **kwargs):
-        """ Plot an array of points in the open plot region. """
-
+        """ Plot an array of points in the open plot region.
+        """
         n_pts = len(x)
         fs = kwargs.get('fs', 'none')
         mk = kwargs.get('mk', 'o')

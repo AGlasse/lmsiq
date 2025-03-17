@@ -6,8 +6,10 @@ Update:
 """
 import math
 import numpy as np
-from lms_globals import Globals
+from astropy import units as u
 from scipy.optimize import least_squares
+from scipy.optimize import curve_fit
+from lms_globals import Globals
 
 
 class Util:
@@ -390,6 +392,99 @@ class Util:
         return text
 
     @staticmethod
+    def surface_model(xy, a, b, c, d, e, f):
+        """ Fit function for a two variable quadratic surface of the form,
+         f(x, y) = a + b x + c y + d x^2 + e y^2 + f x y
+         for example, x -> prism angle, y -> echelle angle, f(x, y) -> wavelength (or transform coefficient)
+        """
+        xp, ye = xy
+        return a + b * xp + c * ye + d * xp ** 2 + e * ye ** 2 + f * xp * ye
+
+    @staticmethod
+    def add_wxo_fit(bs_vals):
+        x = np.array(bs_vals['pri_ang'])
+        y = np.array(bs_vals['ech_ang'])
+        wxo = np.array(bs_vals['w_bs']) * np.array(bs_vals['ech_ord'])
+        wxo_opt, wxo_cov = curve_fit(Util.surface_model, (x, y), wxo)
+        bs_vals['wxo_opt'] = wxo_opt
+        bs_vals['wxo_cov'] = wxo_cov
+        return bs_vals
+
+    @staticmethod
+    def add_term_fit(term_vals):
+        x = np.array(term_vals['pri_ang'])
+        y = np.array(term_vals['ech_ang'])
+        matrices = term_vals['matrices']
+        mat_fits = {}
+        mat_tags = ['a', 'b', 'ai', 'bi']
+        n_mats = len(mat_tags)
+        n_terms = 6     # No. of terms in surface fit (const, p, e, pp, ee, pe)
+        for i, mat_tag in enumerate(mat_tags):
+            # mat_fits[mat_tag] = {}
+            # mat_fits = np.zeros((4, 4, 4, n_terms))
+            term_array = np.zeros((4, 4, n_terms))
+            mat_fits[mat_tag] = term_array
+            for row in range(0, 4):
+                # mat_fits[mat_tag][row] = {}
+                for col in range(0, 4):
+                    term_list = []
+                    for mat_set in matrices:
+                        mat = mat_set[mat_tag]
+                        term = mat[row, col]
+                        term_list.append(term)
+                    terms = np.array(term_list)
+                    term_opt, term_cov = curve_fit(Util.surface_model, (x, y), terms)
+                    term_array[row, col, :] = term_opt
+
+                    # mat_fits[mat_tag][row][col] = term_opt, term_cov
+        term_vals['mat_fits'] = mat_fits
+        return term_vals
+
+    @staticmethod
+    def get_term_values(transforms, slice_no, debug=False):
+        """ Find the transforms which map the centre of slide 13 (alpha = 0.0) onto the EFP.
+        """
+        phase = 0.                      # Across slice fractional displacement
+        y = Util.slice_to_efp_y(slice_no, phase)
+        efp_y = np.array([y.value])     # Location in EFP.
+        efp_x = np.array([0.])
+        efp_bs = {'efp_y': efp_y, 'efp_x': efp_x}
+        if debug:
+            print("Slice no= {:d}".format(slice_no))
+            fmt = "{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s}"
+            print(fmt.format('pri_ang', 'ech_ang', 'efp_x', 'efp_y', 'mfp_x', 'mfp_y', 'w'))
+        values = {'slice_no': slice_no, 'pri_ang': [], 'ech_ang': [],
+                  'mfp_y': [], 'w_bs': [], 'ech_ord': [], 'matrices': []}
+        for transform in transforms:
+            cfg = transform['configuration']
+            if cfg['slice'] != slice_no:
+                continue
+            # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
+            w_min, w_max = cfg['w_min'], cfg['w_max']
+            mfp_x = 0.
+            mfp_w_list, mfp_x_list = [], []
+            for efp_w in np.linspace(w_min, w_max, 100):
+                efp_bs['efp_w'] = np.array([efp_w])
+                mfp_bs, _ = Util.efp_to_mfp(transform, efp_bs)
+                mfp_x_list.append(mfp_x)
+                mfp_w_list.append(efp_w)
+
+            mfp_w = np.interp(0., np.array(mfp_x_list), np.array(mfp_w_list))
+            mfp_y = mfp_bs['mfp_y'][0]
+            if debug:
+                fmt = "{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
+                print(fmt.format(cfg['pri_ang'], cfg['ech_ang'],
+                                 efp_bs['efp_x'][0], efp_bs['efp_y'][0],
+                                 mfp_x, mfp_y, mfp_w))
+            values['pri_ang'].append(cfg['pri_ang'])
+            values['ech_ang'].append(cfg['ech_ang'])
+            values['ech_ord'].append(cfg['ech_ord'])
+            values['mfp_y'].append(mfp_y)
+            values['w_bs'].append(mfp_w)
+            values['matrices'].append(transform['matrices'])
+        return values
+
+    @staticmethod
     def find_optimum_transforms(wave, opticon, svd_transforms):
         """ Find the transforms (one per slice) which position a specific wavelength closest to the centre of the
         detector mosaic.  For the extended mode, this is defined as order 24, slice 13
@@ -397,7 +492,7 @@ class Util:
         Step 1. Find the ~boresight transform for slice 13 (For spifu selected, use spifu = 1 and ech_ord = 24)
         """
         bs_transform = None
-        w_off_min = 1000.
+        w_off_min = 1000.*u.nm
         for svd_transform in svd_transforms:
             config = svd_transform['configuration']
             slice_no = config['slice']
@@ -406,14 +501,9 @@ class Util:
             spifu_no = config['spifu']
             if spifu_no > 1:        # Catches both nominal and spifu configurations
                 continue
-            # if spifu_no == 1:       # SPIFU Boresight has echelle order 24 on spifu 1
-            #     ech_order = config['ech_ord']
-            #     if ech_order != 24:
-            #         continue
-
-            w_min, w_max = config['w_min'], config['w_max']
+            w_min, w_max = config['w_min']*u.micron, config['w_max']*u.micron
             w_off = abs(0.5 * (w_max + w_min) - wave)
-            if w_off <= w_off_min:        #  or no_slice:
+            if w_off <= w_off_min:
                 bs_transform = svd_transform
                 w_off_min = w_off
 
@@ -430,7 +520,7 @@ class Util:
             # Option to only use specific orders for specific spifu_slices
             spec_order = False
             if spec_order:
-                if opticon == Globals.spifu:
+                if opticon == Globals.extended:
                     spifu_no = cfg['spifu']
                     spifu_slice = {23: (1, 4), 24: (2, 5), 25: (3, 6)}
                     valid_spifu_nos = spifu_slice[ech_ord]
@@ -459,9 +549,9 @@ class Util:
         """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
         a fraction of the slice width
         """
-        efp_slice_width = .001 * Globals.beta_mas_slice / Globals.efp_as_mm
+        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
-        y_s = np.array(efp_y) / efp_slice_width
+        y_s = efp_y / efp_slice_width
         slice_coord = n_slices // 2 + y_s
         slice_no = n_slices // 2 + y_s.astype(int)
         phase = slice_coord - slice_no
@@ -471,7 +561,7 @@ class Util:
     def slice_to_efp_y(slice_no, phase):
         """ Return the EFP y coordinate of the slice centre (in mm).
         """
-        efp_slice_width = .001 * Globals.beta_mas_slice / Globals.efp_as_mm
+        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
         slice = slice_no + phase
         efp_y = (slice - n_slices // 2) * efp_slice_width

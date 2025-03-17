@@ -1,12 +1,8 @@
-import os
-from os import listdir
-import shutil
 import pickle
 from astropy.io import fits
 from astropy.io.fits import Card, HDUList
 from lms_globals import Globals
 import numpy as np
-import lmsdist_trace
 
 
 class Transform:

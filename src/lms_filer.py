@@ -1,6 +1,7 @@
 import os
 from os import listdir
 import pickle
+from astropy.table import Table
 from astropy.io import fits
 from astropy.io.fits import Card, HDUList, ImageHDU, PrimaryHDU
 from lms_globals import Globals
@@ -21,6 +22,7 @@ class Filer:
         self.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, optical_path, date_stamp)
         self.data_folder = self.get_folder('../data/model/' + sub_folder)
+        self.sim_folder = self.get_folder('../data/sim/' + sub_folder)
         self.output_folder = self.get_folder('../output/' + sub_folder)
         file_leader = self.output_folder + sub_folder.replace('/', '_')
         if analysis_type == 'distortion':
@@ -81,6 +83,64 @@ class Filer:
                 os.mkdir(out_path)
         return out_path
 
+    def write_fits_fit_parameters(self, slice_fits):
+
+        n_slices = len(slice_fits)
+        primary_cards = [Card('N_SLICES', n_slices, 'No. of slices')]
+        primary_header = fits.Header(primary_cards)
+        primary_hdu = fits.PrimaryHDU(header=primary_header)
+        hdu_list = HDUList([primary_hdu])
+
+        _, optical_path, date_stamp, _, _, _ = self.model_configuration
+
+        fmt = "lms_dist_efp_mfp_nom_fit_parameters_v{:s}"
+        fits_name = fmt.format(date_stamp)
+        fits_path = self.tf_dir + fits_name + '.fits'
+
+        wxo_column_names = ['SLICE_NO', 'CONST', 'PRI', 'ECH', 'PRIxPRI', 'ECHxECH', 'PRIxECH']
+        n_columns = len(wxo_column_names)
+        wxo_data = np.zeros((n_columns))
+        # Write wavelength x echelle order fit parameters to second HDU
+        wxo_data[0] = 13
+        wxo_data[1:n_columns] = slice_fits[12]['wxo_opt']     # All slices have the same wxo fit parameters...
+        wxo_cards = [Card('DESCR', 'Fit parms to map prism and echelle angle to slice 13 wavelength.', '')]
+        wxo_hdr = fits.Header(wxo_cards)
+        wxo_table = Table(data=wxo_data, names=wxo_column_names)
+        wxo_hdu = fits.BinTableHDU(data=wxo_table, header=wxo_hdr)
+        hdu_list.append(wxo_hdu)
+
+        term_cards = [Card('DESCR', 'Fit parms to map prism and echelle angle to transform terms.', '')]
+        term_hdr = fits.Header(term_cards)
+        mat_tags_uc = ['A', 'B', 'AI', 'BI']
+        term_names = ['SLICE_NO', 'ROW', 'COL']
+        for mat_tag in mat_tags_uc:
+            for tag in wxo_column_names[1:7]:
+                term_names.append(mat_tag + '_' + tag)
+        n_columns = len(term_names)
+        n_records_slice = 4 * 4
+        n_vals_fit = 6
+        term_data = np.zeros((n_slices * n_records_slice, n_columns))
+        i = 0                           # Row counter in term_data array
+        for slice_fit in slice_fits:
+            j = 0
+            term_data[i:i + n_records_slice, j] = slice_fit['slice_no']
+            mat_fits = slice_fit['mat_fits']
+            for row in range(0, 4):
+                for col in range(0, 4):
+                    term_data[i, 1:3] = [row, col]
+                    j = 3
+                    for mat_tag_uc in mat_tags_uc:
+                        mat_tag_lc = mat_tag_uc.lower()
+                        mat = np.array(mat_fits[mat_tag_lc])
+                        term_data[i, j:j + n_vals_fit] = mat[row, col, :]
+                        j += n_vals_fit
+                    i += 1
+        term_table = Table(data=term_data, names=term_names)
+        term_hdu = fits.BinTableHDU(data=term_table, header=term_hdr)
+        hdu_list.append(term_hdu)
+        hdu_list.writeto(fits_path, overwrite=True)
+        return
+
     def write_fits_affine_transform(self, trace):
         _, _, date_stamp, _, _, _ = trace.model_configuration
         affines = trace.affines
@@ -99,7 +159,6 @@ class Filer:
         cards = []
 
         col_list = []
-
         for m in range(0, n_mats):
             col_name = "MFP>D{:d}".format(m+1) if m < 4 else "D{:d}>MFP".format(m-3)
             col = fits.Column(name=col_name, array=affines[m].flatten(), format='E')
@@ -226,7 +285,8 @@ class Filer:
 
     def read_fits_svd_transforms(self):
         inc_tags = ['efp_mfp']
-        fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=[])
+        exc_tags = ['fit_parameters']
+        fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=exc_tags)
         transform_list = []
         for fits_name in fits_file_list:
             transforms = self.read_fits_svd_transform(fits_name)
