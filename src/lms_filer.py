@@ -83,26 +83,26 @@ class Filer:
                 os.mkdir(out_path)
         return out_path
 
-    def write_fits_fit_parameters(self, slice_fits):
+    def write_fit_parameters(self, wxo_fit, term_fits):
 
-        n_slices = len(slice_fits)
+        n_slices = len(term_fits)
         primary_cards = [Card('N_SLICES', n_slices, 'No. of slices')]
         primary_header = fits.Header(primary_cards)
         primary_hdu = fits.PrimaryHDU(header=primary_header)
         hdu_list = HDUList([primary_hdu])
 
-        _, optical_path, date_stamp, _, _, _ = self.model_configuration
+        _, opticon, date_stamp, _, _, _ = self.model_configuration
 
-        fmt = "lms_dist_efp_mfp_nom_fit_parameters_v{:s}"
-        fits_name = fmt.format(date_stamp)
+        fmt = "lms_dist_efp_mfp_{:s}_fit_parameters_v{:s}"
+        fits_name = fmt.format(opticon[0:3], date_stamp)
         fits_path = self.tf_dir + fits_name + '.fits'
 
         wxo_column_names = ['SLICE_NO', 'CONST', 'PRI', 'ECH', 'PRIxPRI', 'ECHxECH', 'PRIxECH']
         n_columns = len(wxo_column_names)
         wxo_data = np.zeros((n_columns))
         # Write wavelength x echelle order fit parameters to second HDU
-        wxo_data[0] = 13
-        wxo_data[1:n_columns] = slice_fits[12]['wxo_opt']     # All slices have the same wxo fit parameters...
+        wxo_data[0] = wxo_fit['slice_no']
+        wxo_data[1:n_columns] = wxo_fit['wxo_opt']     # All slices have the same wxo fit parameters...
         wxo_cards = [Card('DESCR', 'Fit parms to map prism and echelle angle to slice 13 wavelength.', '')]
         wxo_hdr = fits.Header(wxo_cards)
         wxo_table = Table(data=wxo_data, names=wxo_column_names)
@@ -121,10 +121,10 @@ class Filer:
         n_vals_fit = 6
         term_data = np.zeros((n_slices * n_records_slice, n_columns))
         i = 0                           # Row counter in term_data array
-        for slice_fit in slice_fits:
-            j = 0
-            term_data[i:i + n_records_slice, j] = slice_fit['slice_no']
-            mat_fits = slice_fit['mat_fits']
+        for slice_idx in range(0, n_slices):
+            slice_no = slice_idx + 1
+            term_data[i:i + n_records_slice, 0] = slice_no
+            mat_fits = term_fits[slice_no]
             for row in range(0, 4):
                 for col in range(0, 4):
                     term_data[i, 1:3] = [row, col]
@@ -141,7 +141,42 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return
 
-    def write_fits_affine_transform(self, trace):
+    def read_fit_parameters(self):
+        """ Method to read the surface fit parameters from the fits file. """
+        _, opticon, date_stamp, _, _, _ = self.model_configuration
+        n_slices = 28 if opticon == Globals.nominal else 3
+
+        fmt = "lms_dist_efp_mfp_{:s}_fit_parameters_v{:s}"
+        fits_name = fmt.format(opticon[0:3], date_stamp)
+        fits_path = self.tf_dir + fits_name + '.fits'
+        hdu_list = fits.open(fits_path, mode='readonly')
+
+        wxo_data = hdu_list[1].data
+        slice_no = int(wxo_data['SLICE_NO'][0])
+        wxo_fit = {'slice_no': slice_no, 'wxo_opt': list(wxo_data[0][1:])}
+
+        term_data = hdu_list[2].data
+        mat_length = Globals.svd_order * Globals.svd_order
+        mat_shape = Globals.svd_shape + (Globals.n_svd_fit_terms,)
+        term_fits = {}
+        data_row = 0       # Row counter in term data records
+        for slice_idx in range(0, n_slices):
+            slice_no = slice_idx + 1
+            term_fits[slice_no] = {}
+            for mat_name in Globals.matrix_names:
+                term_fits[slice_no][mat_name] = np.zeros(mat_shape)
+            for i in range(data_row, data_row + mat_length):
+                mat_row = int(term_data['ROW'][i])
+                mat_col = int(term_data['COL'][i])
+                data_col = 3  # Column counter in term data record
+                for mat_name in Globals.matrix_names:
+                    mat = term_fits[slice_no][mat_name]
+                    mat[mat_row, mat_col] = list(term_data[i][data_col:data_col+6])
+                    data_col += 6
+            data_row += 16
+        return wxo_fit, term_fits
+
+    def write_affine_transform(self, trace):
         _, _, date_stamp, _, _, _ = trace.model_configuration
         affines = trace.affines
         n_mats, mat_order, _ = affines.shape
@@ -174,7 +209,6 @@ class Filer:
         """ Read fits file into a 'trace' object, which
         """
         fmt = "lms_dist_mfp_dfp_v{:s}"
-
         fits_name = fmt.format(date_stamp)
         fits_path = self.tf_dir + fits_name + '.fits'
         hdu_list = fits.open(fits_path, mode='readonly')
@@ -193,7 +227,7 @@ class Filer:
             affines[i] = matrix
         return affines
 
-    def write_fits_svd_transform(self, trace):
+    def write_svd_transform(self, trace):
         """ Create data tables holding transforms for all slices in a configuration and write them
         to a fits file.
         """
@@ -201,16 +235,15 @@ class Filer:
         pa = trace.parameter['Prism angle']
         ea = trace.parameter['Echelle angle']
         _, opticon, date_stamp, _, _, _ = trace.model_config
-        trc = Globals.transform_config
-        n_mats = trc['n_mats']
-        mat_order = trc['mat_order']
+        n_mats = Globals.n_svd_matrices
+        svd_order = Globals.svd_order
 
         primary_cards = [Card('OPTICON', opticon, 'Optical configuration'),
                          Card('CFG_ID', cfg_id, 'Optical configuration id'),
                          Card('PRI_ANG', pa, 'Prism angle / deg'),
                          Card('ECH_ANG', ea, 'Echelle angle / deg'),
                          Card('N_MATS', n_mats, 'A, B, AI, BI transform matrices'),
-                         Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
+                         Card('MAT_ORD', svd_order, 'Transform matrix dimensions')
                          ]
         trace_hdr = fits.Header(primary_cards)        # {'ECH_ANG': ea}
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
@@ -245,7 +278,7 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return fits_name
 
-    def read_fits_svd_transform(self, fits_name):
+    def read_svd_transform(self, fits_name):
         """ Read a list of transforms between the EFP and MFP from a fits file.
         """
         fits_path = self.tf_dir + fits_name
@@ -283,15 +316,13 @@ class Filer:
         hdu_list.close()
         return transform_list
 
-    def read_fits_svd_transforms(self):
-        inc_tags = ['efp_mfp']
-        exc_tags = ['fit_parameters']
+    def read_svd_transforms(self, inc_tags=[], exc_tags=[]):
         fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=exc_tags)
         transform_list = []
         for fits_name in fits_file_list:
-            transforms = self.read_fits_svd_transform(fits_name)
-            for transform in transforms:
-                transform_list.append(transform)
+            transform = self.read_svd_transform(fits_name)
+            # for transform in transforms:
+            transform_list.append(transform)
         return transform_list
 
     @staticmethod

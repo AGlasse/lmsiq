@@ -10,10 +10,10 @@ from astropy import units as u
 
 
 class Globals:
-    as_deg = 3600.
+    # as_deg = 3600.
     mas_as = 1000.
     deg_rad = 180. / math.pi
-    mas_deg = as_deg * mas_as
+    # mas_deg = as_deg * mas_as
     rad_per_mas = 4.85E-9
     sterad_per_mas2 =rad_per_mas * rad_per_mas
     elt_area = 1350.*u.m*u.m
@@ -25,6 +25,15 @@ class Globals:
 
     # Simulators
     scopesim, toysim = 'scopesim', 'toysim'
+
+    # Transform parameters
+    svd_order = 4
+    svd_shape = svd_order, svd_order
+    matrix_names = ['a', 'b', 'ai', 'bi']
+    n_svd_matrices = len(matrix_names)
+    svd_residual_fit_order = 3
+    svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
+    n_svd_fit_terms = 6
 
 
     zemax_configuration = None
@@ -47,6 +56,7 @@ class Globals:
     # Plate scale at detector
     alpha_pix = 8.7 * u.mas                                   #
     beta_slice = 20.7 * u.mas
+
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov = 0.897 * u.arcsec
     beta_fov = beta_slice.to(u.arcsec) * 28
@@ -70,10 +80,6 @@ class Globals:
     n_lms_slices = 28
     n_lms_spifu_slices = 6
 
-    transform_config = {'n_mats': 4,                        # Four matrices per transform (A, B, AI, BI)
-                        'mat_order': 4,                     # No of rows/columns in A, B, AI, BI
-                        'res_fit_order': 3}                 # No. of terms in residual fit
-    svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
     nom_pix_pitch = 18.0                                    # LMS pixel pitch in microns
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		            # Unilluminated margin around outer detector edge (pixels)

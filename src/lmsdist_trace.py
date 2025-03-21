@@ -47,7 +47,8 @@ class Trace:
         _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
         self.is_spifu = opticon == Globals.extended
         self.model_config = model_config
-        self.transforms = None                              # Replacement for slice_objects
+        # self.transforms = None                              # Replacement for slice_objects
+        self.transform_fits_name = None
         self.slices, self.ray_trace = None, None
         self.offset_data = None
         self.a_rms = 0.                          # RMS transform errorfor trace (microns)
@@ -131,11 +132,10 @@ class Trace:
         """ Generate transforms to map from phase, across-slice coordinates in the entrance focal plane, to detector
         row, column coordinates.  Also update the wavelength values at the centre and corners of the detector mosaic.
         """
-        n_terms = Globals.transform_config['mat_order']
+        n_terms = Globals.svd_order
         debug = kwargs.get('debug', False)
         slice_order = n_terms - 1
         _, _, _, _, fp_in, fp_out = self.model_config
-        # fp_in, fp_out = self.coord_in, self.coord_out
         is_first = True
         self.slices = []
         a_rms_list = []
@@ -159,12 +159,9 @@ class Trace:
                     off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
                     a_rms_list.append(off_mfp_a)
 
-                    tr_pars = self.lms_config.copy()
-                    tr_pars.update(Globals.transform_config)
                     w_min, w_max = np.amin(waves), np.amax(waves)
 
                     ech_order = ech_orders[0]       # They should all be the same!
-                    print('trace.create_transforms eo= ', ech_order)
                     config = ech_order, slice_no, spifu_no, w_min, w_max
                     matrices = a, b, ai, bi
                     rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
@@ -253,9 +250,9 @@ class Trace:
                 continue
             ax = ax_list[row, col]
             _, _, _, x, y, x_fit, y_fit = rays
-            if field:        # Draw filled polygon around field points.
+            if field:                       # Draw filled polygon around field points.
                 n_uw = len(self.unique_waves)
-                n_pts = 2 * n_uw + 1      # No. of points on perimeter
+                n_pts = 2 * n_uw + 1        # No. of points on perimeter
                 xp, yp = np.zeros(n_pts), np.zeros(n_pts)
                 alphas = rays[2]
                 uni_alphas = np.unique(alphas)
@@ -268,10 +265,8 @@ class Trace:
             if plotdiffs:
                 u, v = x - x_fit, y - y_fit
                 q = ax.quiver(x, y, u, v, angles='uv', width=0.001)
-                # qt = ax.quiver([0.], [-33.5], [.01], [.01], angles='uv', width=0.001, color='red')
                 if row == 0:
-                    ax.quiverkey(q, X=0.9, Y=1.1, U=0.001,
-                                 label='1 micron', labelpos='N')
+                    ax.quiverkey(q, X=0.9, Y=1.1, U=0.001, label='1 micron', labelpos='N')
             else:
                 plot.plot_points(ax, x_fit, y_fit, ms=1.0, colour='blue')
                 plot.plot_points(ax, x, y, ms=1.0, mk='x')

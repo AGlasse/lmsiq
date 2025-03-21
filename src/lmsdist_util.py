@@ -392,40 +392,38 @@ class Util:
         return text
 
     @staticmethod
-    def surface_model(xy, a, b, c, d, e, f):
+    def surface_model(xy, *coefficients):        # a, b, c, d, e, f):
         """ Fit function for a two variable quadratic surface of the form,
          f(x, y) = a + b x + c y + d x^2 + e y^2 + f x y
          for example, x -> prism angle, y -> echelle angle, f(x, y) -> wavelength (or transform coefficient)
         """
+        a, b, c, d, e, f = coefficients
         xp, ye = xy
         return a + b * xp + c * ye + d * xp ** 2 + e * ye ** 2 + f * xp * ye
 
     @staticmethod
-    def add_wxo_fit(bs_vals):
-        x = np.array(bs_vals['pri_ang'])
-        y = np.array(bs_vals['ech_ang'])
-        wxo = np.array(bs_vals['w_bs']) * np.array(bs_vals['ech_ord'])
-        wxo_opt, wxo_cov = curve_fit(Util.surface_model, (x, y), wxo)
-        bs_vals['wxo_opt'] = wxo_opt
-        bs_vals['wxo_cov'] = wxo_cov
-        return bs_vals
+    def find_wxo_fit(term_values):
+        slice_no = term_values['slice_no']
+        x = np.array(term_values['pri_ang'])
+        y = np.array(term_values['ech_ang'])
+        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ord'])
+        wxo_opt, wxo_cov = curve_fit(Util.surface_model, xdata=(x, y), ydata=list(wxo), p0=[0]*6)
+        wxo_fit = {'slice_no': slice_no, 'wxo_opt': wxo_opt, 'wxo_cov': wxo_cov}
+        return wxo_fit
 
     @staticmethod
-    def add_term_fit(term_vals):
+    def find_slice_fit(term_vals):
+        # slice_no = term_vals['slice_no']
         x = np.array(term_vals['pri_ang'])
         y = np.array(term_vals['ech_ang'])
         matrices = term_vals['matrices']
-        mat_fits = {}
+        slice_fit = {}
         mat_tags = ['a', 'b', 'ai', 'bi']
-        n_mats = len(mat_tags)
         n_terms = 6     # No. of terms in surface fit (const, p, e, pp, ee, pe)
         for i, mat_tag in enumerate(mat_tags):
-            # mat_fits[mat_tag] = {}
-            # mat_fits = np.zeros((4, 4, 4, n_terms))
             term_array = np.zeros((4, 4, n_terms))
-            mat_fits[mat_tag] = term_array
+            slice_fit[mat_tag] = term_array
             for row in range(0, 4):
-                # mat_fits[mat_tag][row] = {}
                 for col in range(0, 4):
                     term_list = []
                     for mat_set in matrices:
@@ -433,12 +431,10 @@ class Util:
                         term = mat[row, col]
                         term_list.append(term)
                     terms = np.array(term_list)
-                    term_opt, term_cov = curve_fit(Util.surface_model, (x, y), terms)
+                    term_opt, term_cov = curve_fit(Util.surface_model, xdata=(x, y), ydata=terms, p0=[0]*6)
                     term_array[row, col, :] = term_opt
-
-                    # mat_fits[mat_tag][row][col] = term_opt, term_cov
-        term_vals['mat_fits'] = mat_fits
-        return term_vals
+        # term_fit = {slice_no: mat_fits}
+        return slice_fit
 
     @staticmethod
     def get_term_values(transforms, slice_no, debug=False):
@@ -453,8 +449,8 @@ class Util:
             print("Slice no= {:d}".format(slice_no))
             fmt = "{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s}"
             print(fmt.format('pri_ang', 'ech_ang', 'efp_x', 'efp_y', 'mfp_x', 'mfp_y', 'w'))
-        values = {'slice_no': slice_no, 'pri_ang': [], 'ech_ang': [],
-                  'mfp_y': [], 'w_bs': [], 'ech_ord': [], 'matrices': []}
+        term_values = {'slice_no': slice_no, 'pri_ang': [], 'ech_ang': [],
+                       'mfp_y': [], 'w_bs': [], 'ech_ord': [], 'matrices': []}
         for transform in transforms:
             cfg = transform['configuration']
             if cfg['slice'] != slice_no:
@@ -476,13 +472,13 @@ class Util:
                 print(fmt.format(cfg['pri_ang'], cfg['ech_ang'],
                                  efp_bs['efp_x'][0], efp_bs['efp_y'][0],
                                  mfp_x, mfp_y, mfp_w))
-            values['pri_ang'].append(cfg['pri_ang'])
-            values['ech_ang'].append(cfg['ech_ang'])
-            values['ech_ord'].append(cfg['ech_ord'])
-            values['mfp_y'].append(mfp_y)
-            values['w_bs'].append(mfp_w)
-            values['matrices'].append(transform['matrices'])
-        return values
+            term_values['pri_ang'].append(cfg['pri_ang'])
+            term_values['ech_ang'].append(cfg['ech_ang'])
+            term_values['ech_ord'].append(cfg['ech_ord'])
+            term_values['mfp_y'].append(mfp_y)
+            term_values['w_bs'].append(mfp_w)
+            term_values['matrices'].append(transform['matrices'])
+        return term_values
 
     @staticmethod
     def find_optimum_transforms(wave, opticon, svd_transforms):
@@ -688,8 +684,8 @@ class Util:
         det_lims = Globals.det_lims
         for det_name in det_lims:
             x_lim, y_lim = det_lims[det_name]
-            is_x_hit = x_lim[0] <= det_x and det_x < x_lim[1]
-            is_y_hit = y_lim[0] <= det_y and det_y < y_lim[1]
+            is_x_hit = x_lim[0] <= det_x < x_lim[1]
+            is_y_hit = y_lim[0] <= det_y < y_lim[1]
             is_hit = is_x_hit and is_y_hit
             if is_hit:
                 return  is_hit, det_name
@@ -868,6 +864,67 @@ class Util:
         return rgb
 
     @staticmethod
+    def compare_basis_with_fits(slice_no, trace, svd_transform, wxo_fit, term_fits):
+
+        slice_idx = slice_no - 1
+        svd_cfg = svd_transform[slice_idx]['configuration']
+        svd_slice_no = svd_cfg['slice']
+        svd_wave = 0.5 * (svd_cfg['w_min'] + svd_cfg['w_max'])
+
+        term_fit = term_fits[svd_slice_no]
+        fit_transform = Util.make_fit_transform(svd_cfg, term_fit)
+
+        # Make the polynomial fit transform analogue of the svd transform
+        w_min, w_max = svd_cfg['w_min'] * u.micron, svd_cfg['w_max'] * u.micron
+        yc = Util.slice_to_efp_y(svd_slice_no, 0.).value    # Slice y (beta) coordinate in EFP
+
+        efp_x = trace.get('efp_x', slice_no=slice_no)
+        efp_y = trace.get('efp_y', slice_no=slice_no)
+        efp_w = trace.get('wavelength', slice_no=slice_no)
+        # efp_y = np.array([yc, yc])
+        # efp_x = np.array([0., 0.])                          # Slice x (alpha) bounds in EFP, map to dfp_y
+        # efp_w = np.array([w_min.value, w_max.value]) * u.micron
+        efp_points = {'efp_y': efp_y, 'efp_x': efp_x, 'efp_w': efp_w}  # Centre of slice for detector
+        mfp_points_zemax = {'mfp_x': trace.get('det_x', slice_no=slice_no),
+                            'mfp_y': trace.get('det_y', slice_no=slice_no)}
+        mfp_points_svd = Util.efp_to_mfp(svd_transform[slice_idx], efp_points)
+        mfp_points_fit = Util.efp_to_mfp(fit_transform, efp_points)
+        return mfp_points_zemax, mfp_points_svd[0], mfp_points_fit[0]
+
+    @staticmethod
+    def make_fit_transform(cfg, term_fit):
+
+        pa, ea, eo = cfg['pri_ang'], cfg['ech_ang'], cfg['ech_ord']
+        matrices = {}
+        for mat_name in Globals.matrix_names:
+            poly_matrix = term_fit[mat_name]
+            matrix = Util.make_fit_matrix(poly_matrix, pa, ea, eo)
+            matrices[mat_name] = matrix
+
+        transform = {'configuration': cfg, 'matrices': matrices}
+        return transform
+
+    @staticmethod
+    def make_fit_matrix(poly_matrix, pa, ea, eo):
+        """ Create a transform matrix at any prism and echelle angle with terms provided using the
+        2nd order 2D polynomial fit function.
+
+        :param opt_mat:
+        :param pa:
+        :param ea:
+        :param eo:
+        :return:
+        """
+        svd_order = Globals.svd_order
+        svd_shape = svd_order, svd_order
+        matrix = np.zeros(svd_shape)
+        for i in range(0, svd_order):
+            for j in range(0, svd_order):
+                fit_terms = list(poly_matrix[i, j])
+                matrix[i, j] = Util.surface_model((pa, ea), *fit_terms)
+        return matrix
+
+    @staticmethod
     def test_out_and_back(filer, opticon, date_stamp):
         print('lms_distort - Evaluating transforms')
 
@@ -878,7 +935,7 @@ class Util:
 
         # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
         affines = filer.read_fits_affine_transform(date_stamp)
-        svd_transforms = filer.read_fits_svd_transforms()
+        svd_transforms = filer.read_svd_transforms()
         opt_transforms = Util.find_optimum_transforms(efp_w_cen, opticon, svd_transforms)
         opt_transform = opt_transforms[tgt_slice_no]
 

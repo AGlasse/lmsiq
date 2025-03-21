@@ -108,17 +108,28 @@ class Plot:
         return colours
 
     @staticmethod
-    def wxo_fit(slice_fit):
+    def wxo_fit(wxo_fit, term_values, plot_residuals=False):
         """ Plot the polynomial surface fit to wavelength x echeller order as a function of echelle and
         prism rotation angle.
         """
-        x = np.array(slice_fit['pri_ang'])
-        y = np.array(slice_fit['ech_ang'])
-        wxo = np.array(slice_fit['w_bs']) * np.array(slice_fit['ech_ord'])
-        wxo_opt = slice_fit['wxo_opt']       # Fit parameters
+        x = np.array(term_values['pri_ang'])
+        y = np.array(term_values['ech_ang'])
+        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ord'])
+        wxo_opt = wxo_fit['wxo_opt']       # Fit parameters
 
+        wxo_model = Util.surface_model((x, y), *wxo_opt)
+        f_resid = (wxo - wxo_model) * 1000  # Fractional residual (for fit points)
+
+        z = f_resid if plot_residuals else wxo
         fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-        ax.scatter(x, y, wxo, color='blue')
+        ax.scatter(x, y, z, color='blue')
+        if plot_residuals:
+            ax.set_xlabel('prism angle / deg')
+            ax.set_ylabel('echelle angle / deg')
+            ax.set_zlabel('n $\lambda$ residual / nm')
+            plt.show()
+            return
+
         x_range = np.linspace(5, 8., 50)
         y_range = np.linspace(-6., 6., 50)
         xy_grid = np.meshgrid(x_range, y_range)
@@ -131,11 +142,12 @@ class Plot:
         return
 
     @staticmethod
-    def transform_fit(bs_coord, plot_residuals=False, do_plots=True):
-        pri_ang = np.array(bs_coord['pri_ang'])
-        ech_ang = np.array(bs_coord['ech_ang'])
-        matrices = bs_coord['matrices']
-        slice_no = bs_coord['slice_no']
+    def transform_fit(term_fit, term_values, plot_residuals=False, do_plots=True):
+        # term_fit, term_values
+        pri_ang = np.array(term_values['pri_ang'])
+        ech_ang = np.array(term_values['ech_ang'])
+        matrices = term_values['matrices']
+        slice_no = term_values['slice_no']
 
         if do_plots:
             fig, ax_list = plt.subplots(subplot_kw={"projection": "3d"}, ncols=4, nrows=4)
@@ -147,9 +159,7 @@ class Plot:
             fig.suptitle("slice_no = {:d}".format(slice_no))
 
         x, y = pri_ang, ech_ang
-
         f_residuals = {'slice_no': slice_no}
-
         for mat_tag in ['a']:
             f_residuals[mat_tag] = {}
             for row in range(0, 4):
@@ -162,9 +172,7 @@ class Plot:
                         mat = matrix[mat_tag]
                         z_term.append(mat[row, col])
                     z = np.array(z_term)
-
-                    mat_fits = bs_coord['mat_fits']
-                    mat = mat_fits[mat_tag]
+                    mat = term_fit[mat_tag]
                     term_opt = mat[row, col]
                     z_model = Util.surface_model((x, y), *term_opt)
                     f_resid = (z - z_model) / z_model       # Fractional residual (for fit points)
@@ -184,6 +192,22 @@ class Plot:
         if do_plots:
             Plot.show()
         return f_residuals
+
+    @staticmethod
+    def mfp_projections(mfp_projections):
+        mfp_points_zemax, mfp_points_svd, mfp_points_fit = mfp_projections
+        colours = ['blue', 'green', 'red']
+
+        ax_list = Plot.set_plot_area('Comparison of Zemax, SVD and fit transforms',
+                                     xlabel="x",
+                                     ylabel="y")
+        ax = ax_list[0, 0]
+        for i, mfp_points in enumerate(mfp_projections):
+            x, y = mfp_points['mfp_x'], mfp_points['mfp_y']
+            Plot.plot_points(ax, x, y, colour=colours[i])
+
+        Plot.show()
+        return
 
     @staticmethod
     def round_trip(y_arr, y_rtn_arr, **kwargs):

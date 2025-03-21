@@ -54,7 +54,7 @@ focal_planes = {''}
 util = Util()
 plot = Plot()
 
-n_mats = Globals.transform_config['n_mats']
+n_mats = Globals.n_svd_matrices
 st_file = open(filer.stats_file, 'w')
 
 run_config = 4, 2
@@ -92,10 +92,11 @@ if generate_transforms:
             trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
             trace.plot_focal_planes()
             suppress_plots = False
-        fits_name = filer.write_fits_svd_transform(trace)
+        fits_name = filer.write_svd_transform(trace)
+        trace.transform_fits_name = fits_name
         a_rms_list.append(trace.a_rms)
 
-    filer.write_fits_affine_transform(Trace)
+    filer.write_affine_transform(Trace)
     a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
     print("a_rms = {:10.3f} microns".format(a_rms * 1000.))
 
@@ -113,33 +114,45 @@ if plot_wcal:
     plot.series('coverage', traces[0:1])
     plot.series('coverage', traces)
 
-fit_transforms = True
+fit_transforms = False
 if fit_transforms:
-    # Wavelength calibration -
+    #  Wavelength calibration -
     # Create an interpolation object to map a wavelength to echelle and prism angle settings.
     # This is done by using the transforms to derive fits of the form
     #   theta_prism = f(wave),   for theta_echelle = 0. deg
     #   theta_echelle = g(wave, order)
     # Read in transforms and plot term variations with prism and echelle angles.
-    test_wave = 4700 * u.nm
-    affines = filer.read_fits_affine_transform(date_stamp)
-    svd_transforms = filer.read_fits_svd_transforms()
-    slice_fits = []
-    for slice_no in range(1, 29):
-        slice_fit = Util.get_term_values(svd_transforms, slice_no)
-        slice_fit = Util.add_wxo_fit(slice_fit)
-        plot.wxo_fit(slice_fit)
-        slice_fit = Util.add_term_fit(slice_fit)
-        f_residuals = plot.transform_fit(slice_fit, do_plots=True)
-        f_residuals = plot.transform_fit(slice_fit, do_plots=True, plot_residuals=True)
-        slice_fits.append(slice_fit)
-    filer.write_fits_fit_parameters(slice_fits)
+    # test_wave = 4700 * u.nm
 
-# Evaluate the transform performance when mapping test data.  The method is to interpolate the
-# coordinates determined using the transforms (stored in the 'trace' objects) for adjacent configurations.
-evaluate_transforms = False  # performance statistics, for optimising code parameters.
+    affines = filer.read_fits_affine_transform(date_stamp)
+    svd_transforms = filer.read_svd_transforms(inc_tags=['efp_mfp_nom'], exc_tags=['fit_parameters'])
+    slice_fits = {}
+    wxo_fit = None
+    for slice_no in range(1, 29):
+        term_values = Util.get_term_values(svd_transforms, slice_no)
+        if slice_no == 13:
+            wxo_fit = Util.find_wxo_fit(term_values)
+            wxo_fit = Util.find_wxo_fit(term_values)
+            plot.wxo_fit(wxo_fit, term_values, plot_residuals=False)
+            plot.wxo_fit(wxo_fit, term_values, plot_residuals=True)
+        slice_fit = Util.find_slice_fit(term_values)
+        f_residuals = plot.transform_fit(slice_fit, term_values, do_plots=False)
+        f_residuals = plot.transform_fit(slice_fit, term_values, do_plots=False, plot_residuals=True)
+        slice_fits[slice_no] = slice_fit
+    filer.write_fit_parameters(wxo_fit, slice_fits)
+
+# Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the the projected coordinates
+# using 1) the specific at the Zemax location and 2) the model fit transforms (generated for the prism and echelle angles)
+evaluate_transforms = True
 if evaluate_transforms:
-    Util.test_out_and_back(filer, opticon, date_stamp)
+    traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
+    for trace in traces:
+        inc_tags = [trace.transform_fits_name]
+        svd_transform = filer.read_svd_transforms(inc_tags=inc_tags)[0]
+        wxo_fit, term_fits = filer.read_fit_parameters()
+        slice_no = 13
+        mfp_projections = Util.compare_basis_with_fits(slice_no, trace, svd_transform, wxo_fit, term_fits)
+        plot.mfp_projections(mfp_projections)
 
 print()
 print('lms_distort - Done')

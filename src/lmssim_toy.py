@@ -92,7 +92,7 @@ class Toy:
                 f_ext *= 0.
                 f_pnh *= 0.
             affines = filer.read_fits_affine_transform(date_stamp)
-            svd_transforms = filer.read_fits_svd_transforms()
+            svd_transforms = filer.read_svd_transforms()
 
             n_det_rows_slice = 200          # Number of rows per slice, with comfortable margin...
 
