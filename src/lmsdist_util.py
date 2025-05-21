@@ -302,21 +302,18 @@ class Util:
         return
 
     @staticmethod
-    def filter_transform_list(all_configs, **kwargs):
-        """ Filter transform data with matching echelle order and slice number.
+    def filter_transform_list(transform_list, **kwargs):
+        """ Filter transform data to select a configuration value (e.g. keyword slice=13).
         """
-        ech_order = kwargs.get('ech_order', -1.)
-        slice_no = kwargs.get('slice_no', -1.)
-        spifu_no = kwargs.get('spifu_no', -1.)
-        idx_eo = all_configs[0] == ech_order
-        idx_sno = all_configs[3] == slice_no
-        idx_spifu = all_configs[4] == spifu_no
-        idx = np.logical_and(idx_eo, idx_sno, idx_spifu)
-        configs = []
-        for i in range(0, len(all_configs)):
-            series = np.compress(idx, all_configs[i], axis=0)
-            configs.append(series)
-        return configs
+        filtered_transform_list = []
+        for transform in transform_list:
+            cfg = transform.configuration
+            is_match = True
+            for key in kwargs:
+                is_match = False if cfg[key] != kwargs[key] else is_match
+            if is_match:
+                filtered_transform_list.append(transform)
+        return filtered_transform_list
 
     @staticmethod
     def parse_slice_locations(slice_locs, **kwargs):
@@ -392,52 +389,7 @@ class Util:
         return text
 
     @staticmethod
-    def surface_model(xy, *coefficients):        # a, b, c, d, e, f):
-        """ Fit function for a two variable quadratic surface of the form,
-         f(x, y) = a + b x + c y + d x^2 + e y^2 + f x y
-         for example, x -> prism angle, y -> echelle angle, f(x, y) -> wavelength (or transform coefficient)
-        """
-        a, b, c, d, e, f = coefficients
-        xp, ye = xy
-        return a + b * xp + c * ye + d * xp ** 2 + e * ye ** 2 + f * xp * ye
-
-    @staticmethod
-    def find_wxo_fit(term_values):
-        slice_no = term_values['slice_no']
-        x = np.array(term_values['pri_ang'])
-        y = np.array(term_values['ech_ang'])
-        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ord'])
-        wxo_opt, wxo_cov = curve_fit(Util.surface_model, xdata=(x, y), ydata=list(wxo), p0=[0]*6)
-        wxo_fit = {'slice_no': slice_no, 'wxo_opt': wxo_opt, 'wxo_cov': wxo_cov}
-        return wxo_fit
-
-    @staticmethod
-    def find_slice_fit(term_vals):
-        # slice_no = term_vals['slice_no']
-        x = np.array(term_vals['pri_ang'])
-        y = np.array(term_vals['ech_ang'])
-        matrices = term_vals['matrices']
-        slice_fit = {}
-        mat_tags = ['a', 'b', 'ai', 'bi']
-        n_terms = 6     # No. of terms in surface fit (const, p, e, pp, ee, pe)
-        for i, mat_tag in enumerate(mat_tags):
-            term_array = np.zeros((4, 4, n_terms))
-            slice_fit[mat_tag] = term_array
-            for row in range(0, 4):
-                for col in range(0, 4):
-                    term_list = []
-                    for mat_set in matrices:
-                        mat = mat_set[mat_tag]
-                        term = mat[row, col]
-                        term_list.append(term)
-                    terms = np.array(term_list)
-                    term_opt, term_cov = curve_fit(Util.surface_model, xdata=(x, y), ydata=terms, p0=[0]*6)
-                    term_array[row, col, :] = term_opt
-        # term_fit = {slice_no: mat_fits}
-        return slice_fit
-
-    @staticmethod
-    def get_term_values(transforms, slice_no, debug=False):
+    def get_term_values(transforms, slice_no, spifu_no, debug=False):
         """ Find the transforms which map the centre of slide 13 (alpha = 0.0) onto the EFP.
         """
         phase = 0.                      # Across slice fractional displacement
@@ -446,14 +398,15 @@ class Util:
         efp_x = np.array([0.])
         efp_bs = {'efp_y': efp_y, 'efp_x': efp_x}
         if debug:
-            print("Slice no= {:d}".format(slice_no))
+            print("Slice no= {:d}, Sp. IFU no= {:d}".format(spifu_no))
             fmt = "{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s}"
             print(fmt.format('pri_ang', 'ech_ang', 'efp_x', 'efp_y', 'mfp_x', 'mfp_y', 'w'))
-        term_values = {'slice_no': slice_no, 'pri_ang': [], 'ech_ang': [],
-                       'mfp_y': [], 'w_bs': [], 'ech_ord': [], 'matrices': []}
+        term_values = {'slice_no': slice_no, 'spifu_no': spifu_no,
+                       'pri_ang': [], 'ech_ang': [],
+                       'mfp_y': [], 'w_bs': [], 'ech_orders': [], 'matrices': []}
         for transform in transforms:
-            cfg = transform['configuration']
-            if cfg['slice'] != slice_no:
+            cfg = transform.configuration
+            if (cfg['slice_no'] != slice_no) or (cfg['spifu_no'] != spifu_no):
                 continue
             # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
             w_min, w_max = cfg['w_min'], cfg['w_max']
@@ -474,14 +427,14 @@ class Util:
                                  mfp_x, mfp_y, mfp_w))
             term_values['pri_ang'].append(cfg['pri_ang'])
             term_values['ech_ang'].append(cfg['ech_ang'])
-            term_values['ech_ord'].append(cfg['ech_ord'])
+            term_values['ech_orders'].append(cfg['ech_order'])
             term_values['mfp_y'].append(mfp_y)
             term_values['w_bs'].append(mfp_w)
-            term_values['matrices'].append(transform['matrices'])
+            term_values['matrices'].append(transform.matrices)
         return term_values
 
     @staticmethod
-    def find_optimum_transforms(wave, opticon, svd_transforms):
+    def find_closest_transforms(wave, opticon, svd_transforms):
         """ Find the transforms (one per slice) which position a specific wavelength closest to the centre of the
         detector mosaic.  For the extended mode, this is defined as order 24, slice 13
 
@@ -490,11 +443,11 @@ class Util:
         bs_transform = None
         w_off_min = 1000.*u.nm
         for svd_transform in svd_transforms:
-            config = svd_transform['configuration']
-            slice_no = config['slice']
+            config = svd_transform.configuration
+            slice_no = config['slice_no']
             if slice_no != 13:
                 continue
-            spifu_no = config['spifu']
+            spifu_no = config['spifu_no']
             if spifu_no > 1:        # Catches both nominal and spifu configurations
                 continue
             w_min, w_max = config['w_min']*u.micron, config['w_max']*u.micron
@@ -504,28 +457,28 @@ class Util:
                 w_off_min = w_off
 
         # Step 2, select all transforms with same configuration as the boresight. For spifu, use optimum order
-        bs_cfg = bs_transform['configuration']
+        bs_cfg = bs_transform.configuration
         opt_cfg_id = bs_cfg['cfg_id']
         opt_transforms = {}
         ech_orders = []             # List of unique echelle orders in optimum transforms
         for svd_transform in svd_transforms:
-            cfg = svd_transform['configuration']
+            cfg = svd_transform.configuration
             if cfg['cfg_id'] != opt_cfg_id:
                 continue
-            ech_ord = cfg['ech_ord']
+            ech_ord = cfg['ech_order']
             # Option to only use specific orders for specific spifu_slices
             spec_order = False
             if spec_order:
                 if opticon == Globals.extended:
-                    spifu_no = cfg['spifu']
+                    spifu_no = cfg['spifu_no']
                     spifu_slice = {23: (1, 4), 24: (2, 5), 25: (3, 6)}
                     valid_spifu_nos = spifu_slice[ech_ord]
                     if spifu_no not in valid_spifu_nos:
                         continue
             if ech_ord not in ech_orders:
                 ech_orders.append(ech_ord)
-            slice_no = cfg['slice']
-            spifu_no = cfg['spifu']
+            slice_no = cfg['slice_no']
+            spifu_no = cfg['spifu_no']
             slice_id = Globals.slice_id_fmt.format(opticon, opt_cfg_id, ech_ord, slice_no, spifu_no)
             # print('Adding slice_id= ', slice_id)
             opt_transforms[slice_id] = svd_transform
@@ -603,7 +556,8 @@ class Util:
     @staticmethod
     def dfp_to_mfp(affines, dfp_points):
         """ Transform points from detector to the mosaic focal plane.  Note that all points are assumed
-        to come from the same detector (as specified in the first point). """
+        to come from the same detector (as specified in the first point).
+        """
         det_nos = dfp_points['det_nos']
         dfp_x = dfp_points['dfp_x']
         dfp_y = dfp_points['dfp_y']
@@ -630,14 +584,13 @@ class Util:
         Note that the transform will normally have been verified as non-vignetting
         for this point in the EFP.
         """
-        config = transform['configuration']
-        ech_ord = config['ech_ord']
+        config, matrices = transform.configuration, transform.matrices
+        ech_ord = config['ech_order']
 
         alphas, efp_y, efp_w = efp_points['efp_x'], efp_points['efp_y'], efp_points['efp_w']
         ech_orders = np.full(len(efp_w), ech_ord)
         phases = Util.waves_to_phases(efp_w, ech_orders)
 
-        matrices = transform['matrices']
         a, b = matrices['a'], matrices['b']
         mfp_x, mfp_y = Util.apply_svd_distortion(phases, alphas, a, b)
         oob = Util.out_of_bounds('mfp', mfp_x, mfp_y)       # Check if out of bounds
@@ -658,12 +611,12 @@ class Util:
         slice_phase: Intra-slice position is degenerate with wavelength. It can be passed explicitly here, with
                      the default being to assume the centre of the slice in the EFP (slice_phase = 0.).
         """
-        config = transform['configuration']
-        ech_ord = config['ech_ord']
-        slice_no = config['slice']
+        config = transform.configuration
+        ech_ord = config['ech_order']
+        slice_no = config['slice_no']
         mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
 
-        matrices = transform['matrices']
+        matrices = transform.matrices
         ai, bi = matrices['ai'], matrices['bi']
         phases, alphas = Util.apply_svd_distortion(mfp_x, mfp_y, ai, bi)
 
@@ -675,29 +628,6 @@ class Util:
 
         efp_points = {'efp_x': alphas, 'efp_y': efp_y, 'efp_w': waves}
         return efp_points
-
-    @staticmethod
-    def is_det_hit(det_x, det_y):
-        """ Check if a detector x, y coordinate (mm) falls on a light sensitive pixel.  Will be supreceded when
-        we have a map from det_x, det_y to pix_col, pix_row
-        """
-        det_lims = Globals.det_lims
-        for det_name in det_lims:
-            x_lim, y_lim = det_lims[det_name]
-            is_x_hit = x_lim[0] <= det_x < x_lim[1]
-            is_y_hit = y_lim[0] <= det_y < y_lim[1]
-            is_hit = is_x_hit and is_y_hit
-            if is_hit:
-                return  is_hit, det_name
-        return False, None
-
-    @staticmethod
-    def fit_residual(x_ref, x_in, y_in):
-        _, xy_sort = Util.sort(x_ref, (x_in, y_in))
-        guess_oc = [0.0, 0.0, 0.0]
-        res_lsq = least_squares(Util.offset_error_function, guess_oc, args=xy_sort)
-        offset_correction = res_lsq.x
-        return offset_correction
 
     @staticmethod
     def sort(ref, unsort):
@@ -728,10 +658,9 @@ class Util:
 
     @staticmethod
     def print_poly_transform(transform, **kwargs):
-        mat_names = ["A", "B", "AI", "BI"]
         label = kwargs.get('label', '---')
         print(label)
-        for matrix, mat_name in zip(transform, mat_names):
+        for matrix, mat_name in zip(transform, Globals.matrix_names):
             n_terms = matrix.shape[0]
             print("Matrix {:s}".format(mat_name))
             for r in range(0, n_terms):
@@ -740,31 +669,6 @@ class Util:
                     token = "{:10.3e}".format(matrix[r, c])
                     line = line + token
                 print(line)
-        return
-
-    @staticmethod
-    def find_fwhm_lins(x, ys):
-        """ Find fwhm for """
-        ys = np.atleast_2d(ys)
-        nr, nc = ys.shape
-        fwhm_lin_list = []
-        for r in range(0, nr):
-            y = ys[r, :]
-            xl, xr, yh = Util.find_fwhm_lin(x, y)
-            fwhm_lin_list.append(xr - xl)
-        fwhms_lin = np.array(fwhm_lin_list)
-        fwhm_lin = np.mean(fwhms_lin)
-        fwhm_lin_err = np.std(fwhms_lin) if nc > 1 else 0.
-        return fwhm_lin, fwhm_lin_err
-
-    @staticmethod
-    def print_minmax(obs_list):
-        print("{:>10s}{:>10s}{:>10s}".format('Obs No.', 'min', 'max'))
-        for i, obs in enumerate(obs_list):
-            image, param = obs
-            amin, amax = np.amin(image), np.amax(image)
-            fmt = "{:>10d}{:10.2e}{:10.2e}"
-            print(fmt.format(i, amin, amax))
         return
 
     @staticmethod
@@ -840,91 +744,6 @@ class Util:
         return amat, bmat
 
     @staticmethod
-    def find_phase_bounds(det_bounds, tf_list):
-        x, y = det_bounds
-        for tf in tf_list:
-            ech_order, slice_no, spifu_no, a, b, ai, bi = tf
-            u, v = Util.apply_distortion(x, y, ai, bi)
-        return u, v
-
-    @staticmethod
-    def make_rgb_gradient(vals):
-        n_pts = len(vals)
-        rgb = np.zeros((n_pts, 3))
-
-        w_min = np.amin(vals)
-        w_max = np.amax(vals)
-        r_min, r_max = 0., 1.
-        b_min, b_max = 1., 0.
-
-        f = (vals - w_min) / (w_max - w_min)
-        rgb[:, 0] = r_min + f * (r_max - r_min)
-        rgb[:, 1] = np.sin(f * math.pi)
-        rgb[:, 2] = b_min + f * (b_max - b_min)
-        return rgb
-
-    @staticmethod
-    def compare_basis_with_fits(slice_no, trace, svd_transform, wxo_fit, term_fits):
-
-        slice_idx = slice_no - 1
-        svd_cfg = svd_transform[slice_idx]['configuration']
-        svd_slice_no = svd_cfg['slice']
-        svd_wave = 0.5 * (svd_cfg['w_min'] + svd_cfg['w_max'])
-
-        term_fit = term_fits[svd_slice_no]
-        fit_transform = Util.make_fit_transform(svd_cfg, term_fit)
-
-        # Make the polynomial fit transform analogue of the svd transform
-        w_min, w_max = svd_cfg['w_min'] * u.micron, svd_cfg['w_max'] * u.micron
-        yc = Util.slice_to_efp_y(svd_slice_no, 0.).value    # Slice y (beta) coordinate in EFP
-
-        efp_x = trace.get('efp_x', slice_no=slice_no)
-        efp_y = trace.get('efp_y', slice_no=slice_no)
-        efp_w = trace.get('wavelength', slice_no=slice_no)
-        # efp_y = np.array([yc, yc])
-        # efp_x = np.array([0., 0.])                          # Slice x (alpha) bounds in EFP, map to dfp_y
-        # efp_w = np.array([w_min.value, w_max.value]) * u.micron
-        efp_points = {'efp_y': efp_y, 'efp_x': efp_x, 'efp_w': efp_w}  # Centre of slice for detector
-        mfp_points_zemax = {'mfp_x': trace.get('det_x', slice_no=slice_no),
-                            'mfp_y': trace.get('det_y', slice_no=slice_no)}
-        mfp_points_svd = Util.efp_to_mfp(svd_transform[slice_idx], efp_points)
-        mfp_points_fit = Util.efp_to_mfp(fit_transform, efp_points)
-        return mfp_points_zemax, mfp_points_svd[0], mfp_points_fit[0]
-
-    @staticmethod
-    def make_fit_transform(cfg, term_fit):
-
-        pa, ea, eo = cfg['pri_ang'], cfg['ech_ang'], cfg['ech_ord']
-        matrices = {}
-        for mat_name in Globals.matrix_names:
-            poly_matrix = term_fit[mat_name]
-            matrix = Util.make_fit_matrix(poly_matrix, pa, ea, eo)
-            matrices[mat_name] = matrix
-
-        transform = {'configuration': cfg, 'matrices': matrices}
-        return transform
-
-    @staticmethod
-    def make_fit_matrix(poly_matrix, pa, ea, eo):
-        """ Create a transform matrix at any prism and echelle angle with terms provided using the
-        2nd order 2D polynomial fit function.
-
-        :param opt_mat:
-        :param pa:
-        :param ea:
-        :param eo:
-        :return:
-        """
-        svd_order = Globals.svd_order
-        svd_shape = svd_order, svd_order
-        matrix = np.zeros(svd_shape)
-        for i in range(0, svd_order):
-            for j in range(0, svd_order):
-                fit_terms = list(poly_matrix[i, j])
-                matrix[i, j] = Util.surface_model((pa, ea), *fit_terms)
-        return matrix
-
-    @staticmethod
     def test_out_and_back(filer, opticon, date_stamp):
         print('lms_distort - Evaluating transforms')
 
@@ -936,7 +755,7 @@ class Util:
         # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
         affines = filer.read_fits_affine_transform(date_stamp)
         svd_transforms = filer.read_svd_transforms()
-        opt_transforms = Util.find_optimum_transforms(efp_w_cen, opticon, svd_transforms)
+        opt_transforms = Util.find_closest_transforms(efp_w_cen, opticon, svd_transforms)
         opt_transform = opt_transforms[tgt_slice_no]
 
         # Check out and back for the wavelength min, max and centre of the spectrum.

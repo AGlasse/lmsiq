@@ -10,13 +10,12 @@ from astropy import units as u
 
 
 class Globals:
-    # as_deg = 3600.
+    # Constants
     mas_as = 1000.
     deg_rad = 180. / math.pi
-    # mas_deg = as_deg * mas_as
     rad_per_mas = 4.85E-9
-    sterad_per_mas2 =rad_per_mas * rad_per_mas
-    elt_area = 1350.*u.m*u.m
+    sterad_per_mas2 = rad_per_mas * rad_per_mas
+    elt_area = 1350. * u.m * u.m
 
     pix_spec_res_el = 2.5       # Pixels per spectral resolution element
 
@@ -26,21 +25,26 @@ class Globals:
     # Simulators
     scopesim, toysim = 'scopesim', 'toysim'
 
+    # Optical configurations
+    nominal = 'nominal'
+    extended = 'spifu'
+
     # Transform parameters
     svd_order = 4
     svd_shape = svd_order, svd_order
     matrix_names = ['a', 'b', 'ai', 'bi']
     n_svd_matrices = len(matrix_names)
-    svd_residual_fit_order = 3
     svd_cutoff = 1.0e-7                                     # SVD eigenvalues below this value set to zero.
     n_svd_fit_terms = 6
+    # Order of polynomial fit to wave = f(pri_ang, ech_ang) and tform_matrix_term = g(pri_ang, ech_ang)
+    surface_fit_order = 4  # Matrix order for polynomial surface fit (3 or 4)
 
+    surface_fit_order = 4         # Typically set to 3 or 4 in lmsdist.py
+    surface_fit_n_coeffs = 10     # Non-zero terms in upper triangular matrix of order 'surface_fit_order'
+    wpa_fit_order = {nominal: 6, extended: 3}
 
     zemax_configuration = None
     det_pix_size, im_pix_size = None, None
-    # Optical configurations
-    nominal = 'nominal'
-    extended = 'spifu'
     optical_configurations = [nominal, extended]
     slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
     spifu_no_ranges = {nominal: range(0, 1), extended: range(1, 7)}

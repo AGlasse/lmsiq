@@ -1,109 +1,148 @@
 import pickle
 from astropy.io import fits
-from astropy.io.fits import Card, HDUList
-from lms_globals import Globals
+from astropy.io.fits import Card
 import numpy as np
 
 
 class Transform:
 
-    def __init__(self):
+    config_common_kws = ['opticon', 'cfg_id', 'pri_ang', 'ech_ang',
+                         'n_mats', 'mat_order', 'w_min', 'w_max']
+    slice_specific_kws = ['slice_no', 'spifu_no', 'ech_order']
+    kw_comments = {'opticon': 'LMS wavelength coverage mode',
+                   'cfg_id': 'LMS mechanism configuration identifier',
+                   'pri_ang': 'Prism rotation angle / deg.',
+                   'ech_ang': 'Echelle rotation angle / deg.',
+                   'ech_order': 'Echelle diffraction order number',
+                   'n_mats': 'No. of distortion matrices (4)',
+                   'mat_order': 'Matrix order (4x4)',
+                   'slice_no': 'Spatial slice number',
+                   'spifu_no': 'Spectral IFU slice no. =0 if not selected',
+                   'w_min': 'Minimum slice wavelength (micron)',
+                   'w_max': 'Maximum slice wavelength (micron)'
+                   }
+
+    def __init__(self, **kwargs):
         self.configuration = {}
-        self.matrices = {}
+        for kw in Transform.config_common_kws:
+            self.configuration[kw] = None
+        for kw in Transform.slice_specific_kws:
+            self.configuration[kw] = None
+        self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
+        if 'cfg' in kwargs:         # Set any passed parameters.
+            init_cfg = kwargs.get('cfg', {})
+            for key in init_cfg:
+                self.configuration[key] = init_cfg[key]
+        if 'matrices' in kwargs:
+            self.matrices = kwargs.get('matrices')
         return
 
-    def write_fits(self, trace):
-        # Create data tables holding transforms for all slices
-        par = trace.parameter
-        ea = par['Echelle angle']
-        pa = par['Prism angle']
-        opticon = 'Extended' if trace.is_spifu else 'Nominal'
-        n_mats = Globals.n_mats_transform
-        n_mat_terms = trace.n_mat_terms
-
-        primary_cards = [Card('OPTICON', opticon, 'Optical configuration'),
-                         Card('ECH_ANG', ea, 'Echelle angle / deg'),
-                         Card('PRI_ANG', pa, 'Prism angle / deg'),
-                         Card('N_MATS', n_mats, 'A, B, AI, BI transform matrices'),
-                         Card('N_TERMS', n_mat_terms, 'Transform matrix dimensions'),
-                         Card('W_MIN', trace.wmin, 'Short wavelength limit / micron'),
-                         Card('W_MAX', trace.wmax, 'Long wavelength limit / micron')
-                         ]
-        trace_hdr = fits.Header(primary_cards)        # {'ECH_ANG': ea}
+    def make_hdu_primary(self):
+        cfg = self.configuration
+        cards = []
+        for key in cfg:
+            if key in Transform.slice_specific_kws:  # Skip slice specific key words
+                continue
+            card = Card(key.upper(), cfg[key], Transform.kw_comments[key])
+            cards.append(card)
+        trace_hdr = fits.Header(cards)
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
-        hdu_list = HDUList([primary_hdu])
-        # Create fits file with primaryHDU only
-        ea_tag = self._make_fits_tag(ea)
-        pa_tag = self._make_fits_tag(pa)
-        fmt = "lms_dist_ea_{:s}_pa_{:s}"
-        fits_name = fmt.format(ea_tag, pa_tag)
-        fits_path = self.tf_dir + fits_name + '.fits'
-        for slice_object in trace.slice:
-            ech_order, slice_no, spifu_no = slice_object[0]
-            cards = [Card('ECH_ORD', ech_order, 'Echelle diffraction order'),
-                     Card('SLICE', slice_no, 'Spatial slice number (1 <= slice_no <= 28)'),
-                     Card('SPIFU', spifu_no, 'Spectral IFU slice no.')]
+        return primary_hdu
 
-            a, b, ai, bi = slice_object[1]
-            col_a = fits.Column(name='a', array=a.flatten(), format='E')
-            col_b = fits.Column(name='b', array=b.flatten(), format='E')
-            col_ai = fits.Column(name='ai', array=ai.flatten(), format='E')
-            col_bi = fits.Column(name='bi', array=bi.flatten(), format='E')
+    def make_hdu_ext(self):
+        mats = self.matrices
+        cfg = self.configuration
+        a, b, ai, bi = mats['a'], mats['b'], mats['ai'], mats['bi']
+        col_a = fits.Column(name='A', array=a.flatten(), format='E')
+        col_b = fits.Column(name='B', array=b.flatten(), format='E')
+        col_ai = fits.Column(name='AI', array=ai.flatten(), format='E')
+        col_bi = fits.Column(name='BI', array=bi.flatten(), format='E')
 
-            xpoly_corr, ypoly_corr = slice_object[2]            # x and y polynomial correction factors
-            cards.append(Card('XP1', xpoly_corr[0], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('XP3', xpoly_corr[1], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('XP5', xpoly_corr[2], 'dx = x^1 XP1 + x^3 XP3 + x^5 XP5'))
-            cards.append(Card('YP1', ypoly_corr[0], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
-            cards.append(Card('YP3', ypoly_corr[1], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
-            cards.append(Card('YP5', ypoly_corr[2], 'dy = x^1 YP1 + x^3 YP3 + x^5 YP5'))
+        cards = []
+        for key in Transform.slice_specific_kws:
+            card = Card(key.upper(), cfg[key], self.kw_comments[key])
+            cards.append(card)
+        hdr = fits.Header(cards)
+        hdu_name = "SLICE_{:d}_{:d}".format(cfg['slice_no'], cfg['spifu_no'])
+        bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi],
+                                                     header=hdr, name=hdu_name)
+        return bintable_hdu
 
-            hdr = fits.Header(cards)
-            bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi], header=hdr)
-            hdu_list.append(bintable_hdu)
+    @staticmethod
+    def decode_primary_hdr(primary_hdr):
+        pri_cfg = {}
+        for key in Transform.config_common_kws:
+            pri_cfg[key] = primary_hdr[key]
+        return pri_cfg
 
-        hdu_list.writeto(fits_path, overwrite=True)
-        return fits_name
+    def ingest_extension_hdr(self, hdr):
+        for key in Transform.slice_specific_kws:
+            self.configuration[key] = hdr[key]
+        return
 
-    def read_fits(self, fits_name):
-        """ Read fits file into a 'trace' object, which
+    def read_matrices(self, table):
+        """ Read the transform matrices from a fits hdu table object.
         """
-        fits_path = self.tf_dir + fits_name
-        hdu_list = fits.open(fits_path, mode='readonly')
-        primary_hdr = hdu_list[0].header
-        opticon = primary_hdr['OPTICON']
-        ea = primary_hdr['ECH_ANG']
-        pa = primary_hdr['PRI_ANG']
-        n_mats = primary_hdr['N_MATS']
-        n_mat_terms = primary_hdr['N_TERMS']
-        w_min = primary_hdr['W_MIN']
-        w_max = primary_hdr['W_MAX']
+        mat_order = self.configuration['mat_order']
+        mat_shape = mat_order, mat_order
+        for mat_name in self.matrices:
+            col_data = table[mat_name.upper()]
+            matrix = np.reshape(col_data, mat_shape)
+            self.matrices[mat_name] = matrix
+        return
 
-        base_config = {'opticon': opticon, 'ech_ang': ea, 'pri_ang': pa,
-                       'n_mats': n_mats, 'n_mat_terms': n_mat_terms,
-                       'w_min': w_min, 'w_max': w_max}
-        mat_shape = n_mat_terms, n_mat_terms
+        #
+        # a_col, b_col = table.field('a'), table.field('b')
+        # ai_col, bi_col = table.field('ai'), table.field('bi')
+        # a = np.reshape(a_col, mat_shape)
+        # b = np.reshape(b_col, mat_shape)
+        # ai = np.reshape(ai_col, mat_shape)
+        # bi = np.reshape(bi_col, mat_shape)
+        # matrices = {'a': a, 'b': b, 'ai': ai, 'bi': bi}
+        # transform = {'configuration': config, 'matrices': matrices}
 
-        transform_list = []
-        tr_hdr_keys = ['ECH_ORD', 'SLICE', 'SPIFU', 'XP1', 'XP3', 'XP5', 'YP1', 'YP3', 'YP5']
-        for hdu in hdu_list[1:]:
-            table, hdr = hdu.data, hdu.header
-            config = base_config.copy()
-            for key in tr_hdr_keys:
-                config[key.lower()] = hdr[key]
+        # transform_list.append(transform)
+        # hdu_list.close()
+        # return transform_list
 
-            a_col, b_col = table.field('a'), table.field('b')
-            ai_col, bi_col = table.field('ai'), table.field('bi')
-            a = np.reshape(a_col, mat_shape)
-            b = np.reshape(b_col, mat_shape)
-            ai = np.reshape(ai_col, mat_shape)
-            bi = np.reshape(bi_col, mat_shape)
-            matrices = {'a': a, 'b': b, 'ai': ai, 'bi': bi}
-            transform = {'configuration': config, 'matrices': matrices}
-
-            transform_list.append(transform)
-        hdu_list.close()
-        return transform_list
+    # def read_fits(self, fits_name):
+    #     """ Read fits file into a list of 'transform' objects, one per spatial/spectral slice combination.
+    #     """
+    #     fits_path = self.tf_dir + fits_name
+    #     hdu_list = fits.open(fits_path, mode='readonly')
+    #     primary_hdr = hdu_list[0].header
+    #     opticon = primary_hdr['OPTICON']
+    #     ea = primary_hdr['ECH_ANG']
+    #     pa = primary_hdr['PRI_ANG']
+    #     n_mats = primary_hdr['N_MATS']
+    #     n_mat_terms = primary_hdr['N_TERMS']
+    #     w_min = primary_hdr['W_MIN']
+    #     w_max = primary_hdr['W_MAX']
+    #
+    #     base_config = {'opticon': opticon, 'ech_ang': ea, 'pri_ang': pa,
+    #                    'n_mats': n_mats, 'n_mat_terms': n_mat_terms,
+    #                    'w_min': w_min, 'w_max': w_max}
+    #     mat_shape = n_mat_terms, n_mat_terms
+    #
+    #     transform_list = []
+    #     tr_hdr_keys = ['ECH_ORD', 'SLICE', 'SPIFU', 'XP1', 'XP3', 'XP5', 'YP1', 'YP3', 'YP5']
+    #     for hdu in hdu_list[1:]:
+    #         table, hdr = hdu.data, hdu.header
+    #         config = base_config.copy()
+    #         for key in tr_hdr_keys:
+    #             config[key.lower()] = hdr[key]
+    #
+    #         a_col, b_col = table.field('a'), table.field('b')
+    #         ai_col, bi_col = table.field('ai'), table.field('bi')
+    #         a = np.reshape(a_col, mat_shape)
+    #         b = np.reshape(b_col, mat_shape)
+    #         ai = np.reshape(ai_col, mat_shape)
+    #         bi = np.reshape(bi_col, mat_shape)
+    #         matrices = {'a': a, 'b': b, 'ai': ai, 'bi': bi}
+    #         transform = {'configuration': config, 'matrices': matrices}
+    #         transform_list.append(transform)
+    #     hdu_list.close()
+    #     return transform_list
 
     def _make_fits_tag(self, val):
         val_str = "{:5.3f}".format(val)

@@ -1,8 +1,15 @@
 #!/usr/bin/env python
-"""
+""" Program to generate transform which map coordinates between the LMS entrance focal plane
+EFP_w, wavelength,
+EFP_x, along slice position (mm)
+EFP_y, across slice position,
+and detector focal plane
+DET_NO, detector number (slices 1 to 14 fall on detectors 3 and 4, 15 to 28 on dets 1 and 2, and
+                         1,2 image the short wavelengths)
+DFP_x, along row position
+DFP_y, along row position
 """
 import numpy as np
-from astropy import units as u
 from os import listdir
 from lms_filer import Filer
 from lmsdist_util import Util
@@ -10,6 +17,7 @@ from lmsdist_plot import Plot
 from lmsdist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
+from lmsdist_polyfit import PolyFit
 
 print('lmsdist, distortion model - Starting')
 
@@ -23,21 +31,23 @@ nom_config = (analysis_type, nominal, nom_date_stamp,
               'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
               coord_in, coord_out)
 
-spifu = Globals.extended
-spifu_date_stamp = '20250110'
-spifu_config = (analysis_type, spifu, spifu_date_stamp,
+extended = Globals.extended
+ext_date_stamp = '20250110'
+ext_config = (analysis_type, extended, ext_date_stamp,
                 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                coord_in, coord_out)
+              coord_in, coord_out)
 
-model_configurations = {nominal: nom_config, spifu: spifu_config}
+model_configurations = {nominal: nom_config, extended: ext_config}
 
-""" SET MODEL CONFIGURATION HERE 'nominal' or 'spifu' """
-opticon = nominal
+""" SET MODEL CONFIGURATION HERE """
+opticon = extended                       # 'nominal' or 'spifu'
 
+# wpa_fit_order = Globals.wpa_fit_order_dict[opticon]  # Order of 1D polynomial fit, wavelength -> prism angle
 model_config = model_configurations[opticon]
-filer = Filer(model_config)
 
 _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
+filer = Filer(model_config)
+polyfit = PolyFit(opticon)
 
 print("- optical path  = {:s}".format(opticon))
 print("- input coords  = {:s}, {:s}".format(coord_in[0], coord_in[1]))
@@ -48,7 +58,6 @@ zem_folder = filer.data_folder
 
 detector = Detector()
 
-mat_names = ['A', 'B', 'AI', 'BI']
 focal_planes = {''}
 
 util = Util()
@@ -62,11 +71,11 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-suppress_plots = True                      # f = Plot first trace
-generate_transforms = False                 # for all Zemax ray trace files and write to lms_dist_buffer.txt
+suppress_plots = True                       # f = Plot first trace
+generate_transforms = False
 if generate_transforms:
     print()
-    print("Generating distortion transforms")
+    print("Generating distortion transforms (and prism angle fit parameters)")
     fmt = "- reading Zemax ray trace data from folder {:s}"
     print(fmt.format(zem_folder))
 
@@ -79,10 +88,11 @@ if generate_transforms:
     traces = []
     a_rms_list = []
     debug_first = True
-    for file_name in file_list:
+
+    for cfg_id, file_name in enumerate(file_list):
         print(file_name)
         zf_file = zem_folder + file_name
-        trace = Trace(zf_file, model_config, silent=True)
+        trace = Trace(zf_file, model_config, cfg_id=cfg_id, silent=True)
         trace.create_transforms(debug=debug_first)
         debug_first = False
         traces.append(trace)
@@ -92,7 +102,7 @@ if generate_transforms:
             trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
             trace.plot_focal_planes()
             suppress_plots = False
-        fits_name = filer.write_svd_transform(trace)
+        fits_name = filer.write_svd_transforms(trace)
         trace.transform_fits_name = fits_name
         a_rms_list.append(trace.a_rms)
 
@@ -104,55 +114,84 @@ if generate_transforms:
     filer.write_pickle(filer.trace_file, traces)
 
 suppress_plots = False
-plot_wcal = False
-if plot_wcal:
+calibrate_wavelength = True
+if calibrate_wavelength:
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
-    traces = Filer.read_pickle(filer.trace_file)
     wcal = {}
+    traces = Filer.read_pickle(filer.trace_file)
     plot.series('dispersion', traces)
     plot.series('coverage', traces[0:1])
     plot.series('coverage', traces)
 
-fit_transforms = False
+fit_transforms = True
 if fit_transforms:
-    #  Wavelength calibration -
-    # Create an interpolation object to map a wavelength to echelle and prism angle settings.
-    # This is done by using the transforms to derive fits of the form
-    #   theta_prism = f(wave),   for theta_echelle = 0. deg
-    #   theta_echelle = g(wave, order)
-    # Read in transforms and plot term variations with prism and echelle angles.
-    # test_wave = 4700 * u.nm
+    # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism angle
+    # is provided as a function of wavelength, reflecting the requirement that the target wavelength must be directed
+    # through the slit at the pre-disperser output (this is calculated for spatial slice number 13.
+    # For the extended mode, the fit directs spectral slice number 3 through the slit.
+    _, opticon, _, _, _, _ = filer.model_configuration
+    opt_tag = 'nom' if opticon == nominal else 'ext'
+    svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
 
-    affines = filer.read_fits_affine_transform(date_stamp)
-    svd_transforms = filer.read_svd_transforms(inc_tags=['efp_mfp_nom'], exc_tags=['fit_parameters'])
-    slice_fits = {}
-    wxo_fit = None
-    for slice_no in range(1, 29):
-        term_values = Util.get_term_values(svd_transforms, slice_no)
-        if slice_no == 13:
-            wxo_fit = Util.find_wxo_fit(term_values)
-            wxo_fit = Util.find_wxo_fit(term_values)
-            plot.wxo_fit(wxo_fit, term_values, plot_residuals=False)
-            plot.wxo_fit(wxo_fit, term_values, plot_residuals=True)
-        slice_fit = Util.find_slice_fit(term_values)
-        f_residuals = plot.transform_fit(slice_fit, term_values, do_plots=False)
-        f_residuals = plot.transform_fit(slice_fit, term_values, do_plots=False, plot_residuals=True)
-        slice_fits[slice_no] = slice_fit
-    filer.write_fit_parameters(wxo_fit, slice_fits)
+    # Generate and save a polynomial fit for the function prism_angle(wavelength).
+    traces = Filer.read_pickle(filer.trace_file)
+    wave_boresights, prism_angles = [], []   # Wavelength which passes through Int Foc Plane origin.
+    for trace in traces:
+        wave_bs, pri_ang = trace.get_ifp_boresight(opticon)
+        wave_boresights.append(wave_bs)
+        prism_angles.append(pri_ang)
+    wpa_fit  = polyfit.create_pa_wave_fit(opticon, wave_boresights, prism_angles)
+    wxo_fit, wxo_header, term_fits = polyfit.create_polynomial_surface_fits(opticon, svd_transforms)
+    filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, term_fits)
+    plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles)
 
-# Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the the projected coordinates
-# using 1) the specific at the Zemax location and 2) the model fit transforms (generated for the prism and echelle angles)
+# Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
+# coordinates using 1) the specific at the Zemax location and 2) the model fit transforms (generated for the prism
+# and echelle angles)
 evaluate_transforms = True
 if evaluate_transforms:
     traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
+    _, opticon, date_stamp, _, _, _ = filer.model_configuration
+    inc_tags = ["efp_mfp_{:s}".format(opticon[0:3])]
+    svd_transforms = filer.read_svd_transforms(inc_tags=inc_tags, exc_tags=['fit_parameters'])
     for trace in traces:
         inc_tags = [trace.transform_fits_name]
-        svd_transform = filer.read_svd_transforms(inc_tags=inc_tags)[0]
-        wxo_fit, term_fits = filer.read_fit_parameters()
-        slice_no = 13
-        mfp_projections = Util.compare_basis_with_fits(slice_no, trace, svd_transform, wxo_fit, term_fits)
-        plot.mfp_projections(mfp_projections)
+        trace_transforms = filer.read_svd_transforms(inc_tags=inc_tags)
+        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
+        mfp_projections = {}
+        slice_nos = [28, 13, 1] if opticon == nominal else [13]
+        spifu_nos = [0] if opticon == nominal else [1, 3, 6]
+        for slice_no in slice_nos:
+            mfp_projections[slice_no] = {}
+            for spifu_no in spifu_nos:
+                mfp_projections[slice_no][spifu_no] = {}
+                slice_transform = Util.filter_transform_list(trace_transforms,
+                                                             slice_no=slice_no, spifu_no=spifu_no)[0]
+                mfp_projection = PolyFit.make_mfp_projection(slice_no, spifu_no, trace, slice_transform,
+                                                             wxo_fit, term_fits)
+                mfp_projections[slice_no][spifu_no] = mfp_projection
+        do_plot = False
+        if do_plot:
+            plot.mfp_projections(mfp_projections, trace)
+
+test_transform_fit = True
+if test_transform_fit:
+    print_header = True
+    test_waves = np.linspace(2.7, 5.4, 28, endpoint=True)
+    if opticon == Globals.extended:
+        test_waves = np.linspace(4.4, 4.6, 3, endpoint=True)
+    for test_wave in np.linspace(2.7, 5.4, 28, endpoint=True):  # Test wavelength does not match an SVD transform
+        _, opticon, date_stamp, _, _, _ = filer.model_configuration
+        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
+        PolyFit.wave_to_config(test_wave, wpa_fit, wxo_fit, debug=False, select='min_ech_ang', print_header=print_header)
+        print_header = False
+    print_header = True
+    for test_wave in np.linspace(2.7, 2.9, 6, endpoint=True):  # Test wavelength does not match an SVD transform
+        _, opticon, date_stamp, _, _, _ = filer.model_configuration
+        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
+        PolyFit.wave_to_config(test_wave, wpa_fit, wxo_fit, debug=False, select='min_ech_ang', print_header=print_header)
+        print_header = False
 
 print()
 print('lms_distort - Done')

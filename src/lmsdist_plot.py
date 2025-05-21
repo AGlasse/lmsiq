@@ -4,13 +4,10 @@
 @author: achg
 """
 import math
-
 import numpy as np
-from numpy.polynomial import Polynomial
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from lms_globals import Globals
-from lmsdist_util import Util
 
 
 class Plot:
@@ -19,7 +16,7 @@ class Plot:
         return
 
     @staticmethod
-    def set_plot_area(title, **kwargs):
+    def set_plot_area(**kwargs):
         figsize = kwargs.get('figsize', [9, 6])
         xlim = kwargs.get('xlim', None)            # Common limits for all plots
         ylim = kwargs.get('ylim', None)            # Common limits for all plots
@@ -39,7 +36,6 @@ class Plot:
                                     sharex=sharex, sharey=sharey,
                                     squeeze=False)
         fig.patch.set_facecolor('white')
-        fig.suptitle(title)
 
         for i in range(0, nrows):
             for j in range(0, ncols):
@@ -56,7 +52,7 @@ class Plot:
             rps = np.atleast_2d(remplots)
             for i in range(0, len(rps)):
                 ax_list[rps[i,0], rps[i, 1]].remove()
-        return ax_list
+        return fig, ax_list
 
     def efficiency_v_wavelength(self, weoas, **kwargs):
 
@@ -108,64 +104,135 @@ class Plot:
         return colours
 
     @staticmethod
-    def wxo_fit(wxo_fit, term_values, plot_residuals=False):
+    def make_rgb_gradient(vals):
+        n_pts = len(vals)
+        rgb = np.zeros((n_pts, 3))
+
+        w_min = np.amin(vals)
+        w_max = np.amax(vals)
+        r_min, r_max = 0., 1.
+        b_min, b_max = 1., 0.
+
+        f = (vals - w_min) / (w_max - w_min)
+        rgb[:, 0] = r_min + f * (r_max - r_min)
+        rgb[:, 1] = np.sin(f * math.pi)
+        rgb[:, 2] = b_min + f * (b_max - b_min)
+        return rgb
+
+    @staticmethod
+    def wave_v_prism_angle(wpa_fit, wpa_model, wave_boresights, prism_angles):
+        """ Plot fit of prism angle to wavelength compared with the trace data it is derived from.
+        """
+        x, y = wave_boresights, prism_angles
+        fig, [ax1, ax2] = plt.subplots(figsize=(10, 8), ncols=1, nrows=2,
+                                       sharex=True)
+        ylabel = 'Prism rotation angle / deg'
+        xlabel = "Wavelength / $\mu$m"
+
+        coeffs = wpa_fit['wpa_opt']
+        y_fit = wpa_model(x, *coeffs)
+        form_text = ", $\phi_{prism} = $"
+        lam_text = ''
+        for i, coeff in enumerate(coeffs):
+            if i > 1:
+                lam_text = r'$\lambda^{' + str(i) + r'}$'
+            form_text += "{:+6.3f}{:s}".format(coeff, lam_text) # + plus_text
+            lam_text = '$\lambda$'
+
+        title1 = 'Prism dispersion data and best fit' + form_text
+        ax1.set_title(title1, loc='left')
+        ax1.set_ylabel(ylabel)
+        ax1.plot(x, y, color='blue', clip_on=True,
+                 fillstyle='full', marker='+', ms=5., linestyle='None')
+        ax1.plot(x, y_fit, color='black', clip_on=True, lw=1., linestyle='solid')
+        ax1.grid(True)
+
+        ax2.set_title('Residual (data - fit)', loc='left')
+        ax2.set_xlabel(xlabel)
+        ax2.set_ylabel(ylabel)
+        y_residual = y - y_fit
+        ax2.plot(x, y_residual, color='blue', clip_on=True,
+                 fillstyle='full', marker='+', ms=5., linestyle='None')
+
+        ax2.grid(True)
+        plt.show()
+        return
+
+    @staticmethod
+    def wxo_fit(wxo_fit, term_values, surface_model, plot_residuals=False):
         """ Plot the polynomial surface fit to wavelength x echeller order as a function of echelle and
         prism rotation angle.
         """
         x = np.array(term_values['pri_ang'])
         y = np.array(term_values['ech_ang'])
-        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ord'])
+        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_orders'])
         wxo_opt = wxo_fit['wxo_opt']       # Fit parameters
-
-        wxo_model = Util.surface_model((x, y), *wxo_opt)
+        wxo_model = surface_model((x, y), *wxo_opt)
         f_resid = (wxo - wxo_model) * 1000  # Fractional residual (for fit points)
+        f_res_std = np.std(f_resid)
+        print("Residual stdev = {:7.3f} nm".format(f_res_std))
+        z = wxo
+        fig, ax = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(10, 8),
+                               ncols=1, nrows=1,
+                               sharex=True, sharey=True)
 
-        z = f_resid if plot_residuals else wxo
-        fig, ax = plt.subplots(subplot_kw={"projection": "3d"})
-        ax.scatter(x, y, z, color='blue')
+        zlabel = 'n $\lambda$ / micron'
+        suptitle = r'$n \lambda = f(\phi_{pri}, \psi_{ech})$'
         if plot_residuals:
-            ax.set_xlabel('prism angle / deg')
-            ax.set_ylabel('echelle angle / deg')
-            ax.set_zlabel('n $\lambda$ residual / nm')
-            plt.show()
-            return
+            suptitle = 'Residuals ' + suptitle
+            z = f_resid
+            zlabel = 'n $\lambda$ residual / nano-m'
+        fig.suptitle(suptitle)
+        ax.scatter(x, y, z, color='blue')
+        ax.set_xlabel('prism angle, $\phi_{pri}$ / deg')
+        ax.set_ylabel('echelle angle, $\psi_{ech}$ / deg')
+        ax.set_zlabel(zlabel)
 
-        x_range = np.linspace(5, 8., 50)
-        y_range = np.linspace(-6., 6., 50)
-        xy_grid = np.meshgrid(x_range, y_range)
-        z_grid = Util.surface_model(xy_grid, *wxo_opt)
-        ax.plot_surface(xy_grid[0], xy_grid[1], z_grid, color='red', alpha=0.5)
-        ax.set_xlabel('prism angle')
-        ax.set_ylabel('echelle angle')
-        ax.set_zlabel('wave x order')
+        if not plot_residuals:
+            x_range = np.linspace(5, 8., 50)
+            y_range = np.linspace(-6., 6., 50)
+            xy_grid = np.meshgrid(x_range, y_range)
+            z_grid = surface_model(xy_grid, *wxo_opt)
+            ax.plot_surface(xy_grid[0], xy_grid[1], z_grid, color='red', alpha=0.5)
         plt.show()
         return
 
     @staticmethod
-    def transform_fit(term_fit, term_values, plot_residuals=False, do_plots=True):
-        # term_fit, term_values
+    def transform_fit(term_fit, term_values, surface_model, plot_residuals=False, do_plots=True):
+        """ Make a 3D plot of data points and the surface that fits them.
+        """
         pri_ang = np.array(term_values['pri_ang'])
         ech_ang = np.array(term_values['ech_ang'])
         matrices = term_values['matrices']
         slice_no = term_values['slice_no']
-
-        if do_plots:
-            fig, ax_list = plt.subplots(subplot_kw={"projection": "3d"}, ncols=4, nrows=4)
-            for row in range(0, 4):
-                for col in range(0, 4):
-                    if row + col > 3:
-                        ax_list[row, col].remove()
-
-            fig.suptitle("slice_no = {:d}".format(slice_no))
-
         x, y = pri_ang, ech_ang
+
+        svd_order = Globals.svd_order
+        fig, ax_list = plt.subplots(subplot_kw={"projection": "3d"}, figsize=(12, 10),
+                                    ncols=svd_order, nrows=svd_order,
+                                    sharex=True, sharey=True)
+        for row in range(0, svd_order):
+            for col in range(0, svd_order):
+                if row + col > svd_order - 1:
+                    ax_list[row, col].remove()
+
+        st1 = r'$c_{i,j} = g_{i,j}(\phi_{pri}, \psi_{ech})$'
+        st2 = '\nTransform fit coefficients $c_{row, col}$'
+        st3 = " for slice no.= {:d}".format(slice_no)
+        zlabel = 'coefficient value'
+        if plot_residuals:
+            st2 = '\nTransform fit coefficient fractional residuals '
+            zlabel = 'residual / %'
+        suptitle = st1 + st2 + st3
+        fig.suptitle(suptitle)
+
         f_residuals = {'slice_no': slice_no}
         for mat_tag in ['a']:
             f_residuals[mat_tag] = {}
-            for row in range(0, 4):
+            for row in range(0, svd_order):
                 f_residuals[mat_tag][row] = {}
-                for col in range(0, 4):
-                    if row + col > 3:
+                for col in range(0, svd_order):
+                    if row + col > svd_order - 1:
                         continue
                     z_term = []
                     for matrix in matrices:
@@ -174,38 +241,73 @@ class Plot:
                     z = np.array(z_term)
                     mat = term_fit[mat_tag]
                     term_opt = mat[row, col]
-                    z_model = Util.surface_model((x, y), *term_opt)
-                    f_resid = (z - z_model) / z_model       # Fractional residual (for fit points)
+                    z_model = surface_model((x, y), *term_opt)
+                    f_resid = 100. * (z - z_model) / z_model       # Fractional residual (for fit points) / %
                     f_residuals[mat_tag][row][col] = f_resid
-                    if not do_plots:
-                        continue
                     ax = ax_list[row, col]
+                    title = "c[{:d}, {:d}]".format(row, col)
+                    ax.set_title(title)
+                    ax.xaxis.set_major_formatter("{x:1.2f}")
+                    if row == 2 and col == 1:
+                        ax.set_xlabel('$\phi_{pri}$ / deg')
+                        ax.set_ylabel('$\psi_{ech}$ / deg')
+                        ax.set_zlabel(zlabel)
                     if plot_residuals:
                         ax.scatter(x, y, f_resid, color='black', alpha=0.5)
                         continue
                     x_range = np.linspace(5, 8., 50)
                     y_range = np.linspace(-6., 6., 50)
                     xy_grid = np.meshgrid(x_range, y_range)
-                    z_grid = Util.surface_model(xy_grid, *term_opt)
+                    z_grid = surface_model(xy_grid, *term_opt)
                     ax.scatter(x, y, z, color='red', alpha=0.5)
                     ax.plot_surface(xy_grid[0], xy_grid[1], z_grid, color='grey', alpha=0.5)
-        if do_plots:
-            Plot.show()
+        Plot.show()
         return f_residuals
 
     @staticmethod
-    def mfp_projections(mfp_projections):
-        mfp_points_zemax, mfp_points_svd, mfp_points_fit = mfp_projections
-        colours = ['blue', 'green', 'red']
+    def mfp_projections(mfp_projections, trace):
 
-        ax_list = Plot.set_plot_area('Comparison of Zemax, SVD and fit transforms',
-                                     xlabel="x",
-                                     ylabel="y")
-        ax = ax_list[0, 0]
-        for i, mfp_points in enumerate(mfp_projections):
-            x, y = mfp_points['mfp_x'], mfp_points['mfp_y']
-            Plot.plot_points(ax, x, y, colour=colours[i])
+        n_ax_rows = 0
+        for slice_no in mfp_projections.keys():
+            mfp_slice = mfp_projections[slice_no]
+            for spifu_no in mfp_slice.keys():
+                n_ax_rows += 1
 
+        trace_str = trace.__str__()
+        ea = trace.parameter['Echelle angle']
+        pa = trace.parameter['Prism angle']
+        tname = trace.parameter['name']
+        tag = '$\phi_{prism} = $'
+        suptitle = 'fit - zemax displacements for config \n' + "{:s}, {:s}{:6.3f}".format(tname, tag, pa)
+        print(suptitle)
+        fig, ax_list = Plot.set_plot_area(nrows=n_ax_rows, ncols=1, sharey=False, sharex = True,
+                                          xlabel="x / mm", ylabel="y / mm")
+        plt.suptitle(suptitle, x=0.13, y=.96, ha='left', fontsize='small')     # x=0., y=0.,
+        ax_row = 0
+        for slice_no in mfp_projections.keys():
+            mfp_slice = mfp_projections[slice_no]
+            for spifu_no in mfp_slice:
+                mfp_spifu = mfp_slice[spifu_no]
+                ax = ax_list[ax_row, 0]
+                x_ref, y_ref = mfp_spifu['zemax']['mfp_x'], mfp_spifu['zemax']['mfp_y']
+                ax.plot(x_ref, y_ref, color='black', clip_on=True,
+                        fillstyle='full', marker='.', ms=5., linestyle='None')
+                colours = ['blue', 'red']
+                i = 0
+                scale = .05
+                for key in mfp_spifu:
+                    if key == 'zemax':
+                        continue
+                    mfp = mfp_spifu[key]
+                    x, y = mfp['mfp_x'], mfp['mfp_y']
+                    u, v = x - x_ref, y - y_ref
+                    q = ax.quiver(x_ref, y_ref, u, v,
+                                  angles='xy', scale_units='xy', scale=scale,
+                                  width=0.0015, color=colours[i])
+                    i += 1
+                if ax_row == 0:
+                    ax.quiverkey(q, X=0.9, Y=1.15, U=0.18, label='10 pixels', labelpos='W', color='black')
+                ax_row += 1
         Plot.show()
         return
 
@@ -314,31 +416,39 @@ class Plot:
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
         title, ylabel = titles[plot_type]
-        ax_list = Plot.set_plot_area(title,
-                                     xlabel=r'Wavelength / $\mu$m',
-                                     ylabel=ylabel)
+        fig, ax_list = Plot.set_plot_area(xlabel=r'Wavelength / $\mu$m',
+                                          ylabel=ylabel)
+        fig.suptitle(title)
         ax = ax_list[0, 0]
         if colour_by == 'slice':
-            slice_rgb = Util.make_rgb_gradient(np.arange(28))
+            slice_rgb = Plot.make_rgb_gradient(np.arange(28))
         if colour_by == 'config':
-            slice_rgb = Util.make_rgb_gradient(np.arange(108))
-        for config_idx, trace in enumerate(traces):
+            slice_rgb = Plot.make_rgb_gradient(np.arange(108))
+        for trace in traces:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
             # tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
             # config_colour[tag] = next(colour_iterator, 'black')
             n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
             colour = None
             perimeter_upper, perimeter_lower = None, None
-            for slice in trace.slices:
-                config, _, rays = slice
-                label, slice_no, spifu_no, _, _ = config
-                waves, _, _, det_x, det_y, _, _ = rays
+            for transform in trace.transforms:
+                config = transform.configuration
+                keys = transform.slice_specific_kws
+                slice_no = config['slice_no']
+                spifu_no = config['spifu_no']
+                cfg_id = config['cfg_id']
+                cfg = {}
+                for key in keys:
+                    cfg[key] = config[key]
+                waves = trace.get('wavelength', **cfg)
+                det_x = trace.get('det_x', **cfg)
+                det_y = trace.get('det_y', **cfg)
                 if colour_by == 'slice_wave':
-                    rgb = Util.make_rgb_gradient(waves)
+                    rgb = Plot.make_rgb_gradient(waves)
                 if colour_by == 'slice':
                     colour = slice_rgb[slice_no - 1]
                 if colour_by == 'config':
-                    colour = slice_rgb[config_idx]
+                    colour = slice_rgb[cfg_id]
 
                 x, y = None, None
                 if plot_type == 'coverage':
@@ -347,7 +457,7 @@ class Plot:
                 if plot_type == 'dispersion':
                     mm_pix = 0.018
                     nm_micron = 1000.0
-                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])    # um / mm
+                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])  # nm / pix
                     x = waves[1:]
                     y = dw_dlmspix
 
@@ -413,21 +523,6 @@ class Plot:
                 ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
                         fillstyle=fs, marker=mk, mew=mew, ms=ms)
         return
-
-    def plot_line(self, ax, x, y, **kwargs):
-        colour = kwargs.get('colour', 'black')
-        ls = kwargs.get('linestyle', '-')
-        lw = kwargs.get('linewidth', 1.0)
-
-        ax.plot(x, y, clip_on=True, linestyle=ls, linewidth=lw, color=colour)
-        return
-
-    def plot_point(self, ax, xy, **kwargs):
-        """ Plot a single point in the open plot region.
-        """
-        import numpy as np
-        xyList = np.array([[xy[0]], [xy[1]]])
-        self.plot_points(ax, xyList, **kwargs)
 
     @staticmethod
     def show():

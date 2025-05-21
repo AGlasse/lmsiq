@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.axes
 from mpl_toolkits.axes_grid1 import ImageGrid
 
 
@@ -14,6 +15,7 @@ class Plot:
 
         # Set up figure and image grid
         fig = plt.figure(figsize=(8, 7))
+        fig.suptitle(file_name)
         grid = ImageGrid(fig, 111,
                          nrows_ncols=(2, 2),
                          axes_pad=0.15,
@@ -40,18 +42,34 @@ class Plot:
         return
 
     @staticmethod
-    def profiles(profiles):
-        n_profiles = len(profiles)
-        figsize = [8, 8]
-        nrows_win = int(n_profiles / 2)
-        ncols_win = int(n_profiles / nrows_win)
-        fig, ax_list = plt.subplots(nrows=nrows_win, ncols=ncols_win, figsize=figsize,
-                                    sharex='all', sharey='all', squeeze=True)
+    def histograms(mosaics):
+        for mosaic in mosaics:
+            file_name, hdr, data = mosaic
+            n_bins = 200
+            fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, tight_layout=True)
+            fig.suptitle(file_name)
 
+            for i, image in enumerate(data):
+                ax_row, ax_col = int(i / 2), i % 2
+                vals = image.flatten()
+                axs[ax_row, ax_col].hist(vals, bins=n_bins)
+            plt.show()
+        return
+
+    @staticmethod
+    def profiles(profiles, nax_rows=1, nax_cols=1):
+        """ Plot multiple profile tuples.
+        """
+        figsize = [8, 8]
+        n_axes = nax_rows * nax_cols
+        fig, axes = plt.subplots(nrows=nax_rows, ncols=nax_cols, figsize=figsize,
+                                 sharex='all', sharey='all', squeeze=True)
+        ax_list = axes if n_axes > 1 else [axes]
+        ax_list = np.array(ax_list).flatten()
         for i, profile in enumerate(profiles):
             title, x_val, y_val, pts_list = profile
 
-            ax = ax_list[int(i / 2), i % 2]
+            ax = ax_list[i]
             ax.plot(x_val, y_val)
             ax.set_title(title)
             for pts in pts_list:

@@ -12,6 +12,7 @@ from lms_detector import Detector
 from lms_globals import Globals
 from lmsdist_util import Util
 from lmsdist_plot import Plot
+from lms_transform import Transform
 
 
 class Trace:
@@ -47,9 +48,9 @@ class Trace:
         _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
         self.is_spifu = opticon == Globals.extended
         self.model_config = model_config
-        # self.transforms = None                              # Replacement for slice_objects
         self.transform_fits_name = None
-        self.slices, self.ray_trace = None, None
+        self.ray_trace = None
+        self.transforms = []
         self.offset_data = None
         self.a_rms = 0.                          # RMS transform errorfor trace (microns)
         self.n_mat_terms = None
@@ -64,7 +65,7 @@ class Trace:
         if cfg_tag not in Trace.cfg_tags:
             self.cfg_id = Trace.cfg_id_counter
             Trace.cfg_id_counter += 1
-        self.lms_config = {'opticon': opticon, 'pri_ang': config['Prism angle'],
+        self.lms_config = {'opticon': opticon, 'cfg_id': self.cfg_id, 'pri_ang': config['Prism angle'],
                            'ech_ang': config['Echelle angle'], 'ech_order': config['Spectral order']}
         self.parameter = config
 
@@ -128,27 +129,38 @@ class Trace:
         Trace.affines = affines
         return
 
+    def get_ifp_boresight(self, opticon):
+        spifu_no = 0 if opticon == Globals.nominal else 3
+        slit_x = self.get('ifu_x', slice_no=13, spifu_no=spifu_no)
+        waves = self.get('wavelength', slice_no=13, spifu_no=spifu_no)
+        wave_bs = np.interp(0.0, slit_x, waves)     # Find wavelength where slit_x == 0.
+        pri_ang = self.lms_config['pri_ang']
+        return wave_bs, pri_ang
+
     def create_transforms(self, **kwargs):
         """ Generate transforms to map from phase, across-slice coordinates in the entrance focal plane, to detector
         row, column coordinates.  Also update the wavelength values at the centre and corners of the detector mosaic.
         """
-        n_terms = Globals.svd_order
         debug = kwargs.get('debug', False)
+        n_terms = Globals.svd_order
         slice_order = n_terms - 1
         _, _, _, _, fp_in, fp_out = self.model_config
         is_first = True
-        self.slices = []
         a_rms_list = []
-        # for ech_order in self.unique_ech_orders:
         for spifu_no in self.unique_spifu_slices:
             for slice_no in self.unique_slices:
                 for ech_order in self.unique_ech_orders:
-                    kwargs = {'spifu_no': spifu_no, 'slice_no': slice_no, 'ech_order': ech_order}
-                    waves = self.get('wavelength', **kwargs)
-                    ech_orders = self.get('ech_order', **kwargs)
-                    alpha = self.get('efp_x', **kwargs)
-                    mfp_x = self.get(fp_out[0], **kwargs)
-                    mfp_y = self.get(fp_out[1], **kwargs)
+                    transform = Transform(cfg=self.lms_config)
+                    cfg = transform.configuration
+                    cfg['slice_no'] = slice_no
+                    cfg['spifu_no'] = spifu_no
+                    cfg['ech_order'] = ech_order
+                    # kwargs = {'spifu_no': spifu_no, 'slice_no': slice_no, 'ech_order': ech_order}
+                    waves = self.get('wavelength', **cfg)
+                    ech_orders = self.get('ech_order', **cfg)
+                    alpha = self.get('efp_x', **cfg)
+                    mfp_x = self.get(fp_out[0], **cfg)
+                    mfp_y = self.get(fp_out[1], **cfg)
 
                     phase = Util.waves_to_phases(waves, ech_orders)
                     a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
@@ -160,19 +172,23 @@ class Trace:
                     a_rms_list.append(off_mfp_a)
 
                     w_min, w_max = np.amin(waves), np.amax(waves)
-
-                    ech_order = ech_orders[0]       # They should all be the same!
-                    config = ech_order, slice_no, spifu_no, w_min, w_max
-                    matrices = a, b, ai, bi
+                    cfg['w_min'] = w_min
+                    cfg['w_max'] = w_max
+                    mats = transform.matrices
+                    mats['a'] = a
+                    mats['b'] = b
+                    mats['ai'] = ai
+                    mats['bi'] = bi
+                    cfg['n_mats'] = 4
+                    cfg['mat_order'], _ = a.shape
                     rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
-                    slice_tpl = config, matrices, rays
-                    self.slices.append(slice_tpl)
-                    fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
-
                     if debug and is_first:        # Plot intermediate and full fit to data
+                        fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
                         tlin1 = fmt.format(Globals.svd_cutoff)
-                        self.plot_scatter(slice_tpl, plot_correction=True, tlin1=tlin1)
+                        self.plot_scatter(transform, rays, plot_correction=True, tlin1=tlin1)
                         is_first = False
+                    self.transforms.append(transform)
+
         a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
         self.a_rms = a_rms
         return
@@ -196,8 +212,9 @@ class Trace:
         return a
 
     def plot_fit_maps(self, **kwargs):
-        """ Plot ray coordinates at detector for the reference zemax data and also
-        as projected using the passed list of transforms (one per slice). """
+        """ Plot ray coordinates at detector for the reference zemax data and also as projected using the
+        passed list of transforms (one per slice).
+        """
         suppress = kwargs.get('suppress', False)
         if suppress:
             return
@@ -220,9 +237,9 @@ class Trace:
             n_rows = 3
             n_cols = 1
         xlim = (None if plotdiffs else [-40.0, 40.0])
-        ax_list = plot.set_plot_area(fig_title,
-                                     fontsize=14.0, sharex=True, sharey=False,
+        fig, ax_list = plot.set_plot_area(fontsize=14.0, sharex=True, sharey=False,
                                      nrows=n_rows, ncols=n_cols, xlim=xlim)
+        fig.suptitle(fig_title)
         for ifu_slice in self.slices:
             config, _, rays = ifu_slice
             ech_order, slice_no, spifu_no, _, _ = config
@@ -264,9 +281,11 @@ class Trace:
                 ax.fill(xp, yp, color='pink')
             if plotdiffs:
                 u, v = x - x_fit, y - y_fit
-                q = ax.quiver(x, y, u, v, angles='uv', width=0.001)
+                q = ax.quiver(x_fit, y_fit, u, v,
+                              angles='xy', scale_units='xy', scale=.001,
+                              width=0.001)
                 if row == 0:
-                    ax.quiverkey(q, X=0.9, Y=1.1, U=0.001, label='1 micron', labelpos='N')
+                    ax.quiverkey(q, X=0.9, Y=1.1, U=0.01, label='10 microns', labelpos='N')
             else:
                 plot.plot_points(ax, x_fit, y_fit, ms=1.0, colour='blue')
                 plot.plot_points(ax, x, y, ms=1.0, mk='x')
@@ -281,18 +300,17 @@ class Trace:
         plot.show()
         return
 
-    def plot_scatter(self, tf, **kwargs):
+    def plot_scatter(self, transform, rays, **kwargs):
         """ Plot the spread of offsets between ray trace and fit positions on the detector.
         """
         slice_list = kwargs.get('slice_list', None)
         tlin1_default = "Distortion residuals (Zemax - Zemax Fit): \n"
         tlin1 = kwargs.get('tlin1', tlin1_default)
+        config = transform.configuration
 
-        if len(tf) == 4:
-            config, _, rays, wave_coverage = tf
-        else:
-            config, _, rays = tf
-        ech_order, slice_no, spifu_no, _, _ = config
+        ech_order = config['ech_order']
+        slice_no = config['slice_no']
+        spifu_no = config['spifu_no']
         # Create plot area
         ech_angle = self.parameter['Echelle angle']
         prism_angle = self.parameter['Prism angle']
@@ -302,7 +320,9 @@ class Trace:
             tlin2 += ", spifu={:d}".format(int(spifu_no))
         title = tlin1 + tlin2
 
-        ax_list = Plot.set_plot_area(title, nrows=1, ncols=2, fontsize=10.0, sharey=True)
+        fig, ax_list = Plot.set_plot_area(nrows=1, ncols=2, fontsize=10.0, sharey=True)
+        fig.suptitle(title)
+
         x_list, y_list = [], []
         off_det_x_list, off_det_y_list, off_det_a_list = [], [], []
 
@@ -576,18 +596,9 @@ class Trace:
         rgb = None
         if colour_scheme == 'wavelength':
             waves = self.series['wavelength']
-            rgb = Util.make_rgb_gradient(waves)
+            rgb = Plot.make_rgb_gradient(waves)
         return rgb
 
-    # def _get_parameters(self):
-    #     ea = self.parameter['Echelle angle']
-    #     pa = self.parameter['Prism angle']
-    #     w1 = np.max(self.w_slice[0, :])
-    #     w2 = np.min(self.w_slice[1, :])
-    #     w3 = np.max(self.w_slice[2, :])
-    #     w4 = np.min(self.w_slice[3, :])
-    #     return ea, pa, w1, w2, w3, w4
-    #
     @staticmethod
     def _find_limits(a, margin):
         amin = min(a)

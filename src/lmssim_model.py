@@ -175,7 +175,7 @@ class Model:
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
                 file_path = dataset_folder + iq_path
-                hdr, psf = filer.read_fits(file_path)
+                hdr, psf = filer.read_zemax_fits(file_path)
                 # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
                 if downsample:
                     oversampling = 4
@@ -198,12 +198,12 @@ class Model:
         blaze = {}
         for key in transforms:
             transform = transforms[key]
-            cfg = transform['configuration']
-            if cfg['slice'] != 13:
+            cfg = transform.configuration
+            if cfg['slice_no'] != 13:
                 continue
             ech_ang = cfg['ech_ang']
             mfp_bs = {'mfp_x': [0.], 'mfp_y': [0.]}
-            ech_ord = cfg['ech_ord']
+            ech_ord = cfg['ech_order']
             efp_bs = Util.mfp_to_efp(transform, mfp_bs)
             wave = efp_bs['efp_w'][0]
             if ech_ord not in blaze:
@@ -313,7 +313,7 @@ class Model:
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
                 file_path = dataset_folder + iq_path
-                hdr, psf = filer.read_fits(file_path)
+                hdr, psf = filer.read_zemax_fits(file_path)
                 # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
                 if downsample:
                     oversampling = 4

@@ -61,6 +61,9 @@ class ObsMap:
                 for beta in [0, -150, +150]:
                     efp_y = beta / 100.  # FIX THIS!!
                     waves = wave_setting[bgd_src]
+                    if (bgd_src == 'wcu_ls') and (opticon == Globals.extended):
+                        continue
+
                     for wave in waves:
                         obs_id = fmt1.format(test_name, opticon, bgd_src, fp_mask, wave, beta)
                         obs_parameters = {'id': obs_id, 'bgd_src': bgd_src,
