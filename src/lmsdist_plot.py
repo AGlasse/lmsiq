@@ -120,13 +120,19 @@ class Plot:
         return rgb
 
     @staticmethod
-    def wave_v_prism_angle(wpa_fit, wpa_model, wave_boresights, prism_angles):
+    def wave_v_prism_angle(wpa_fit, wpa_model, wave_boresights, prism_angles, differential=False):
         """ Plot fit of prism angle to wavelength compared with the trace data it is derived from.
         """
-        x, y = wave_boresights, prism_angles
+        x, y = np.array(wave_boresights), np.array(prism_angles)
+        if differential:
+            dp = y[1:] - y[:-1]
+            dw = x[1:] - x[:-1]
+            x = x[1:]
+            y = dp / dw
+
         fig, [ax1, ax2] = plt.subplots(figsize=(10, 8), ncols=1, nrows=2,
                                        sharex=True)
-        ylabel = 'Prism rotation angle / deg'
+        ylabel = 'Prism rotation sensitivity micron / deg' if differential else 'Prism rotation angle / deg'
         xlabel = "Wavelength / $\mu$m"
 
         coeffs = wpa_fit['wpa_opt']
@@ -144,7 +150,8 @@ class Plot:
         ax1.set_ylabel(ylabel)
         ax1.plot(x, y, color='blue', clip_on=True,
                  fillstyle='full', marker='+', ms=5., linestyle='None')
-        ax1.plot(x, y_fit, color='black', clip_on=True, lw=1., linestyle='solid')
+        if not differential:
+            ax1.plot(x, y_fit, color='black', clip_on=True, lw=1., linestyle='solid')
         ax1.grid(True)
 
         ax2.set_title('Residual (data - fit)', loc='left')
@@ -414,7 +421,8 @@ class Plot:
     @staticmethod
     def series(plot_type, traces, colour_by='config'):
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
-                  'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]')}
+                  'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]'),
+                  'nm_det': ('Instantaneous wavelength coverage', 'Mosaic coverage [nm]')}
         title, ylabel = titles[plot_type]
         fig, ax_list = Plot.set_plot_area(xlabel=r'Wavelength / $\mu$m',
                                           ylabel=ylabel)
@@ -426,8 +434,6 @@ class Plot:
             slice_rgb = Plot.make_rgb_gradient(np.arange(108))
         for trace in traces:
             ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
-            # tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-            # config_colour[tag] = next(colour_iterator, 'black')
             n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
             colour = None
             perimeter_upper, perimeter_lower = None, None
@@ -454,9 +460,13 @@ class Plot:
                 if plot_type == 'coverage':
                     x = waves
                     y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * det_y
+                nm_micron = 1000.0
+                if plot_type == 'nm_det':
+                    x = waves
+                    dw = (trace.wmax - trace.wmin) * nm_micron
+                    y = np.full(waves.shape, dw)
                 if plot_type == 'dispersion':
                     mm_pix = 0.018
-                    nm_micron = 1000.0
                     dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])  # nm / pix
                     x = waves[1:]
                     y = dw_dlmspix

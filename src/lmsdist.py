@@ -40,7 +40,7 @@ ext_config = (analysis_type, extended, ext_date_stamp,
 model_configurations = {nominal: nom_config, extended: ext_config}
 
 """ SET MODEL CONFIGURATION HERE """
-opticon = extended                       # 'nominal' or 'spifu'
+opticon = nominal                       # 'nominal' or 'extended'
 
 # wpa_fit_order = Globals.wpa_fit_order_dict[opticon]  # Order of 1D polynomial fit, wavelength -> prism angle
 model_config = model_configurations[opticon]
@@ -71,12 +71,13 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-suppress_plots = True                       # f = Plot first trace
 generate_transforms = False
 if generate_transforms:
+    suppress_plots = True  # f = Plot first trace
     print()
     print("Generating distortion transforms (and prism angle fit parameters)")
     fmt = "- reading Zemax ray trace data from folder {:s}"
+    print("Suppressing plots = {:s}".format(str(suppress_plots)))
     print(fmt.format(zem_folder))
 
     # Select *.csv files
@@ -113,13 +114,14 @@ if generate_transforms:
     print(Filer.trace_file)
     filer.write_pickle(filer.trace_file, traces)
 
-suppress_plots = False
 calibrate_wavelength = True
 if calibrate_wavelength:
+    suppress_plots = False
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
     wcal = {}
     traces = Filer.read_pickle(filer.trace_file)
+    plot.series('nm_det', traces)
     plot.series('dispersion', traces)
     plot.series('coverage', traces[0:1])
     plot.series('coverage', traces)
@@ -144,6 +146,7 @@ if fit_transforms:
     wpa_fit  = polyfit.create_pa_wave_fit(opticon, wave_boresights, prism_angles)
     wxo_fit, wxo_header, term_fits = polyfit.create_polynomial_surface_fits(opticon, svd_transforms)
     filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, term_fits)
+    plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles, differential=True)
     plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles)
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected

@@ -11,7 +11,10 @@ class Plot:
 
     @staticmethod
     def mosaic(mosaic, **kwargs):
-        file_name, hdr, data = mosaic
+        file_name, hdr, hdus = mosaic
+
+        cmap = kwargs.get('cmap', 'hot')
+        sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
 
         # Set up figure and image grid
         fig = plt.figure(figsize=(8, 7))
@@ -25,35 +28,51 @@ class Plot:
                          cbar_size="7%",
                          cbar_pad=0.15,
                          )
-
-        xmin, xmax = 0, data[0].shape[0]
-        ymin, ymax = 0, data[0].shape[1]
-        vmin = kwargs.get('vmin', np.nanmin(data))
-        vmax = kwargs.get('vmax', np.nanmax(data))
+        # Set plot limits
+        xmin, xmax = 0, hdus[0].shape[0]
+        ymin, ymax = 0, hdus[0].shape[1]
+        vmin, vmax = 1.E6, -1.E6
+        for hdu in hdus:
+            vmin_hdu, vmax_hdu = np.nanmin(hdu.data), np.nanmax(hdu.data)
+            vmin = vmin if vmin < vmin_hdu else vmin_hdu
+            vmax = vmax if vmax > vmax_hdu else vmax_hdu
+        if 'vmin' in kwargs:
+            vmin = kwargs.get('vmin', np.nanmin(hdus))
+        if 'vmax' in kwargs:
+            vmax = kwargs.get('vmax', np.nanmax(hdus))
         for det_idx, ax in enumerate(grid):
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
             ax.set_aspect('equal', 'box')
-            image = data[det_idx]
+            image = hdus[det_idx].data
             im = ax.imshow(image, extent=(xmin-0.5, xmax+0.5, ymin-0.5, ymax+0.5),
-                           interpolation='nearest', cmap='hot', vmin=vmin, vmax=vmax, origin='lower')
+                           interpolation='nearest', cmap=cmap, vmin=vmin, vmax=vmax, origin='lower')
+            if sb is not None:
+                det_no = sb['det_no']
+                idx = np.argwhere(det_no == det_idx + 1)
+                x = sb['det_col'][idx]
+                yrmin = sb['det_row_min'][idx]
+                ax.plot(x, yrmin, marker='o', ms=2.0, color='red', linestyle='none')
+                yrmax = sb['det_row_max'][idx]
+                ax.plot(x, yrmax, marker='o', ms=2.0, color='green', linestyle='none')
+
+
         ax.cax.colorbar(im)
         plt.show()
         return
 
     @staticmethod
-    def histograms(mosaics):
-        for mosaic in mosaics:
-            file_name, hdr, data = mosaic
-            n_bins = 200
-            fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, tight_layout=True)
-            fig.suptitle(file_name)
+    def histograms(mosaic):
+        file_name, hdr, hdus = mosaic
+        n_bins = 200
+        fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, tight_layout=True)
+        fig.suptitle(file_name)
 
-            for i, image in enumerate(data):
-                ax_row, ax_col = int(i / 2), i % 2
-                vals = image.flatten()
-                axs[ax_row, ax_col].hist(vals, bins=n_bins)
-            plt.show()
+        for i, hdu in enumerate(hdus):
+            ax_row, ax_col = int(i / 2), i % 2
+            vals = hdu.data.flatten()
+            axs[ax_row, ax_col].hist(vals, bins=n_bins)
+        plt.show()
         return
 
     @staticmethod
@@ -64,7 +83,7 @@ class Plot:
         n_axes = nax_rows * nax_cols
         fig, axes = plt.subplots(nrows=nax_rows, ncols=nax_cols, figsize=figsize,
                                  sharex='all', sharey='all', squeeze=True)
-        ax_list = axes if n_axes > 1 else [axes]
+        ax_list = [axes] if n_axes < 2 else axes
         ax_list = np.array(ax_list).flatten()
         for i, profile in enumerate(profiles):
             title, x_val, y_val, pts_list = profile
@@ -74,9 +93,6 @@ class Plot:
             ax.set_title(title)
             for pts in pts_list:
                 x_pts, y_pts, colour = pts
-                # n_on = len(on_rows)
-                # mark_y = [cut_level] * n_on
                 ax.plot(x_pts, y_pts, linestyle='none', marker='x', color=colour)
-                # ax.plot(off_rows, mark_y, linestyle='none', marker='+', color='red')
 
         plt.show()

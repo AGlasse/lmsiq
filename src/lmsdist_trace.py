@@ -131,8 +131,11 @@ class Trace:
 
     def get_ifp_boresight(self, opticon):
         spifu_no = 0 if opticon == Globals.nominal else 3
-        slit_x = self.get('ifu_x', slice_no=13, spifu_no=spifu_no)
-        waves = self.get('wavelength', slice_no=13, spifu_no=spifu_no)
+        ech_order = self.unique_ech_orders[0] if opticon == Globals.nominal else self.unique_ech_orders[1]
+        slit_x = self.get('ifu_x', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
+        waves = self.get('wavelength', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
+
+        ech_orders = self.get('ech_order', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
         wave_bs = np.interp(0.0, slit_x, waves)     # Find wavelength where slit_x == 0.
         pri_ang = self.lms_config['pri_ang']
         return wave_bs, pri_ang
@@ -157,7 +160,13 @@ class Trace:
                     cfg['ech_order'] = ech_order
                     # kwargs = {'spifu_no': spifu_no, 'slice_no': slice_no, 'ech_order': ech_order}
                     waves = self.get('wavelength', **cfg)
+                    n_waves, = waves.shape
+                    if n_waves == 0:
+                        continue
+
                     ech_orders = self.get('ech_order', **cfg)
+                    print(slice_no, spifu_no, ech_order, waves[0], ech_orders[0])
+
                     alpha = self.get('efp_x', **cfg)
                     mfp_x = self.get(fp_out[0], **cfg)
                     mfp_y = self.get(fp_out[1], **cfg)
@@ -199,7 +208,8 @@ class Trace:
         """
         _, opticon, _, _, _, _ = self.model_config
         slice_no = kwargs.get('slice_no', None)
-        spifu_no = kwargs.get('spifu_no', None)      # -1 = No Spectral IFU slice set
+        spifu_no = kwargs.get('spifu_no', None)
+        ech_order = kwargs.get('ech_order', None)
         a = self.series[tag]
         if slice_no is not None:
             slice_nos = self.series['slice_no']
@@ -208,6 +218,9 @@ class Trace:
                 spifu_slices = self.series['sp_slice']
                 idx2 = spifu_slices == spifu_no
                 idx = np.logical_and(idx, idx2)
+                ech_orders = self.series['ech_order']
+                idx3 = ech_orders == ech_order
+                idx = np.logical_and(idx, idx3)
             a = np.compress(idx, a)
         return a
 
@@ -484,7 +497,8 @@ class Trace:
             tokens = line.split(':')
             if len(tokens) < 2:
                 break
-            name, val = tokens[0], float(tokens[1])
+            name = tokens[0].strip()
+            val = float(tokens[1].strip(', '))
             parameter[name] = val
             if is_spifu:            # For SPIFU data, the order is currently calculated from the spifu slice number.
                 parameter['Spectral order'] = -1

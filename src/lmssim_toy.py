@@ -187,7 +187,7 @@ class Toy:
                         tau_echelle = np.interp(w_obs, w_blaze, tau_blaze)
                         tau_ech_mosaic[det_idx][det_row, idx_illum] = tau_echelle
                         f_ext_obs = np.interp(w_obs, w_ext, f_ext)
-                        print('toy190 ', strip_row)
+                        # print('toy190 ', strip_row)
                         ext_sig[strip_row, idx_illum] = f_ext_obs * tau_echelle
                         waves_mosaic[det_idx][det_row, idx_illum] = w_obs
                         w_illuminated = w_illuminated + list(w_obs[:])

@@ -13,16 +13,20 @@ class OptTools:
     @staticmethod
     def dark_stats(mosaics):
         for mosaic in mosaics:
-            file_name, hdr, data = mosaic
+            file_name, hdr, hdus = mosaic
             print()
             print("File = {:s}".format(file_name))
-            print("{:>10s},{:>10s},{:>10s}".format('Detector', 'median', 'stdev'))
+            print("Signal distribution statistics")
+            print("{:>8s},{:>10s},{:>10s},{:>10s},{:>10s}".format('Detector', 'median', 'stdev', 'median', 'stdev'))
+            print("{:>8s},{:>10s},{:>10s},{:>10s},{:>10s}".format('No.', 'ADU', 'ADU', 'el.', 'el.'))
 
-            for i, image in enumerate(data):
-                median = np.median(image)
-                stdev = np.std(image)
-                fmt = "{:10d},{:10.3f},{:10.3f}"
-                text = fmt.format(i + 1, median, stdev)
+            for i, hdu in enumerate(hdus):
+                el_adu = hdu.header['HIERARCH ESO DET3 CHIP GAIN']
+                median = np.median(hdu.data)
+                stdev = np.std(hdu.data)
+                median_el, stdev_el = median * el_adu, stdev * el_adu
+                fmt = "{:8d},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
+                text = fmt.format(i + 1, median, stdev, median_el, stdev_el)
                 print(text)
         return
 
@@ -30,8 +34,8 @@ class OptTools:
     def flood_stats(mosaic):
         """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
         """
-        file_name, hdr, images = mosaic
-        opticon = hdr['AIT OPTICON']
+        file_name, hdr, hdus = mosaic
+        opticon = hdr['HIERARCH ESO INS MODE']
 
         u.arcsec2 = u.arcsec * u.arcsec
 
@@ -67,22 +71,21 @@ class OptTools:
         slice_bounds = QTable(names=sb_names, dtype=['i4', 'i4', 'i4', 'f8', 'f8', 'f8'])
         profiles = []
         alpha_det = [0.]*4
-        for i, image in enumerate(images):
+        for i, hdu in enumerate(hdus):
             det_no = i + 1
+            n_profiles = len(profile_cols[det_no])
             for pr_col in profile_cols[det_no]:
-                # pr_col = profile_col[det_no]
-                pr_col_hw = 2
+                pr_col_hw = 2                           # Co-add 2 x pr_col_hw + 1 centred on pr_col.
                 col1, col2 = pr_col - pr_col_hw, pr_col + pr_col_hw
-                col_cen = int((col1 + col2) / 2)
-                fmt = "Analysing profile at column {:d} averaged over columns {:d} to {:d}"
-                print(fmt.format(col_cen, col1, col2))
+                # fmt = "Analysing profile at column {:d} averaged over columns {:d} to {:d}"
+                # print(fmt.format(pr_col, col1, col2))
 
                 slice_no = 1 if det_no in [3, 4] else 14  # Starting slice number (bottom row)
                 spifu_no = 0
                 if n_spifus > 0:
                     slice_no = 12
                     spifu_no = 1 if det_no in [3, 4] else 4
-                y_vals = np.nanmean(image[:, col1:col2], axis=1)
+                y_vals = np.nanmean(hdu.data[:, col1:col2+1], axis=1)
                 bright_level = np.nanpercentile(y_vals, bright_pctile)
                 on_rows, off_rows = [], []
                 row_off = 0
@@ -99,7 +102,7 @@ class OptTools:
                     off_indices = np.argwhere(y_vals[row_on:] < 1. * cut_level)
                     row_off = row_on + off_indices[0][0]
                     r_off = np.interp(cut_level, [y_vals[row_off], y_vals[row_off-1]], [row_off, row_off-1])
-                    sb_row = [det_no, slice_no, spifu_no, col_cen, r_on, r_off]
+                    sb_row = [det_no, slice_no, spifu_no, pr_col, r_on, r_off]
                     slice_bounds.add_row(sb_row)
 
                     alpha_slice = (row_off - r_on) * Globals.alpha_pix
@@ -116,7 +119,7 @@ class OptTools:
                             slice_no -= n_slices
                             if spifu_no != 0:
                                 spifu_no += 1
-                print("No. of slices identified = {:d}".format(slice_count))
+                # print("No. of slices identified = {:d}".format(slice_count))
 
                 x_indices = np.arange(0, len(y_vals))
                 title = "det {:d}, cols {:d}-{:d}".format(i+1, col1, col2)
@@ -129,16 +132,17 @@ class OptTools:
                 for row_on, row_off in zip(on_rows, off_rows):
                     illum_rows = row_off - row_on
                     illum_rows_sum += illum_rows
+            alpha_det[i] /= n_profiles
 
         alpha_02 = alpha_det[0] + alpha_det[2]
         alpha_13 = alpha_det[1] + alpha_det[3]
         alpha_ave = 0.5 * (alpha_02 + alpha_13)
         fov = alpha_ave * Globals.beta_slice
         print()
-        print("Total field of view = {:5.3f}".format(fov.to(u.arcsec2)))
+        print("Total field of view = {:5.3f} (cf METIS-3667, shall be > 0.500 arcsec2)".format(fov.to(u.arcsec2)))
         alpha_ext, beta_ext = alpha_ave / n_slices, Globals.beta_slice * n_slices
         aspect_ratio = alpha_ext / beta_ext
-        print("Aspect ratio (alpha/beta) = {:5.3f}:1 ".format(aspect_ratio))
+        print("Aspect ratio (alpha/beta) = {:5.3f}:1 (cf METIS-3667, shall be 1:1 < ar < 2:1)".format(aspect_ratio))
         print(slice_bounds)
         return slice_bounds, profiles
 

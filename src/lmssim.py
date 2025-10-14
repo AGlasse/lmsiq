@@ -7,8 +7,8 @@ from lms_obs_map import ObsMap
 from lmssim_scope import Scope
 from lmssim_toy import Toy
 
-test_name = 'lms_test'
-force_simulator = Globals.toysim        # Set = None to use simulator specified in lms-opt-config.csv
+test_name = 'lms_opt_01_t2'
+force_simulator = Globals.scopesim   # Set = None to use simulator specified in lms-opt-config.csv
 
 
 def run(test_name):
@@ -19,7 +19,6 @@ def run(test_name):
     - implementing calibration sources (WCU and sea-level sky) available during AIT in Leiden.
     Start by defining the observation.
     """
-
     _ = Globals()
     scope = Scope()
     toy = Toy()
@@ -32,9 +31,9 @@ def run(test_name):
         if force_simulator is not None:
             simulator = force_simulator
         if simulator == Globals.scopesim:
-            scope.run(obs_cfg)
+            scope.run(sim_config)
         if simulator == Globals.toysim:
             toy.run(sim_config)
     return
 
-run(test_name)       # 'ScopeSim' or 'ToySim'
+run(test_name)

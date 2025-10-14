@@ -410,11 +410,11 @@ class Util:
                 continue
             # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
             w_min, w_max = cfg['w_min'], cfg['w_max']
-            mfp_x = 0.
             mfp_w_list, mfp_x_list = [], []
             for efp_w in np.linspace(w_min, w_max, 100):
                 efp_bs['efp_w'] = np.array([efp_w])
                 mfp_bs, _ = Util.efp_to_mfp(transform, efp_bs)
+                mfp_x = mfp_bs['mfp_x'][0]
                 mfp_x_list.append(mfp_x)
                 mfp_w_list.append(efp_w)
 

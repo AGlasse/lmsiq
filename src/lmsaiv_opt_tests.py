@@ -9,15 +9,21 @@ class OptTests:
 
     def __init__(self):
         OptTests.valid_test_names = {'lms_opt_01_t1': (OptTests.lms_opt_01_t1, 'Field of view'),
-                                     'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'BB iso-alpha, psf'),
-                                     'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, lsf'),
+                                     'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'Grey body iso-alpha, along slice PSF'),
+                                     'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, LSF'),
                                      'lms_opt_01_t4': (OptTests.lms_opt_01_t4, 'Sky iso-lambda trace'),
                                      'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
                                      }
-        Filer.set_test_data_folder()
-        print(OptTests.valid_test_names)
+        Filer.set_test_data_folder('scopesim')
         _ = AsBuilt()
         return
+
+    def __str__(self):
+        text = 'OptTests available for tests.. \n'
+        for test_name in self.valid_test_names:
+            test = self.valid_test_names[test_name]
+            text += "{:<20s},{:<20s} \n".format(test_name, test[1])
+        return text
 
     @staticmethod
     def run(test_name, **kwargs):
@@ -35,8 +41,8 @@ class OptTests:
         """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
         map in the AsBuilt object
         """
-        do_plot = kwargs.get('do_plot', False)
         darks = Filer.read_mosaics(inc_tags=[test_name, 'nom_dark'])
+        do_plot = kwargs.get('do_plot', True)
         if do_plot:
             Plot.mosaic(darks[0], title=title)
             Plot.histograms(darks[0])
@@ -44,11 +50,16 @@ class OptTests:
 
         floods = Filer.read_mosaics(inc_tags=[test_name, 'flood'])
         for flood in floods:
-            Plot.mosaic(flood, title=title)
             slice_bounds, profiles = tools.flood_stats(flood)
             AsBuilt.slice_bounds = slice_bounds
-            Plot.profiles(profiles)
-
+            print(slice_bounds)
+            n_profiles = len(profiles)
+            nax_rows = int((n_profiles / 4) + 1)
+            nax_cols = int(n_profiles / nax_rows)
+            Plot.profiles(profiles, nax_rows=nax_rows, nax_cols=nax_cols)
+            do_plot = True
+            if do_plot:
+                Plot.mosaic(flood, title=title, cmap='gray', sb=slice_bounds)        # Use cmap='hot', 'gray' etc.
         print('Done')
         return
 

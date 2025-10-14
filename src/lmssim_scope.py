@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import math
+import sys
 import numpy as np
 import scopesim as sim
 from scopesim import Source
@@ -14,34 +14,47 @@ from lmssim_model import Model
 
 class Scope:
 
-    # sim.bug_report()      Crashes here.  Bug #491 submitted.
     def __init__(self):
         install_notebooks = False
         if install_notebooks:
-            sim.download_packages(["METIS", "ELT", "Armazones"])
-
-        # List all settable modes.
-        cmd = sim.UserCommands(use_instrument="METIS", set_modes=["lms"])
-        print('Instrument modes')
-        for mode in cmd.modes_dict:
-            print(mode)
+            sim.download_packages(["METIS", "ELT", "Armazones"], release="latest")
         return
 
-    def run(self, sim_cfg):
-        for obs_name in sim_cfg:
-            obs_cfg = sim_cfg[obs_name]
-            if obs_cfg['opticon'] == Globals.extended:
-                print('Skipping simulation ' + obs_name + ', extended spectral coverage not yet supported !!')
-                continue
-            cmd, source = self.setup(obs_cfg)
-            metis = sim.OpticalTrain(cmd)
-            metis['skycalc_atmosphere'].include = False         # Turn off sky and telescope for AIV tests
-            metis['telescope_reflection'].include = False
-            metis['cold_stop'].include = False                  # 67 K emission
-            n_obs = int(obs_cfg['nobs'])                                     # = 5 for 5 fits files.
+    def run(self, sim_configs):
+        for obs_name in sim_configs:
+            sim_config = sim_configs[obs_name]
+            opticon = sim_config['opticon']
+            mode = {'nominal': 'wcu_lms', 'extended': 'wcu_lms_extended'}[opticon]
+            cmds = sim.UserCommands(use_instrument="METIS", set_modes=[mode])
+            cmds['!OBS.dit'] = float(sim_config['dit'])  # Integration time per ramp (> 1.3 seconds)
+            cmds['!OBS.ndit'] = int(sim_config['ndit'])  # No. of ramps
+            wavelen = float(sim_config['wave_cen']) / 1000.
+            cmds['!OBS.wavelen'] = wavelen  # Observation wavelength (microns)
+            # cmds["!WCU.config_file"] = "./inst_pkgs/lms_ait_wcu_config.yaml"  # From metis_wcu_config
+
+            pup_trans = 0. if sim_config['lms_pp1'] == 'closed' else 1.
+            cmds["!OBS.pupil_transmission"] = pup_trans
+
+            metis = sim.OpticalTrain(cmds)
+#            splist = metis['lms_spectral_traces']
+            wcu = metis['wcu_source']
+
+            wcu_aper = float(sim_config['wcu_aper'])
+            wcu_mask = sim_config['wcu_mask']
+            wcu_angle = float(sim_config['wcu_angle'])
+            wcu_x = float(sim_config['wcu_x'])
+            wcu_y = float(sim_config['wcu_y'])
+            wcu_shift = wcu_x, wcu_y
+
+            wcu.set_bb_aperture(wcu_aper)
+            wcu.set_fpmask(maskname=wcu_mask, angle=wcu_angle, shift=wcu_shift)
+            print(wcu)
+
+            metis.effects.pprint_all()
+            n_obs = int(sim_config['nobs'])
             for obs_idx in range(0, n_obs):
-                metis.observe(source)
-                result = metis.readout(detector_readout_mode="auto")[0]
+                metis.observe()
+                result = metis.readout(dit=cmds['!OBS.dit'], ndit=cmds['!OBS.ndit'])[0]                 # detector_readout_mode="auto"
                 obs_tag = "_{:03d}.fits".format(obs_idx)
                 out_path = '../data/test_scopesim/' + obs_name + obs_tag
                 result.writeto(out_path, overwrite=True)
@@ -49,118 +62,102 @@ class Scope:
         print('Done metsim')
         return
 
-    def setup(self, obs_cfg):
-        """ Set up observation command parameters.  Sources are defined by ImgHDS data cubes.
-
-        """
-        model = Model()
-        cmd = sim.UserCommands(use_instrument="METIS", set_modes=["lms"])
-        cmd['!OBS.dit'] = float(obs_cfg['dit'])             # Integration time per ramp (> 1.3 seconds)
-        cmd['!OBS.ndit'] = int(obs_cfg['ndit'])             # No. of ramps
-        wavelen = float(obs_cfg['wave_cen']) *u.nm
-        cmd['!OBS.wavelen'] = wavelen                       # Observation wavelength (microns)
-        bgd_src = obs_cfg['bgd_src']
-        wrange = 2.  # Width of wavelength range to model (4 um to overfill mosaic in spifu mode)
-        wbounds = [wavelen - wrange / 2., wavelen + wrange / 2.]
-        w_ext, f_ext = model.get_flux(Globals.scopesim, wbounds, bgd_src)
-        waves_ang, flux_photlam = self.convert_mjy_to_photlam(w_ext, f_ext)
-        src_config = Model.bgd_srcs[obs_cfg['bgd_src']]
-        if obs_cfg['lms_pp1'] == 'closed':
-            src_config = Model.bgd_srcs['dark']
-        bgd_source = self.create_source(src_config)
-
-        # efp_x, efp_y = obs_cfg['efp_x'],obs_cfg['efp_y']
-
-
-
-        return cmd, bgd_source
-
-    @staticmethod
-    def create_source(src_cfg, debug=False):
-        # Create a 1 x 1 arcsec source (to slightly overfill the LMS EFP), sampled at half the along-slice plate scale.
-        img_pitch = Globals.alpha_pix / 2.         # EFP image pitch in mas.
-        img_fov = 1.*u.arcsec
-        nxy = int(img_fov / img_pitch)
-        img_shape = nxy, nxy
-        cdelt_deg = img_pitch.to(u.deg)
-        # Create a common fits header.
-        hdr = fits.Header(dict(NAXIS=2, NAXIS1=nxy + 1, NAXIS2=nxy + 1,
-                               CRPIX1=nxy / 2, CRPIX2=nxy / 2, CRVAL1=0,
-                               CRVAL2=0, CDELT1=cdelt_deg.value, CDELT2=cdelt_deg.value,
-                               CUNIT1="DEG", CUNIT2="DEG",
-                               CTYPE1='RA---TAN', CTYPE2='DEC--TAN'))
-        wave = np.arange(27000, 55000, 10)      # Common wavelength range for source spectrum
-
-        if src_cfg['sed'] == 'dark':
-            img = np.full(img_shape, 1.)
-            flux = np.zeros(wave.shape)
-            sp = synphot.SourceSpectrum(synphot.Empirical1D, points=wave, lookup_table=flux)
-
-        if src_cfg['sed'] == 'bb':
-            img = np.full(img_shape, 1.)       # Pixel weights (uniform illumination).
-            tbb = src_cfg['temperature']
-            bb = Model.black_body(wave, tbb=tbb)    # ph/sec/Angstrom/cm2/sterad
-            img_omega = img_fov.to(u.rad) * img_fov.to(u.rad)
-            tau = src_cfg['tau']
-            flux = tau * bb(wave) * img_omega.value     # Total flux in image, so normalise by n_pixels to get pixel signal.
-            sp = synphot.SourceSpectrum(synphot.Empirical1D, points=wave, lookup_table=flux)
-
-        if src_cfg['sed'] == 'laser':
-            line_flux = src_cfg['flux']
-            gwid = 50       # Gaussian width in pixels
-            x, y = np.meshgrid(np.arange(nxy), np.arange(nxy))
-            img = np.exp(-1 * (((x - nxy/2) / gwid) ** 2 + ((y - nxy/2) / gwid) ** 2))
-
-        # Create ImageHDU object
-        hdu = fits.ImageHDU(data=img, header=hdr)
-
-        # Source creation
-        src = Source(image_hdu=hdu, spectra=sp)
-
-        if debug:
-            plt.imshow(src.fields[0].data)
-            plt.show()
-            src.spectra[0].plot()
-            plt.show()
-        return src
-
-    # @staticmethod
-    # def import_source(sim, sources, spatial_extent, do_plot=True):
-    #     """ Import spectrum into ScopeSim 'Source' object.
-    #     """
-    #     if spatial_extent == 'point':
-    #         waves_ang, flux_photlam = sources[0]
-    #         spec = SourceSpectrum(Empirical1D, points=waves_ang, lookup_table=flux_photlam)
-    #         spectra = [spec]
-    #         source = sim.Source(spectra=spectra, ref=np.zeros(1), x=np.array([0.]), y=np.array([0.]))
-    #     if spatial_extent == 'extended':
-    #         source = sources[0]
+    # def setup(self, sim_cfg, debug=False):
+    #     """ Set up observation command parameters.  Sources are defined by ImgHDS data cubes.
     #
-    #     if do_plot:
-    #         source.plot()
+    #     """
+    #     cmds = sim.UserCommands(use_instrument="METIS", set_modes=["wcu_lms"])
+    #     cmds['!OBS.dit'] = float(sim_cfg['dit'])             # Integration time per ramp (> 1.3 seconds)
+    #     cmds['!OBS.ndit'] = int(sim_cfg['ndit'])             # No. of ramps
+    #     wavelen = float(sim_cfg['wave_cen']) / 1000.
+    #     cmds['!OBS.wavelen'] = wavelen                       # Observation wavelength (microns)
+    #     src_config = Model.bgd_srcs[sim_cfg['bgd_src']]
+    #     # if obs_cfg['lms_pp1'] == 'closed':
+    #     #     src_config = Model.bgd_srcs['dark']
+    #     bgd_source = None
+    #     # bgd_source = self.create_source(src_config)       # All source information now in ScopeSim
+    #     # Show all settable parameters (eg, cmd[param] = new_value
+    #     if debug:
+    #         print('Instrument modes')
+    #         for mode in cmds.modes_dict:
+    #             print(mode)
+    #         fmt = "{:<40s}{:s}"
+    #         print(fmt.format('param', 'value'))
+    #         for param in cmds:
+    #             print(fmt.format(param, str(cmds[param])))
+    #     return cmds, bgd_source
+    #
+    # @staticmethod
+    # def create_source(src_cfg, debug=False):
+    #     # Create a 1 x 1 arcsec source (to slightly overfill the LMS EFP), sampled at half the along-slice plate scale.
+    #     img_pitch = Globals.alpha_pix / 2.         # EFP image pitch in mas.
+    #     img_fov = 1. * u.arcsec
+    #     nxy = int(img_fov / img_pitch)
+    #     img_shape = nxy, nxy
+    #     cdelt_deg = img_pitch.to(u.deg)
+    #     # Create a common fits header.
+    #     hdr = fits.Header(dict(NAXIS=2, NAXIS1=nxy + 1, NAXIS2=nxy + 1,
+    #                            CRPIX1=nxy / 2, CRPIX2=nxy / 2, CRVAL1=0,
+    #                            CRVAL2=0, CDELT1=cdelt_deg.value, CDELT2=cdelt_deg.value,
+    #                            CUNIT1="DEG", CUNIT2="DEG",
+    #                            CTYPE1='RA---TAN', CTYPE2='DEC--TAN'))
+    #     waves = np.arange(2700, 5500, 1) * u.nm     # Common wavelength range for source spectrum
+    #
+    #     img = None
+    #     sed = src_cfg['sed']
+    #     if sed == 'dark':
+    #         img = np.full(img_shape, 1.)
+    #         flux = np.zeros(waves.shape)
+    #         sp = synphot.SourceSpectrum(synphot.Empirical1D, points=waves, lookup_table=flux)
+    #     if sed == 'bb':
+    #         img = np.full(img_shape, 1.)       # Pixel weights (uniform illumination).
+    #         tbb = src_cfg['temperature']
+    #         bb = Model.black_body(waves, tbb=tbb)    # ph/sec/Angstrom/cm2/sterad
+    #         img_omega = img_fov.to(u.rad) * img_fov.to(u.rad)
+    #         tau = src_cfg['tau']
+    #         # a1 = bb * img_omega.value
+    #         # a2 = tau * a1
+    #         kludge = 0.0
+    #         flux = kludge * tau * bb * img_omega.value     # Total flux in image, so normalise by n_pixels to get pixel signal.
+    #         sp = synphot.SourceSpectrum(synphot.Empirical1D, points=waves, lookup_table=flux)
+    #     if sed == 'laser':
+    #         line_flux = src_cfg['flux']
+    #         gwid = 50       # Gaussian width in pixels
+    #         x, y = np.meshgrid(np.arange(nxy), np.arange(nxy))
+    #         img = np.exp(-1 * (((x - nxy/2) / gwid) ** 2 + ((y - nxy/2) / gwid) ** 2))
+    #     if sed == 'sky':
+    #         img = np.full(img_shape, 1.)       # Pixel weights (uniform illumination).
+    #         flux = Model.load_sky_emission(waves)
+    #         sp = synphot.SourceSpectrum(synphot.Empirical1D, points=waves, lookup_table=flux)
+    #         # print('Sky source spectrum not yet implemented !!')
+    #
+    #     # Create source as an ImageHDU object
+    #     hdu = fits.ImageHDU(data=img, header=hdr)
+    #     src = Source(image_hdu=hdu, spectra=sp)
+    #     if debug:
+    #         plt.imshow(src.fields[0].data)
     #         plt.show()
-    #         spectrum = source.spectra[0]
-    #         spectrum.plot()
+    #         src.spectra[0].plot()
     #         plt.show()
-    #     return source
+    #     return src
 
-    def convert_mjy_to_photlam(self, waves_um, flux_mjy):
-        """ Convert from um, mJy to PHOTLAM flux units (ph s-1 cm-2 ang-1) and wavelengths in Angstroms.
-        """
-        m_um = 1.E-6
-        waves_m = np.array(waves_um) * m_um
-        flux_w_m2_hz = 1.E-29 * np.array(flux_mjy) * .000001
-        cc = 2.997E+8
-        flux_w_m2_m = flux_w_m2_hz * cc / (waves_m * waves_m)
-        hc = 1.98645E-8
-        ph_energy_j = hc / waves_m
-        flux_ph_s_m2_m = ph_energy_j * flux_w_m2_m
-        ang_m = 1.E10
-        cm2_m2 = 1.E4
-        flux_photlam = flux_ph_s_m2_m * ang_m * cm2_m2 * s_units.PHOTLAM
-        waves_ang = waves_m * ang_m
-        return waves_ang, flux_photlam
-
+    # def convert_mjy_to_photlam(self, waves_um, flux_mjy):
+    #     """ Convert from um, mJy to PHOTLAM flux units (ph s-1 cm-2 ang-1) and wavelengths in Angstroms.
+    #     """
+    #     m_um = 1.E-6
+    #     waves_m = np.array(waves_um) * m_um
+    #     flux_w_m2_hz = 1.E-29 * np.array(flux_mjy) * .000001
+    #     cc = 2.997E+8
+    #     flux_w_m2_m = flux_w_m2_hz * cc / (waves_m * waves_m)
+    #     hc = 1.98645E-8
+    #     ph_energy_j = hc / waves_m
+    #     flux_ph_s_m2_m = ph_energy_j * flux_w_m2_m
+    #     ang_m = 1.E10
+    #     cm2_m2 = 1.E4
+    #     flux_photlam = flux_ph_s_m2_m * ang_m * cm2_m2 * s_units.PHOTLAM
+    #     waves_ang = waves_m * ang_m
+    #     return waves_ang, flux_photlam
+    #
     @staticmethod
     def make_exo_planet():
         # Read in toy exo-planet spectrum (PSG HR8799c, with CO and H2O atmosphere only. SRP = 2E5.)

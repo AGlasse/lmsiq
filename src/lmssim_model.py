@@ -4,6 +4,7 @@
 """
 import math
 import numpy as np
+import synphot.units
 from astropy.io import fits
 from astropy import units as u, constants as const
 from lmsdist_util import Util
@@ -17,7 +18,6 @@ from synphot import SourceSpectrum, units as s_units
 class Model:
 
     tau_blaze_kernel = None  # Kernel blaze profile tau(x) where x = (wave / blaze_wave(eo) - 1)
-
     tau_cfo_mask = 1.0      # CFO pinhole mask to detector (excluding detector and echelle blaze profile)
     tau_wcu_fp = .9         # WCU focal plane to METIS window
     tau_wcu_hs = .05         # WCU hot source to METIS window
@@ -80,7 +80,7 @@ class Model:
         if sed == 'bb':
             f_bb = Model.black_body(w_ext, tbb=source['temperature'])  # Units are photlam = ph/sec/cm2/angstrom/sterad
             if simulator is Globals.scopesim:
-                return f_bb
+                return w_ext, f_bb
             srp = 100000
             pixel_delta_w = w_ext / srp / Globals.pix_spec_res_el
             tau = Model.tau_wcu_hs * Model.tau_lms_toy
@@ -88,8 +88,8 @@ class Model:
         if sed == 'sky':
             f_sky = Model.load_sky_emission(w_ext)      # Units = ph/s/m2/um/arcsec2
             if simulator is Globals.scopesim:
-                f_sky_scope = f_sky.to(Globals.u.plam)
-                return f_sky_scope
+                f_sky_scope = f_sky.to(u.plam)
+                return w_ext, f_sky_scope
 
             f_ext_in = Model.tau_sky * Model.tau_lms_toy * f_sky
             atel = math.pi * (39. / 2)**2 *u.m *u.m               # ELT collecting area
@@ -104,7 +104,7 @@ class Model:
             f_laser2 = f_laser1 * pixel_etendue.to(u.cm2sr)                           # ph/sec/pixel
             f_laser3 = f_laser2 * w_ext.to(u.angstrom) / 100000
             if simulator is Globals.scopesim:
-                return f_laser1
+                return w_ext, f_laser1
             f_ext_in = Model.tau_wcu_hs * Model.tau_lms_toy * f_laser3
             atel = math.pi * (39. / 2)**2 *u.m *u.m               # ELT collecting area
             alpha_pix = Globals.alpha_pix               # Along slice pixel scale
@@ -338,10 +338,9 @@ class Model:
         data_table = hdu_list[1].data
         waves_all = data_table['lam'] * u.nm
         flux_all, flux_errs = data_table['flux'], None
-        # label, colour = 'Emission', 'orange'
-        flux_units = 1. / u.second / u.m / u.m / u.micron / u.arcsec / u.arcsec    # 'ph/s/m2/um/arcsec2'
+        # flux_units = u.ph / u.second / u.m / u.m / u.micron / u.arcsec / u.arcsec    # 'ph/s/m2/um/arcsec2'
 
-        print("Loaded sky transmission and emission spectrum with units {:s}".format(flux_units))
+        # print("Loaded sky transmission and emission spectrum with units {:s}".format(flux_units))
         flux = np.zeros(waves.shape)
         i = 0
         fmt = "{:10s}{:10s}{:10s}{:10s}{:10s}{:10s}"
@@ -349,10 +348,11 @@ class Model:
         n_waves_all, = waves_all.shape
         #  Bug!  Need to implement long wavelength test for when requested wavelength range overruns sky spectrum..
         for j, new_wave in enumerate(waves):
-            while waves_all[i] < new_wave:
+            # print(i, waves_all[i], new_wave)
+            while waves_all[i] <= new_wave:
                 i += 1
             flux[j] = np.interp(new_wave, waves_all[i - 1:i + 1], flux_all[i - 1:i + 1])
             i += 1
             if i >= n_waves_all - 1:
                 break
-        return flux * flux_units
+        return flux * synphot.units.PHOTLAM

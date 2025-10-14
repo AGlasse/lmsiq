@@ -88,7 +88,9 @@ class Globals:
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
     pix_margin = [64, 64]		            # Unilluminated margin around outer detector edge (pixels)
     margin = pix_margin[0] * nom_pix_pitch / 1000.          # Convert to mm
-    det_size = 2048 * nom_pix_pitch / 1000.                 # Detector size in mm
+    det_format = 2048, 2048
+    mosaic_format = 2, 2
+    det_size = det_format[0] * nom_pix_pitch / 1000.                 # Detector size in mm
     xyn = .5 * det_gap                      # x,y distance from nearest light sensitive pixel to the origin
     xyf = xyn + det_size - margin           # x,y distance from farthest light sensitive pixel to the origin
     det_lims = {'1': ([-xyf, -xyn], [+xyn, +xyf]),
