@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import photutils
 from photutils.centroids import centroid_com
 from photutils.aperture import RectangularAperture, CircularAperture
 from scipy.optimize import curve_fit

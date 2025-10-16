@@ -1,7 +1,10 @@
 import numpy as np
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.axes
 from mpl_toolkits.axes_grid1 import ImageGrid
+
+from lms_globals import Globals
 
 
 class Plot:
@@ -13,7 +16,8 @@ class Plot:
     def mosaic(mosaic, **kwargs):
         file_name, hdr, hdus = mosaic
 
-        cmap = kwargs.get('cmap', 'hot')
+        cmap_name = kwargs.get('cmap', 'hot')
+        cmap = mpl.colormaps[cmap_name]
         sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
 
         # Set up figure and image grid
@@ -45,6 +49,12 @@ class Plot:
             ax.set_ylim(ymin-1, ymax+1)
             ax.set_aspect('equal', 'box')
             image = hdus[det_idx].data
+            mask = kwargs.get('mask', None)
+            if mask is not None:
+                mask_value, mask_colour = mask
+                image = np.ma.masked_where(image == mask_value, image)
+                cmap.set_bad(color=mask_colour)
+
             im = ax.imshow(image, extent=(xmin-0.5, xmax+0.5, ymin-0.5, ymax+0.5),
                            interpolation='nearest', cmap=cmap, vmin=vmin, vmax=vmax, origin='lower')
             if sb is not None:
@@ -80,6 +90,10 @@ class Plot:
         """ Plot multiple profile tuples.
         """
         figsize = [8, 8]
+        n_profiles = len(profiles)
+        nax_rows = Globals.n_lms_detectors
+        nax_cols = int(n_profiles / nax_rows)
+
         n_axes = nax_rows * nax_cols
         fig, axes = plt.subplots(nrows=nax_rows, ncols=nax_cols, figsize=figsize,
                                  sharex='all', sharey='all', squeeze=True)
@@ -87,12 +101,10 @@ class Plot:
         ax_list = np.array(ax_list).flatten()
         for i, profile in enumerate(profiles):
             title, x_val, y_val, pts_list = profile
-
             ax = ax_list[i]
             ax.plot(x_val, y_val)
             ax.set_title(title)
             for pts in pts_list:
                 x_pts, y_pts, colour = pts
                 ax.plot(x_pts, y_pts, linestyle='none', marker='x', color=colour)
-
         plt.show()

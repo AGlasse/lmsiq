@@ -17,7 +17,7 @@ class Filer:
     cube_folder, iq_png_folder = None, None
     slice_results_path, dataset_results_path = None, None
     pdp_path, profiles_path, centroids_path = None, None, None
-    # wpa_fit_order = None
+    test_data_folder = None
 
     def __init__(self, model_configuration):
         analysis_type, opticon, date_stamp, _, _, _ = model_configuration
@@ -40,15 +40,15 @@ class Filer:
         return
 
     @staticmethod
-    def read_zemax_fits(path, header_ext=0, data_exts=[0]):
+    def read_zemax_fits(path, pri_hdr_ext=0, data_exts=[0]):
         """ Read in a Zemax model (PSF) image.
         """
         hdu_list = fits.open(path, mode='readonly')
-        header = hdu_list[header_ext].header
-        image_list = [hdu_list[i].data for i in data_exts]
+        pri_hdr = hdu_list[pri_hdr_ext].header
+        image_hdus = [hdu_list[i] for i in data_exts]
         if len(data_exts) == 1:
-            return header, image_list[0]
-        return header, image_list
+            return pri_hdr, image_hdus[0]
+        return pri_hdr, image_hdus
 
     @staticmethod
     def write_zemax_fits(path, header, data):
@@ -69,13 +69,14 @@ class Filer:
         return
 
     @staticmethod
-    def set_test_data_folder():
-        Filer.test_data_folder = '../data/test_toysim'
+    def set_test_data_folder(simulator_name):
+        Filer.test_data_folder = "../data/test_{:s}".format(simulator_name)
         return
 
     @staticmethod
     def read_mosaics(inc_tags=[], exc_tags=[]):
         mosaics = []
+        data_ext_nos = [2, 1, 3, 4]
         folder = Filer.test_data_folder
         file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
         if len(file_list) == 0:
@@ -87,7 +88,7 @@ class Filer:
 
         for file in file_list:
             path = folder + '/' + file
-            hdr, data = Filer.read_zemax_fits(path, data_exts=[1, 2, 3, 4])
+            hdr, data = Filer.read_zemax_fits(path, data_exts=data_ext_nos)
             mosaic = file, hdr, data
             mosaics.append(mosaic)
         return mosaics

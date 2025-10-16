@@ -7,7 +7,7 @@ from lms_obs_map import ObsMap
 from lmssim_scope import Scope
 from lmssim_toy import Toy
 
-test_name = 'lms_opt_01_t2'
+test_name = 'lms_cal'       # 'lms_opt_01_t2'
 force_simulator = Globals.scopesim   # Set = None to use simulator specified in lms-opt-config.csv
 
 

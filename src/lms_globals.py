@@ -38,12 +38,12 @@ class Globals:
     n_svd_fit_terms = 6
     # Order of polynomial fit to wave = f(pri_ang, ech_ang) and tform_matrix_term = g(pri_ang, ech_ang)
     surface_fit_order = 4  # Matrix order for polynomial surface fit (3 or 4)
-
     surface_fit_order = 4         # Typically set to 3 or 4 in lmsdist.py
     surface_fit_n_coeffs = 10     # Non-zero terms in upper triangular matrix of order 'surface_fit_order'
     wpa_fit_order = {nominal: 6, extended: 3}
 
     zemax_configuration = None
+    n_lms_detectors = 4
     det_pix_size, im_pix_size = None, None
     optical_configurations = [nominal, extended]
     slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
@@ -111,3 +111,5 @@ class Globals:
     axes = ['spectral', 'spatial']
     # Zemax PSF image oversampling wrt detector pixels.
     oversampling = 4
+
+    as_built_file = '../output/asbuilt/asbuilt'

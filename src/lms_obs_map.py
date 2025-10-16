@@ -25,6 +25,8 @@ class ObsMap:
                 obs_keys = line.split(',')
                 continue
             tokens = line.split(',')
+            if '#' in tokens[0]:        # Skip commented lines.
+                continue
             obs_cfg = {}
             for obs_key, token in zip(obs_keys, tokens):
                 if obs_key == '':
@@ -37,7 +39,6 @@ class ObsMap:
                     print('Creating simulation configuration for ' + test_name)
                     simulator = obs_cfg['simulator']
                     sim_config = ObsMap.get_opt_01_t3_config(test_name, simulator)
-
                     return sim_config
                 sim_config[cfg_id] = obs_cfg
 

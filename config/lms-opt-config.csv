@@ -1,5 +1,7 @@
 id,simulator,opticon,wave_cen,dit,ndit,nobs,bgd_src,wcu_aper,wcu_mask,wcu_angle,wcu_x,wcu_y,cfo_mask,lms_pp1
-lms_test,scopesim,nominal,4600,5,200,1,sky,0.01,open,0.,0.,0.,open,open
+lms_cal_2s_1f,scopesim,nominal,4600,2.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
+lms_cal_20s_1f,scopesim,nominal,4600,20.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
+lms_cal_2s_10f,scopesim,nominal,4600,2.,10,1,wcu_bb,0.02,open,0.,0.,0.,open,open
 lms_opt_01_t1_nom_dark1,scopesim,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
 lms_opt_01_t1_nom_flood,scopesim,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
 # lms_opt_01_t1_ext_flood,scopesim,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
