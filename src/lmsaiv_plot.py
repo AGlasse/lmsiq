@@ -19,10 +19,11 @@ class Plot:
         cmap_name = kwargs.get('cmap', 'hot')
         cmap = mpl.colormaps[cmap_name]
         sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
+        title = kwargs.get('title', file_name)
 
         # Set up figure and image grid
         fig = plt.figure(figsize=(8, 7))
-        fig.suptitle(file_name)
+        fig.suptitle(title)
         grid = ImageGrid(fig, 111,
                          nrows_ncols=(2, 2),
                          axes_pad=0.15,

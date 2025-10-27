@@ -307,9 +307,10 @@ class Util:
         """
         filtered_transform_list = []
         for transform in transform_list:
-            cfg = transform.configuration
+            cfg = transform.configuration | transform.slice_configuration
             is_match = True
             for key in kwargs:
+                print(key, cfg[key], kwargs[key])
                 is_match = False if cfg[key] != kwargs[key] else is_match
             if is_match:
                 filtered_transform_list.append(transform)
@@ -390,7 +391,7 @@ class Util:
 
     @staticmethod
     def get_term_values(transforms, slice_no, spifu_no, debug=False):
-        """ Find the transforms which map the centre of slide 13 (alpha = 0.0) onto the EFP.
+        """ Find the transforms which map the centre of slice 13 (alpha = 0.0) onto the EFP.
         """
         phase = 0.                      # Across slice fractional displacement
         y = Util.slice_to_efp_y(slice_no, phase)
@@ -405,10 +406,12 @@ class Util:
                        'pri_ang': [], 'ech_ang': [],
                        'mfp_y': [], 'w_bs': [], 'ech_orders': [], 'matrices': []}
         for transform in transforms:
-            cfg = transform.configuration
-            if (cfg['slice_no'] != slice_no) or (cfg['spifu_no'] != spifu_no):
+            slice_cfg = transform.slice_configuration
+            if (slice_cfg['slice_no'] != slice_no) or (slice_cfg['spifu_no'] != spifu_no):
                 continue
             # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
+            # trace = transform.trace
+            cfg = transform.configuration
             w_min, w_max = cfg['w_min'], cfg['w_max']
             mfp_w_list, mfp_x_list = [], []
             for efp_w in np.linspace(w_min, w_max, 100):
@@ -427,7 +430,7 @@ class Util:
                                  mfp_x, mfp_y, mfp_w))
             term_values['pri_ang'].append(cfg['pri_ang'])
             term_values['ech_ang'].append(cfg['ech_ang'])
-            term_values['ech_orders'].append(cfg['ech_order'])
+            term_values['ech_orders'].append(slice_cfg['ech_order'])
             term_values['mfp_y'].append(mfp_y)
             term_values['w_bs'].append(mfp_w)
             term_values['matrices'].append(transform.matrices)
@@ -584,7 +587,7 @@ class Util:
         Note that the transform will normally have been verified as non-vignetting
         for this point in the EFP.
         """
-        config, matrices = transform.configuration, transform.matrices
+        config, matrices = transform.slice_configuration, transform.matrices
         ech_ord = config['ech_order']
 
         alphas, efp_y, efp_w = efp_points['efp_x'], efp_points['efp_y'], efp_points['efp_w']

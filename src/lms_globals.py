@@ -15,19 +15,37 @@ class Globals:
     deg_rad = 180. / math.pi
     rad_per_mas = 4.85E-9
     sterad_per_mas2 = rad_per_mas * rad_per_mas
-    elt_area = 1350. * u.m * u.m
-
-    pix_spec_res_el = 2.5       # Pixels per spectral resolution element
-
     u.plam = u.photon / u.s / u.cm / u.cm / u.angstrom / u.steradian
     u.cm2 = u.cm * u.cm
+
+    # Optical parameters
+    elt_area = 1350. * u.m * u.m
+    pix_spec_res_el = 2.5       # Pixels per spectral resolution element
 
     # Simulators
     scopesim, toysim = 'scopesim', 'toysim'
 
-    # Optical configurations
+    # Optical configurations and focal planes
     nominal = 'nominal'
     extended = 'spifu'
+    coord_in = 'efp_x', 'efp_y', 'wavelength'
+    coord_out = 'det_x', 'det_y'
+
+    # Zemax data descriptors
+
+    dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
+                       coord_in, coord_out)
+    dist_ext_config = ('distortion', extended, '20250110', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                       coord_in, coord_out)
+    iq_nom_config = ('iq', nominal, '2024073000', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
+                     coord_in, coord_out)
+    iq_ext_config = ('iq', extended, '2024061403', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                     coord_in, coord_out)
+
+    model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
+                            'iq': {nominal: iq_nom_config, extended: iq_ext_config}
+                            }
+    lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_order': None, 'ech_ang': None}
 
     # Transform parameters
     svd_order = 4
@@ -38,7 +56,6 @@ class Globals:
     n_svd_fit_terms = 6
     # Order of polynomial fit to wave = f(pri_ang, ech_ang) and tform_matrix_term = g(pri_ang, ech_ang)
     surface_fit_order = 4  # Matrix order for polynomial surface fit (3 or 4)
-    surface_fit_order = 4         # Typically set to 3 or 4 in lmsdist.py
     surface_fit_n_coeffs = 10     # Non-zero terms in upper triangular matrix of order 'surface_fit_order'
     wpa_fit_order = {nominal: 6, extended: 3}
 

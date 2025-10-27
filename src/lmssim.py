@@ -7,7 +7,7 @@ from lms_obs_map import ObsMap
 from lmssim_scope import Scope
 from lmssim_toy import Toy
 
-test_name = 'lms_cal'       # 'lms_opt_01_t2'
+sim_test_name = 'lms_opt_01_t2_nom_wcu_grid'       # 'lms_opt_01_t2'
 force_simulator = Globals.scopesim   # Set = None to use simulator specified in lms-opt-config.csv
 
 
@@ -36,4 +36,4 @@ def run(test_name):
             toy.run(sim_config)
     return
 
-run(test_name)
+run(sim_test_name)

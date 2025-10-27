@@ -8,6 +8,7 @@ Python object to encapsulate ray trace data for the LMS
 import math
 import numpy as np
 import matplotlib.patches as mpatches
+
 from lms_detector import Detector
 from lms_globals import Globals
 from lmsdist_util import Util
@@ -17,9 +18,10 @@ from lms_transform import Transform
 
 class Trace:
 
-    common_series_names = {'ech_order': 'int', 'slice_no': 'int', 'sp_slice': 'int',
-                           'slicer_x': 'float', 'slicer_y': 'float',
-                           'ifu_x': 'float', 'ifu_y': 'float'}
+    # Configuration dicts.  Note lms_config is instantiated from Globals.
+    series_names = {'ech_order': 'int', 'slice_no': 'int', 'sp_slice': 'int',
+                    'slicer_x': 'float', 'slicer_y': 'float',
+                    'ifu_x': 'float', 'ifu_y': 'float'}
     nominal_efp_map = {'efp_x': 'fp2_x', 'efp_y': 'fp2_y'}
     nominal_series_names = {'slit_x': 'float', 'slit_y': 'float'}
     spifu_efp_map = {'efp_x': 'fp1_x', 'efp_y': 'fp1_y'}
@@ -38,39 +40,48 @@ class Trace:
     cfg_tags, cfg_id_counter = [], 0
 
     affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
+    model_config = None
 
-    def __init__(self, path, model_config, **kwargs):
+    def __init__(self, **kwargs):
+        self.lms_config = None
+        self.transform_fits_name = None
+        self.transforms = []
+        self.offset_data = None
+        self.a_rms = 0.                          # RMS transform error for trace (microns)
+        self.n_mat_terms = None
+        self.is_extended = None
+        self.wmin, self.wmax = None, None
+        self.series = None
+        self.unique_ech_orders = None
+        self.unique_slices = None
+        self.unique_spifu_slices = None
+        self.unique_waves = None
+        self.n_rays = None
+        return
+
+    def create(self, path, model_config, **kwargs):
         """ Read in Zemax ray trace data for a specific LMS configuration (echelle and prism angle, spectral IFU
         selected or not).
         @author: Alistair Glasse
         Read Zemax ray trace data
         """
-        _, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
-        self.is_spifu = opticon == Globals.extended
-        self.model_config = model_config
+        Trace.model_config = model_config
+        analysis_type, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
+        self.is_extended = opticon == Globals.extended
         self.transform_fits_name = None
-        self.ray_trace = None
         self.transforms = []
         self.offset_data = None
-        self.a_rms = 0.                          # RMS transform errorfor trace (microns)
+        self.a_rms = 0.                          # RMS transform error for trace (microns)
         self.n_mat_terms = None
         silent = kwargs.get('silent', False)
         if not silent:
             print('Reading Zemax model data from ' + path)
-        csv_name, config, series = self._read_csv(path, model_config)
-        pri_ang = config['Prism angle']
-        ech_ang = config['Echelle angle']
-        # Set unique (LMS mechanism settings) configuration number for this trace.
-        cfg_tag = "{:s}_{:05.3f}_{:05.3f}".format(opticon, ech_ang, pri_ang)
-        if cfg_tag not in Trace.cfg_tags:
-            self.cfg_id = Trace.cfg_id_counter
-            Trace.cfg_id_counter += 1
-        self.lms_config = {'opticon': opticon, 'cfg_id': self.cfg_id, 'pri_ang': config['Prism angle'],
-                           'ech_ang': config['Echelle angle'], 'ech_order': config['Spectral order']}
-        self.parameter = config
+        csv_name, lms_config, series = self._read_csv(path, model_config)
+        lms_config['opticon'] = opticon
+        self.lms_config = lms_config
 
         # For SPIFU data, spifu slices 1,2 -> echelle order 23, 3,4 _> 24, 5,6 -> 25
-        if self.is_spifu:
+        if self.is_extended:
             spifus = series['sp_slice']
             spifu_indices = spifus - 1
             ech_orders = spifu_indices // 2 + 23
@@ -89,16 +100,15 @@ class Trace:
         self.unique_spifu_slices = np.unique(spifus)
         self.unique_waves = np.unique(waves)
         self.n_rays, = slice_nos.shape
-
         self._create_mask(silent)
-        Trace.model_configuration = model_config
+        self.create_svd_transforms()
         Trace.create_affine_transforms()
         return
 
     def __str__(self):
         fmt = "{:s}, EA={:6.3f} deg, PA={:6.3f} deg, "
-        opticon = self.model_config[1]
-        string = fmt.format(opticon, self.parameter['Echelle angle'], self.parameter['Prism angle'])
+        opticon = Trace.model_configuration[1]
+        string = fmt.format(opticon, self.lms_config['ech_ang'], self.lms_config['pri_ang'])
         smin, smax = self.unique_slices[0], self.unique_slices[-1]
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
         return string
@@ -132,15 +142,15 @@ class Trace:
     def get_ifp_boresight(self, opticon):
         spifu_no = 0 if opticon == Globals.nominal else 3
         ech_order = self.unique_ech_orders[0] if opticon == Globals.nominal else self.unique_ech_orders[1]
-        slit_x = self.get('ifu_x', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
-        waves = self.get('wavelength', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
+        slit_x = self.get_series('ifu_x', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
+        waves = self.get_series('wavelength', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
 
-        ech_orders = self.get('ech_order', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
+        ech_orders = self.get_series('ech_order', slice_no=13, spifu_no=spifu_no, ech_order=ech_order)
         wave_bs = np.interp(0.0, slit_x, waves)     # Find wavelength where slit_x == 0.
         pri_ang = self.lms_config['pri_ang']
         return wave_bs, pri_ang
 
-    def create_transforms(self, **kwargs):
+    def create_svd_transforms(self, **kwargs):
         """ Generate transforms to map from phase, across-slice coordinates in the entrance focal plane, to detector
         row, column coordinates.  Also update the wavelength values at the centre and corners of the detector mosaic.
         """
@@ -153,23 +163,20 @@ class Trace:
         for spifu_no in self.unique_spifu_slices:
             for slice_no in self.unique_slices:
                 for ech_order in self.unique_ech_orders:
-                    transform = Transform(cfg=self.lms_config)
-                    cfg = transform.configuration
-                    cfg['slice_no'] = slice_no
-                    cfg['spifu_no'] = spifu_no
-                    cfg['ech_order'] = ech_order
-                    # kwargs = {'spifu_no': spifu_no, 'slice_no': slice_no, 'ech_order': ech_order}
-                    waves = self.get('wavelength', **cfg)
+                    transform = Transform(trace=self, spifu_no=spifu_no, slice_no=slice_no, ech_order=ech_order,
+                                          wmin=self.wmin, wmax=self.wmax)
+                    transform.slice_no = slice_no
+                    transform.spifu_no = spifu_no
+                    transform.echo_order = ech_order
+                    cfg = {'slice_no': slice_no, 'spifu_no': spifu_no, 'ech_order': ech_order}
+                    waves = self.get_series('wavelength', **cfg)
                     n_waves, = waves.shape
                     if n_waves == 0:
                         continue
-
-                    ech_orders = self.get('ech_order', **cfg)
-                    print(slice_no, spifu_no, ech_order, waves[0], ech_orders[0])
-
-                    alpha = self.get('efp_x', **cfg)
-                    mfp_x = self.get(fp_out[0], **cfg)
-                    mfp_y = self.get(fp_out[1], **cfg)
+                    ech_orders = self.get_series('ech_order', **cfg)
+                    alpha = self.get_series('efp_x', **cfg)
+                    mfp_x = self.get_series(fp_out[0], **cfg)
+                    mfp_y = self.get_series(fp_out[1], **cfg)
 
                     phase = Util.waves_to_phases(waves, ech_orders)
                     a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
@@ -202,11 +209,12 @@ class Trace:
         self.a_rms = a_rms
         return
 
-    def get(self, tag, **kwargs):
+    def get_series(self, tag, **kwargs):
         """ Extract a specific coordinate (identified by 'tag') from the trace for rays which pass through
         a specified spatial and (if the spectral IFU is selected) spectral slice.
         """
-        _, opticon, _, _, _, _ = self.model_config
+        # _, opticon, _, _, _, _ = Trace.model_config
+        opticon = kwargs.get('opticon', None)
         slice_no = kwargs.get('slice_no', None)
         spifu_no = kwargs.get('spifu_no', None)
         ech_order = kwargs.get('ech_order', None)
@@ -243,7 +251,7 @@ class Trace:
         n_rows, n_cols = 7, 4
         unique_spifus, unique_slices = self.unique_spifu_slices, self.unique_slices
         spifu_start, slice_start = unique_spifus[0], unique_slices[0]
-        if self.is_spifu:
+        if self.is_extended:
             n_rows, = unique_spifus.shape
             n_cols, = unique_slices.shape
         if subset:
@@ -258,7 +266,7 @@ class Trace:
             ech_order, slice_no, spifu_no, _, _ = config
             row, col = -1, 0
             if subset:
-                if self.is_spifu:
+                if self.is_extended:
                     select_row = {6: 0, 3: 1, 1: 2}
                     if slice_no == 12 and spifu_no in select_row:
                         row = select_row[spifu_no]
@@ -269,7 +277,7 @@ class Trace:
             else:
                 spifu_idx = int(spifu_no - spifu_start)
                 slice_idx = int(slice_no - slice_start)
-                if self.is_spifu:
+                if self.is_extended:
                     row = spifu_idx
                     col = slice_idx
                 else:
@@ -303,7 +311,7 @@ class Trace:
                 plot.plot_points(ax, x_fit, y_fit, ms=1.0, colour='blue')
                 plot.plot_points(ax, x, y, ms=1.0, mk='x')
             title = "slice {:3.0f}".format(slice_no)
-            if self.is_spifu:
+            if self.is_extended:
                 title += ", spectral slice {:3.0f}".format(spifu_no)
             ax.set_title(title)
         ax = ax_list[n_rows-1, 0]
@@ -359,7 +367,8 @@ class Trace:
         # Add the legend to both plots
         x_labels = ['Det x / mm', 'Det y / mm']
         y_labels = ["Residual / micron.", '']
-        fmt = "{:s} residual, $\sigma$ = {:4.2f} $\mu$m"
+        gk_text = '$\sigma$ = {:4.2f} $\mu$m'
+        fmt = '{:s} residual, ' + gk_text
         for pane in range(0, 2):
             ax = ax_list[0, pane]
             ax.set_xlabel(x_labels[pane])
@@ -446,7 +455,7 @@ class Trace:
 
         fp_plot_mask = {'LMS EFP': False, 'Slicer': False,
                         'IFU': False, 'Slit': True, 'SP slicer': True, 'Detector': True}
-        focal_planes = Trace.spifu_focal_planes if self.is_spifu else Trace.nominal_focal_planes
+        focal_planes = Trace.spifu_focal_planes if self.is_extended else Trace.nominal_focal_planes
 
         n_focal_planes = len(focal_planes)
         colour_scheme = kwargs.get('colour_scheme', 'wavelength')
@@ -479,7 +488,6 @@ class Trace:
         :return:
         """
         _, _, _, _, coord_in, coord_out = model_config
-        is_spifu = self.is_spifu
         csv_name = path.split('/')[-1]
         name = csv_name.split('.')[0]
         with open(path, 'r') as text_file:
@@ -488,21 +496,23 @@ class Trace:
         line_iter = iter(line_list)
 
         # Read configuration parameters
-        efp_map = Trace.spifu_efp_map if is_spifu else Trace.nominal_efp_map
+        efp_map = Trace.spifu_efp_map if self.is_extended else Trace.nominal_efp_map
         efp_x_name = efp_map['efp_x']
         efp_y_name = efp_map['efp_y']
-        parameter = {'name': name}
+        lms_config = Globals.lms_config_template.copy()
         while True:
             line = next(line_iter)
             tokens = line.split(':')
             if len(tokens) < 2:
                 break
-            name = tokens[0].strip()
+            parameter = tokens[0].strip()
             val = float(tokens[1].strip(', '))
-            parameter[name] = val
-            if is_spifu:            # For SPIFU data, the order is currently calculated from the spifu slice number.
-                parameter['Spectral order'] = -1
-            self.parameter = parameter
+            par_to_lms = {'Spectral order': 'ech_order', 'Echelle angle': 'ech_ang',
+                          'Prism angle': 'pri_ang'}
+            lms_name = par_to_lms[parameter]
+            lms_config[lms_name] = val
+        if self.is_extended:            # For SPIFU data, the order is currently calculated from the spifu slice number.
+            lms_config['ech_order'] = -1
 
         # Create dictionary of data series, include echelle order, slice, spifu_slice, wavelength, and input and output
         # focal planes.
@@ -521,8 +531,8 @@ class Trace:
                 ser_tag = 'slice_no'
             zem_column[ser_tag] = i, zem_tag
 
-        series_names = Trace.common_series_names
-        if is_spifu:
+        series_names = Trace.series_names
+        if self.is_extended:
             series_names.update(Trace.spifu_series_names)
         else:
             series_names.update(Trace.nominal_series_names)
@@ -533,6 +543,7 @@ class Trace:
         series = {}
         for name in series_names:
             series[name] = []
+        series['ech_order'] = []    # Add explicitly, since it changes within the csv file for extended data.
         while True:
             line = next(line_iter)
             tokens = line.split(',')
@@ -540,12 +551,12 @@ class Trace:
                 break
             for name in series_names:
                 if name == 'ech_order':         # Assign spectral IFU orders later
-                    val = 0 if is_spifu else parameter['Spectral order']
+                    val = 0 if self.is_extended else lms_config['ech_order']
                     series[name].append(val)
                     continue
                 if name == 'sp_slice':
                     val = 0
-                    if is_spifu:
+                    if self.is_extended:
                         zem_col, zem_tag = zem_column[name]
                         val = int(tokens[zem_col])
                     series[name].append(val)      # Default for nominal configuration
@@ -567,7 +578,7 @@ class Trace:
         for name in series:
             vals = series[name]
             series[name] = np.array(vals, dtype=int) if name in int_arrays else np.array(vals)
-        return csv_name, parameter, series
+        return csv_name, lms_config, series
 
     def _create_mask(self, silent):
         edge = Detector.det_size * Detector.det_pix_size / 1000.0

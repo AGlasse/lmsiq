@@ -60,8 +60,8 @@ data_dictionary = {'2024032400': (nominal, 'all', '20240109', fts_efp, 4,
                    }
 
 iq_date_stamp = '2024061403'
-optical_path, mc_bounds, dist_date_stamp, field_tgt_slice, slice_radius, data_label = data_dictionary[iq_date_stamp]
-data_identifier = {'optical_path': optical_path,
+opticon, mc_bounds, dist_date_stamp, field_tgt_slice, slice_radius, data_label = data_dictionary[iq_date_stamp]
+data_identifier = {'optical_path': opticon,
                    'iq_date_stamp': iq_date_stamp,
                    'mc_bounds': mc_bounds,                    # Set to None, [mlo, mhi] or 'all'
                    'dist_date_stamp': dist_date_stamp,
@@ -69,10 +69,10 @@ data_identifier = {'optical_path': optical_path,
                    'slice_radius': slice_radius,
                    'data_label': data_label
                    }
-is_spifu = optical_path == Globals.extended
+is_spifu = opticon == Globals.extended
 
 fmt = "Analysing dataset for {:s} optical path, dated {:s}"
-print(fmt.format(optical_path, iq_date_stamp))
+print(fmt.format(opticon, iq_date_stamp))
 
 # Initialise static classes
 globals = Globals()
@@ -80,9 +80,9 @@ analyse = Analyse()
 plot = Plot()
 detector = Detector()
 util = Util()
-fitsio = FitsIo(optical_path)
+fitsio = FitsIo(opticon)
 
-model_configuration = analysis_type, optical_path, iq_date_stamp, None, None, None
+model_configuration = analysis_type, opticon, iq_date_stamp, None, None, None
 iq_filer = Filer(model_configuration)
 
 image_manager = ImageManager()
@@ -121,7 +121,7 @@ if build_cubes:
     print('\nReconstructing cubes and analysing slice profile data')
     print('-----------------------------------------------------')
     cuber = Cuber()
-    dist_model_configuration = 'distortion', optical_path, dist_date_stamp, None, None, None
+    dist_model_configuration = 'distortion', opticon, dist_date_stamp, None, None, None
     dist_filer = Filer(dist_model_configuration)
     cuber.build(data_identifier, process_control, image_manager, iq_filer, dist_filer, debug=False)
 
@@ -132,9 +132,9 @@ if plot_cubes:
     print('-'*len(title))
     cuber = Cuber()
     cube_packages = cuber.read_pkl_cubes(iq_filer)
-    if optical_path == 'nominal':           # Filter out weird nominal configuration...!
+    if opticon == 'nominal':           # Filter out weird nominal configuration...!
         cube_packages = Cuber.remove_configs(cube_packages, [21])
     # cuber.write_csv(image_manager, cube_packages, iq_filer)
-    cuber.plot(optical_path, cube_packages, iq_filer, is_defocus=False)
+    cuber.plot(opticon, cube_packages, iq_filer, is_defocus=False)
 
 print('LMS Repeatability (lmsiq.py) - done')

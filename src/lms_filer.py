@@ -1,6 +1,7 @@
 import os
 from os import listdir
 import pickle
+import dill
 from astropy.table import Table
 from astropy.io import fits
 from astropy.io.fits import Card, HDUList, ImageHDU, PrimaryHDU
@@ -12,58 +13,90 @@ import numpy as np
 class Filer:
 
     analysis_types = ['distortion', 'iq']
+    model_configuration = None
     trace_file, poly_file, wcal_file, stats_file, tf_fit_file = None, None, None, None, None
     base_results_path = None
+    data_folder = None
     cube_folder, iq_png_folder = None, None
     slice_results_path, dataset_results_path = None, None
     pdp_path, profiles_path, centroids_path = None, None, None
-    test_data_folder = None
+    test_data_folder, tf_dir = None, None
 
-    def __init__(self, model_configuration):
+    def __init__(self, analysis_type, opticon):
+        model_configuration = Globals.model_configurations[analysis_type][opticon]
         analysis_type, opticon, date_stamp, _, _, _ = model_configuration
         # Filer.wpa_fit_order = Globals.wpa_fit_order_dict[opticon]
-        self.model_configuration = model_configuration
+        Filer.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, opticon, date_stamp)
-        self.data_folder = self.get_folder('../data/model/' + sub_folder)
-        self.sim_folder = self.get_folder('../data/sim/' + sub_folder)
-        self.output_folder = self.get_folder('../output/' + sub_folder)
-        file_leader = self.output_folder + sub_folder.replace('/', '_')
-        if analysis_type == 'distortion':
-            self.tf_dir = self.get_folder(self.output_folder + 'fits')
-            self.trace_file = file_leader + '_trace'  # All ray coordinates
-            self.poly_file = file_leader + '_dist_poly.txt'
-            self.wcal_file = file_leader + '_dist_wcal.txt'  # Echelle angle as function of wavelength
-            self.stats_file = file_leader + '_dist_stats.txt'
-            self.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
-        if analysis_type == 'iq':
-            self.cube_folder = self.get_folder(self.output_folder + '/cube')
+        Filer.data_folder = Filer.get_folder('../data/model/' + sub_folder)
+        Filer.sim_folder = Filer.get_folder('../data/sim/' + sub_folder)
+        Filer.output_folder = Filer.get_folder('../output/' + sub_folder)
+        file_leader = Filer.output_folder + sub_folder.replace('/', '_')
+        Filer.tf_dir = Filer.get_folder(Filer.output_folder + 'fits')
+        Filer.trace_file = file_leader + '_trace'  # All ray coordinates
+        Filer.poly_file = file_leader + '_dist_poly.txt'
+        Filer.wcal_file = file_leader + '_dist_wcal.txt'  # Echelle angle as function of wavelength
+        Filer.stats_file = file_leader + '_dist_stats.txt'
+        Filer.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
+        Filer.cube_folder = Filer.get_folder(Filer.output_folder + '/cube')
         return
 
     @staticmethod
-    def read_zemax_fits(path, pri_hdr_ext=0, data_exts=[0]):
-        """ Read in a Zemax model (PSF) image.
+    def read_zemax_fits(path):
+        """ Read in a Zemax model (PSF) image, with the image data in the primary extension.
         """
         hdu_list = fits.open(path, mode='readonly')
-        pri_hdr = hdu_list[pri_hdr_ext].header
-        image_hdus = [hdu_list[i] for i in data_exts]
-        if len(data_exts) == 1:
-            return pri_hdr, image_hdus[0]
-        return pri_hdr, image_hdus
+        hdr = hdu_list[0].header
+        hdu = hdu_list[0].data
+        return hdr, hdu
 
     @staticmethod
-    def write_zemax_fits(path, header, data):
-        """ Write a Zemax image.  Header in hdu[0].  If data is a (3D) image stack, they are written to hdu[1] onwards,
-        while a single image is written to hdu[0]
+    def write_zemax_fits(path, header, hdu):
+        """ Write a Zemax image into the primary extension of a new fits file.
         """
-        n_frames = len(data)
         primary_hdu = PrimaryHDU(header=header)
         hdu_list = HDUList([primary_hdu])
-        for i in range(0, n_frames):
-            if n_frames == 1:
-                hdu_list[0].data = data
-                break
-            hdu = ImageHDU(data[i])
-            hdu.name = "Detector {:d}".format(i+1)
+        hdu_list[0] = hdu
+        hdu_list.writeto(path, overwrite=True, checksum=True)
+        return
+
+    @staticmethod
+    def read_mosaic(folder, file_name):
+        data_ext_nos = [2, 1, 3, 4]             # HDU order is anti-clockwise in ScopeSim, left right in lmsiq.
+        path = folder + '/' + file_name
+        hdu_list_in = fits.open(path, mode='readonly')
+        primary_hdr = hdu_list_in[0].header
+        hdu_list = []       # Re-order hdus
+        for i in range(0, 4):
+            idx = data_ext_nos[i]
+            hdu_list.append(hdu_list_in[idx])
+        mosaic = file_name, primary_hdr, hdu_list
+        return mosaic
+
+    @staticmethod
+    def read_mosaic_list(inc_tags=[], exc_tags=[]):
+        mosaic_list = []
+        folder = Filer.test_data_folder
+        file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
+        if len(file_list) == 0:
+            text = "Files in {:s} including tags ".format(folder)
+            for tag in inc_tags:
+                text += "{:s}, ".format(tag)
+            text += 'not found'
+            return mosaic_list
+
+        for file_name in file_list:
+            mosaic = Filer.read_mosaic(folder, file_name)
+            mosaic_list.append(mosaic)
+        return mosaic_list
+
+    @staticmethod
+    def write_mosaic(path, primary_header, hdu_list_in):
+        """ Write a Zemax image into the primary extension of a new fits file.
+        """
+        primary_hdu = PrimaryHDU(header=primary_header)
+        hdu_list = HDUList([primary_hdu])
+        for hdu in hdu_list_in:
             hdu_list.append(hdu)
         hdu_list.writeto(path, overwrite=True, checksum=True)
         return
@@ -72,26 +105,6 @@ class Filer:
     def set_test_data_folder(simulator_name):
         Filer.test_data_folder = "../data/test_{:s}".format(simulator_name)
         return
-
-    @staticmethod
-    def read_mosaics(inc_tags=[], exc_tags=[]):
-        mosaics = []
-        data_ext_nos = [2, 1, 3, 4]
-        folder = Filer.test_data_folder
-        file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
-        if len(file_list) == 0:
-            text = "Files in {:s} including tags ".format(folder)
-            for tag in inc_tags:
-                text += "{:s}, ".format(tag)
-            text += 'not found'
-            return mosaics
-
-        for file in file_list:
-            path = folder + '/' + file
-            hdr, data = Filer.read_zemax_fits(path, data_exts=data_ext_nos)
-            mosaic = file, hdr, data
-            mosaics.append(mosaic)
-        return mosaics
 
     @staticmethod
     def get_file_list(folder, inc_tags=[], exc_tags=[]):
@@ -207,7 +220,6 @@ class Filer:
         fits_path = self.tf_dir + fits_name + '.fits'
         hdu_list = fits.open(fits_path, mode='readonly')
 
-
         wpa_data = hdu_list[1].data
         wxo_header = hdu_list[1].header
         n_fit_coeffs = wxo_header['N_COEFFS']
@@ -251,15 +263,15 @@ class Filer:
         return wpa_fit, wxo_fit, term_fits
 
     def write_affine_transform(self, trace):
-        _, _, date_stamp, _, _, _ = trace.model_configuration
+        _, _, date_stamp, _, _, _ = trace.model_config
         affines = trace.affines
         n_mats, mat_order, _ = affines.shape
 
         primary_cards = [Card('N_MATS', n_mats, 'MFP <-> DFP transform matrices'),
                          Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
                          ]
-        trace_hdr = fits.Header(primary_cards)
-        primary_hdu = fits.PrimaryHDU(header=trace_hdr)
+        hdr = fits.Header(primary_cards)
+        primary_hdu = fits.PrimaryHDU(header=hdr)
         hdu_list = HDUList([primary_hdu])
 
         fmt = "lms_dist_mfp_dfp_v{:s}"
@@ -302,17 +314,17 @@ class Filer:
         return affines
 
     def write_svd_transforms(self, trace):
-        """ Create data tables holding transforms for all slices in a configuration and write them
-        to a fits file.
+        """ Create HDU binary data tables holding transforms for all slices in a configuration and write them
+        to a fits file.  This is the data product we provide to ScopeSim and the pipeline.
         """
         hdu_list = None
+        fits_path, fits_name = None, None
         write_primary = True
         for transform in trace.transforms:
             cfg = transform.configuration
             if write_primary:
-                primary_hdu = transform.make_hdu_primary()
+                primary_hdu = transform.make_hdu_primary(trace.wmin, trace.wmax)
                 hdu_list = HDUList([primary_hdu])
-                # hdu_list.append(primary_hdu)
 
                 # Create fits file with primaryHDU only
                 otag = '_nom' if cfg['opticon'] == 'nominal' else '_ext'
@@ -331,80 +343,51 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return fits_name
 
-    # def read_svd_transforms(self, fits_name):
-    #     """ Read a list of transforms between the EFP and MFP from a fits file.
-    #     """
-    #     fits_path = self.tf_dir + fits_name
-    #     hdu_list = fits.open(fits_path, mode='readonly')
-    #     primary_hdr = hdu_list[0].header
-    #     opticon = primary_hdr['OPTICON']
-    #     cfg_id = primary_hdr['CFG_ID']
-    #     ea = primary_hdr['ECH_ANG']
-    #     pa = primary_hdr['PRI_ANG']
-    #     n_mats = primary_hdr['N_MATS']
-    #     w_min = primary_hdr['W_MIN']
-    #     w_max = primary_hdr['W_MAX']
-    #     mat_order = primary_hdr['MAT_ORDER']
-    #
-    #     base_config = {'opticon': opticon, 'cfg_id': cfg_id, 'ech_ang': ea, 'pri_ang': pa,
-    #                    'n_mats': n_mats, 'mat_order': mat_order, 'w_min': w_min, 'w_max': w_max}
-    #     mat_shape = mat_order, mat_order
-    #
-    #     transform_list = []
-    #     tr_hdr_keys = (['ECH_ORDER', 'SLICE_NO', 'SPIFU_NO'])
-    #     for hdu in hdu_list[1:]:
-    #         table, hdr = hdu.data, hdu.header
-    #         config = base_config.copy()
-    #         for key in tr_hdr_keys:
-    #             config[key.lower()] = hdr[key]
-    #
-    #         a_col, b_col = table.field('a'), table.field('b')
-    #         ai_col, bi_col = table.field('ai'), table.field('bi')
-    #         a = np.reshape(a_col, mat_shape)
-    #         b = np.reshape(b_col, mat_shape)
-    #         ai = np.reshape(ai_col, mat_shape)
-    #         bi = np.reshape(bi_col, mat_shape)
-    #         matrices = {'a': a, 'b': b, 'ai': ai, 'bi': bi}
-    #         transform = {'configuration': config, 'matrices': matrices}
-    #
-    #         transform_list.append(transform)
-    #     hdu_list.close()
-    #     return transform_list
-
     def read_svd_transforms(self, inc_tags=[], exc_tags=[]):
+        """ Read A,B, AI,BI transforms from a fits file.
+        """
         fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=exc_tags)
         transform_list = []
         for fits_name in fits_file_list:
             fits_path = self.tf_dir + fits_name
             hdu_list = fits.open(fits_path, mode='readonly')
-            primary_hdr = hdu_list[0].header
-            pri_cfg = Transform.decode_primary_hdr(primary_hdr)
-            n_transforms = len(hdu_list) - 1
-            for hdu in hdu_list[1:]:
-                transform = Transform(cfg=pri_cfg)
-                transform.ingest_extension_hdr(hdu.header)
-                transform.read_matrices(hdu.data)
+            n_ext = len(hdu_list)
+            for ext_no in range(1, n_ext):
+                transform = Transform(hdu_list=hdu_list, ext_no=ext_no)
                 transform_list.append(transform)
             hdu_list.close()
-            # transforms = self.read_svd_transform(fits_name)
-            # for transform in transforms:
-            #     transform_list.append(transform)
         return transform_list
+
+    @staticmethod
+    def read_dill(dill_path):
+        if dill_path[-4:] != '.dil':
+            dill_path += '.dil'
+        dill_file = open(dill_path, 'rb')
+        python_object = dill.load(dill_file)
+        dill_file.close()
+        return python_object
+
+    @staticmethod
+    def write_dill(dill_path, python_object):
+        dill_file = open(dill_path + '.dil', 'wb')
+        dill.dump(python_object, dill_file)
+        dill_file.close()
+        return
 
     @staticmethod
     def read_pickle(pickle_path):
         if pickle_path[-4:] != '.pkl':
             pickle_path += '.pkl'
-        file = open(pickle_path, 'rb')
-        python_object = pickle.load(file)
-        file.close()
+        pickle_file = open(pickle_path, 'rb')
+        python_object = pickle.load(pickle_file)
+        pickle_file.close()
         return python_object
 
     @staticmethod
     def write_pickle(pickle_path, python_object):
-        file = open(pickle_path + '.pkl', 'wb')
-        pickle.dump(python_object, file)
-        file.close()
+        pickle_file = open(pickle_path + '.pkl', 'wb')
+        pickle.dump(python_object, pickle_file)
+        pickle_file.close()
         return
 
     def _get_results_path(self, data_id, data_type):

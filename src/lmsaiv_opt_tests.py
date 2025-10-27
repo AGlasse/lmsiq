@@ -1,23 +1,30 @@
 import numpy as np
 from astropy import units as u
+from scipy.sparse import lil_array
+
 from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
 from lmsaiv_plot import Plot
 from lmssim_model import Model
 from lms_filer import Filer
+from lms_mosaic import Mosaic
+# from notebooks.lms_opt_01_t1 import primary_hdr
+from lmsdist_machine import DistortionMachine
 
 
 class OptTests:
 
+    valid_test_names = None
 
     def __init__(self):
-        OptTests.valid_test_names = {'lms_opt_01_t1': (OptTests.lms_opt_01_t1, 'Field of view'),
-                                     'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'Grey body iso-alpha, along slice PSF'),
-                                     'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, LSF'),
-                                     'lms_opt_01_t4': (OptTests.lms_opt_01_t4, 'Sky iso-lambda trace'),
-                                     'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
-                                     }
         Filer.set_test_data_folder('scopesim')
+        valid_test_names = {'lms_opt_01_t1': (OptTests.lms_opt_01_t1, 'Field of view'),
+                            'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'Grey body iso-alpha, along slice PSF'),
+                            'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, LSF'),
+                            'lms_opt_01_t4': (OptTests.lms_opt_01_t4, 'Sky iso-lambda trace'),
+                            'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
+                            }
+        OptTests.valid_test_names = valid_test_names
         return
 
     def __str__(self):
@@ -100,34 +107,50 @@ class OptTests:
         return as_built
 
     @staticmethod
-    def lms_opt_01_t2(test_name, title, **kwargs):
+    def _parse_abo(file_name):
+        """ Extract alpha, beta and observation number from a fits file name.  Used in lms_opt_01_t2
+        """
+        signed = {'_a': True, '_b': True, '_o': False}
+        ip = file_name.find('_grid') + 5  # Get start position of wavelength, alpha and beta sub strings
+        abo = []
+        for tag in signed:
+            ip = file_name.find(tag, ip) + len(tag)
+            sign = 1.0
+            if signed[tag]:
+                sign = 1. if file_name[ip] == 'p' else -1.
+                ip += 1
+            mag = float(file_name[ip: ip + 3])
+            val = sign * mag
+            abo.append(val)
+        return tuple(abo)
+
+    @staticmethod
+    def lms_opt_01_t2(test_name, title, as_built, **kwargs):
         """ iso-alpha spectra of black body source.
         """
-        # Start by processing all grid
-        mosaics = Filer.read_mosaics(inc_tags=[test_name, 'grid'])
-        for mosaic in mosaics:
-            file_name, hdr, hdus = mosaic
-            # For now we get the wavelength and field position from the file name.  Header later.
-            wave_tag = file_name[28:32]
-            wave = float(wave_tag) / 1000.      # Laser wavelength in microns
-            alpha_sign = 1. if file_name[34] == 'p' else -1.
-            alpha_tag = file_name[35:38]
-            beta_sign = 1. if file_name[40] == 'p' else -1.
-            beta_tag = file_name[41:44]
-            alpha = alpha_sign * float(alpha_tag)           # alpha/beta coordinates in mas.
-            beta = beta_sign * float(beta_tag)
+        # Start by processing grid images.
+        ill_mosaics = Filer.read_mosaic_list(inc_tags=[test_name, '_grid_ill'])
+        bgd_mosaics = Filer.read_mosaic_list(inc_tags=[test_name, '_grid_bgd'])
+        for ill_mosaic, bgd_mosaic in zip(ill_mosaics, bgd_mosaics):
+            mosaic = Mosaic.diff_mosaics(ill_mosaic, bgd_mosaic)
+            diff_name, diff_primary_header, diff_hdus = mosaic
+            path = Filer.test_data_folder + '/' + diff_name + '.fits'
+            Filer.write_mosaic(path, diff_primary_header, diff_hdus)
+            title = ill_mosaic[0] + ' - ' + bgd_mosaic[0]
+            # Plot.mosaic(mosaic, title=title)
+            bgd_name, _, bgd_hdus = bgd_mosaic
+            ill_name, ill_primary_header, ill_hdus = ill_mosaic
+            wave_cen = ill_primary_header['ESO INS WLEN CEN'] * u.nm             # Mosaic centre wavelength
+            # For now we get the field position from the file name.  Header later.
+            opticon = Globals.nominal if '_nom' in ill_name else Globals.extended
+            alpha, beta, obs_index = OptTests._parse_abo(ill_name)
+            print('Extract alpha traces (and compare to distortion model)')
+            dmachine = DistortionMachine()
+            row, col = dmachine.wab_to_det(wave_cen, alpha, beta, opticon)
 
-        for cfg_tag in ['nom', 'ext']:
-            for wav_tag in ['w2700', 'w4700']:
-                for a_tag in ['am350', 'ap000', 'ap350']:
-                    for b_tag in ['bp000', 'bp200']:
-                        obs_tags = [test_name, cfg_tag, wav_tag, a_tag, b_tag]
-                        mosaics = Filer.read_mosaics(inc_tags=obs_tags)
-                        for mosaic in mosaics:
-                            profiles = tools.extract_alpha_traces(mosaic)
-                            Plot.profiles(profiles)
-                            Plot.mosaic(mosaic)
-
+            profiles = OptTools.extract_alpha_traces(mosaic)
+            Plot.profiles(profiles)
+            Plot.mosaic(mosaic)
         return
 
     @staticmethod

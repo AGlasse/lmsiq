@@ -419,7 +419,8 @@ class Plot:
         return colours
 
     @staticmethod
-    def series(plot_type, traces, colour_by='config'):
+    def series(plot_type, traces, model_config, colour_by='config'):
+        _, opticon, _, _, _, _ = model_config
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]'),
                   'nm_det': ('Instantaneous wavelength coverage', 'Mosaic coverage [nm]')}
@@ -432,8 +433,9 @@ class Plot:
             slice_rgb = Plot.make_rgb_gradient(np.arange(28))
         if colour_by == 'config':
             slice_rgb = Plot.make_rgb_gradient(np.arange(108))
-        for trace in traces:
-            ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
+        n_traces = len(traces)
+        for i, trace in enumerate(traces):
+            ech_angle, prism_angle = trace.lms_config['ech_ang'], trace.lms_config['pri_ang']
             n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
             colour = None
             perimeter_upper, perimeter_lower = None, None
@@ -442,19 +444,21 @@ class Plot:
                 keys = transform.slice_specific_kws
                 slice_no = config['slice_no']
                 spifu_no = config['spifu_no']
-                cfg_id = config['cfg_id']
+                # cfg_id = config['cfg_id']
                 cfg = {}
                 for key in keys:
                     cfg[key] = config[key]
-                waves = trace.get('wavelength', **cfg)
-                det_x = trace.get('det_x', **cfg)
-                det_y = trace.get('det_y', **cfg)
+                cfg['opticon'] = opticon
+                waves = trace.get_series('wavelength', **cfg)
+                det_x = trace.get_series('det_x', **cfg)
+                det_y = trace.get_series('det_y', **cfg)
                 if colour_by == 'slice_wave':
                     rgb = Plot.make_rgb_gradient(waves)
                 if colour_by == 'slice':
                     colour = slice_rgb[slice_no - 1]
                 if colour_by == 'config':
-                    colour = slice_rgb[cfg_id]
+                    idx = n_traces - i
+                    colour = slice_rgb[idx]
 
                 x, y = None, None
                 if plot_type == 'coverage':

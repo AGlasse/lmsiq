@@ -162,8 +162,7 @@ class PolyFit:
     def create_pa_wave_fit(opticon, waves, pri_angs):
         order = Globals.wpa_fit_order[opticon]
         p0 = [0] * order
-        wpa_opt, wpa_cov = curve_fit(PolyFit.wpa_model,
-                                     xdata=waves, ydata=pri_angs, p0=p0)
+        wpa_opt, wpa_cov = curve_fit(PolyFit.wpa_model, xdata=waves, ydata=pri_angs, p0=p0)
         wpa_fit = {'wpa_opt': wpa_opt, 'wpa_cov': wpa_cov, 'n_coefficients': order}
         return wpa_fit
 
@@ -228,8 +227,9 @@ class PolyFit:
         return matrix
 
     @staticmethod
-    def make_slice_transforms(lms_cfg, term_fits):
+    def make_slice_transforms(lms_config, term_fits):
         slice_transforms = []
+
 
         return slice_transforms
 

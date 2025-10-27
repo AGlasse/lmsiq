@@ -7,6 +7,7 @@ import time
 import numpy as np
 import scipy.signal
 from astropy import units as u
+from astropy.io.fits import Card, HDUList, ImageHDU, PrimaryHDU
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
@@ -70,7 +71,7 @@ class Toy:
 
             # Read header and data shape (only) in from the template.
             data_exts = [1, 2, 3, 4]
-            hdr_primary, data_list = filer.read_zemax_fits('../config/sim_template.fits', data_exts=data_exts)
+            primary_header, data_list = filer.read_zemax_fits('../config/sim_template.fits', data_exts=data_exts)
             det_shape = data_list[0].shape
             _, n_det_cols = det_shape
 
@@ -252,10 +253,13 @@ class Toy:
 
                 # Add dark current and read noise to illumination image (Finger, Rauscher)
                 frame_mosaic = []
+                hdu_list = []
                 for det_no in range(1, 5):
                     det_idx = det_no - 1
                     image = image_mosaic[det_idx]
                     frame = Detector.detect(image, dit, ndit)
+                    hdu = ImageHDU(image)
+                    hdu_list.append(hdu)
                     frame_mosaic.append(frame)
 
                 print()
@@ -263,22 +267,22 @@ class Toy:
                 toysim_out_path = '../data/test_toysim/' + obs_name + obs_tag
                 print("Writing fits file - {:s}".format(toysim_out_path))
                 for key in cfg:
-                    hdr_primary['AIT ' + key.upper()] = cfg[key]
+                    primary_header['AIT ' + key.upper()] = cfg[key]
 
-                filer.write_zemax_fits(toysim_out_path, hdr_primary, frame_mosaic)
+                filer.write_zemax_fits(toysim_out_path, primary_header, hdu_list)
 
             debug = False
             if debug:
                 fits_out_path = toysim_out_path + '_illumination.fits'
                 print("Writing fits file - {:s}".format(fits_out_path))
-                filer.write_zemax_fits(fits_out_path, hdr_primary, image_mosaic)
+                filer.write_zemax_fits(fits_out_path, primary_header, hdu_list)
 
                 fits_waves_out_path = toysim_out_path + '_waves.fits'
                 print("Writing fits file - {:s}".format(fits_waves_out_path))
-                filer.write_zemax_fits(fits_waves_out_path, hdr_primary, waves_mosaic)
+                filer.write_zemax_fits(fits_waves_out_path, primary_header, waves_mosaic)
 
                 fits_tau_ech_out_path = toysim_out_path + '_tau_ech.fits'
                 print("Writing fits file - {:s}".format(fits_tau_ech_out_path))
-                filer.write_zemax_fits(fits_tau_ech_out_path, hdr_primary, tau_ech_mosaic)
+                filer.write_zemax_fits(fits_tau_ech_out_path, primary_header, tau_ech_mosaic)
 
         return
