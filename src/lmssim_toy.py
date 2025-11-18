@@ -219,7 +219,7 @@ class Toy:
                     efp_w_pnh = efp_w_row
 
                     efp_pnh = {'efp_x': efp_x_cfo, 'efp_y': efp_y_cfo, 'efp_w': efp_w_pnh}
-                    dfp_pnh = Util.efp_to_dfp(opt_transform, affines, det_no, efp_pnh)
+                    dfp_pnh = Util.efp_to_dfp(opt_transform, affines, efp_pnh)
                     # Row by row population of psf_illum image
                     dfp_y_pnh = dfp_pnh['dfp_y']
                     dfp_rows_pnh = np.round(dfp_y_pnh).astype(int)

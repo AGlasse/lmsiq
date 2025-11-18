@@ -11,13 +11,13 @@ DFP_y, along row position
 """
 import numpy as np
 from os import listdir
-
 from lms_filer import Filer
 from lmsdist_util import Util
 from lmsdist_plot import Plot
 from lmsdist_trace import Trace
 from lms_globals import Globals
 from lms_detector import Detector
+from lms_transform import Transform
 from lmsdist_polyfit import PolyFit
 
 print('lmsdist, distortion model - Starting')
@@ -25,7 +25,7 @@ print('lmsdist, distortion model - Starting')
 analysis_type = 'distortion'            # Used for file handling (types = 'iq', 'distortion' or 'sky'
 
 """ SET MODEL CONFIGURATION HERE """
-opticon = Globals.nominal                       # 'nominal' or 'extended'
+opticon = Globals.nominal                     # 'nominal' or 'extended'
 
 filer = Filer(analysis_type, opticon)
 polyfit = PolyFit(opticon)
@@ -52,11 +52,9 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-# traces = Filer.read_dill(filer.trace_file)
-
 generate_transforms = False
 if generate_transforms:
-    suppress_plots = True  # f = Plot first trace
+    suppress_plots = False  # f = Plot first trace
     print()
     print("Generating distortion transforms (and prism angle fit parameters)")
     fmt = "- reading Zemax ray trace data from folder {:s}"
@@ -77,7 +75,8 @@ if generate_transforms:
         print(file_name)
         zf_file = zem_folder + file_name
         trace = Trace(cfg_id=cfg_id, silent=True)
-        trace.create(zf_file, Filer.model_configuration, debug=debug_first)
+        trace.load(zf_file, Filer.model_configuration, do_plot=False)
+        trace.find_wavelength_bounds()
         debug_first = False
         offset_data_list.append(trace.offset_data)
         if not suppress_plots:
@@ -85,7 +84,8 @@ if generate_transforms:
             trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
             trace.plot_focal_planes()
             suppress_plots = False
-        fits_name = filer.write_svd_transforms(trace)
+
+        fits_name = filer.write_svd_transforms(trace, do_plot=True)
         trace.transform_fits_name = fits_name
         traces.append(trace)
         a_rms_list.append(trace.a_rms)
@@ -98,18 +98,21 @@ if generate_transforms:
 
 calibrate_wavelength = False
 if calibrate_wavelength:
-    suppress_plots = False
+    first_plot = True
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
     wcal = {}
     traces = Filer.read_dill(filer.trace_file)
     model_config = Filer.model_configuration
-    plot.series('nm_det', traces, model_config)
-    plot.series('dispersion', traces, model_config)
-    plot.series('coverage', traces[0:1], model_config)
-    plot.series('coverage', traces, model_config)
+    # plot.series('nm_det', traces, model_config)
+    if first_plot:
+        plot.series('dispersion', traces, model_config)
+        plot.series('coverage', traces[0:1], model_config)
+        plot.series('coverage', traces, model_config)
+        first_plot = False
 
 fit_transforms = True
+is_first = True
 if fit_transforms:
     # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism angle
     # is provided as a function of wavelength, reflecting the requirement that the target wavelength must be directed
@@ -127,39 +130,107 @@ if fit_transforms:
         wave_boresights.append(wave_bs)
         prism_angles.append(pri_ang)
     wpa_fit  = polyfit.create_pa_wave_fit(opticon, wave_boresights, prism_angles)
-    wxo_fit, wxo_header, term_fits = polyfit.create_polynomial_surface_fits(opticon, svd_transforms)
-    filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, term_fits)
-    plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles, differential=True)
-    plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles)
+    wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms)
+    filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
+    if is_first:
+        plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles)
+        is_first = False
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
-# coordinates using 1) the specific at the Zemax location and 2) the model fit transforms (generated for the prism
-# and echelle angles)
+# coordinates.  using 1) the specific transform for the trace at the Zemax location, 2) the model fit transforms
+# (generated for the prism and echelle angles).
 evaluate_transforms = True
 if evaluate_transforms:
-    traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
+    traces = Filer.read_dill(filer.trace_file)            # Use the ray trace data
     _, opticon, date_stamp, _, _, _ = filer.model_configuration
+    affines = filer.read_fits_affine_transform(date_stamp)
+    spifu_no = 0
     inc_tags = ["efp_mfp_{:s}".format(opticon[0:3])]
-    svd_transforms = filer.read_svd_transforms(inc_tags=inc_tags, exc_tags=['fit_parameters'])
+    wpa_fit, wxo_fit, svd_fit = filer.read_fit_parameters(opticon)
+
+    fmt = '{:45s},{:8s},{:8s},{:8s},{:10s},{:10s},{:10s},{:1s},{:10s},{:10s},{:1s},{:10s},{:10s},{:1s},'
+    print(fmt.format('Trace', 'slice_no', 'spifu_no', 'ech_ord', 'wave_ref',
+                     'Zemax', 'Zemax', '|', 'Zemax', 'Zemax', '|', 'PolyFit', 'PolyFit', '', '', '|'))
+    print(fmt.format('file name', '-', '-', '-', 'efp_w0',
+                     'pri_ang', 'ech_ang', '|', 'mfp_x0', 'mfp_y0', '|', 'mfp_x0', 'mfp_y0', '|'))
+    fmt = '{:45s},{:8d},{:8d},{:8d},{:10.3f},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s}'
     for trace in traces:
+        lms_config, wave_bs = None, None
         inc_tags = [trace.transform_fits_name]
-        trace_transforms = filer.read_svd_transforms(inc_tags=inc_tags)
-        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
-        mfp_projections = {}
-        slice_nos = [28, 13, 1] if opticon == Globals.nominal else [13]
-        spifu_nos = [0] if opticon == Globals.nominal else [1, 3, 6]
+        trace_transforms = filer.read_svd_transforms(inc_tags=inc_tags, exc_tags=['fit_parameters'])
+
+        slice_nos = trace.unique_slices
+        spifu_nos = trace.unique_spifu_slices
+        ech_ords = trace.unique_ech_ords
+
+        mfp_plot = {'slice_no': [], 'spifu_no': [], 'ech_ord': [], 'ray': [], 'sli': [], 'fit': []}
         for slice_no in slice_nos:
-            mfp_projections[slice_no] = {}
             for spifu_no in spifu_nos:
-                mfp_projections[slice_no][spifu_no] = {}
-                slice_transform = Util.filter_transform_list(trace_transforms,
-                                                             slice_no=slice_no, spifu_no=spifu_no)[0]
-                mfp_projection = PolyFit.make_mfp_projection(slice_no, spifu_no, trace, slice_transform,
-                                                             wxo_fit, term_fits)
-                mfp_projections[slice_no][spifu_no] = mfp_projection
-        do_plot = False
+                for ech_ord in ech_ords:
+                    slice_filter = {'slice_no':slice_no, 'spifu_no':spifu_no, 'ech_ord':ech_ord}
+                    # Start by finding the slice transform for this configuration
+                    slice_transform_zem = None
+                    for slice_transform_zem in trace_transforms:
+                        is_match = slice_transform_zem.is_match(slice_filter)
+                        if is_match:
+                            break
+
+                    efp_w = trace.get_series('wavelength', slice_filter)
+                    if len(efp_w) < 1:      # spifu_no and ech_ord are not independent.
+                        continue
+                    efp_x = trace.get_series('efp_x', slice_filter)
+                    efp_y = trace.get_series('efp_y', slice_filter)
+                    efp_points = {'efp_x': efp_x, 'efp_y': efp_y, 'efp_w': efp_w}
+                    mfp_pts_sli_tform, _ = util.efp_to_mfp(slice_transform_zem, efp_points)
+                    det_x = trace.get_series('det_x', slice_filter)
+                    det_y = trace.get_series('det_y', slice_filter)
+                    mfp_pts_ray = {'mfp_x': det_x, 'mfp_y': det_y}
+                    mfp_plot['ray'].append(mfp_pts_ray)
+                    mfp_plot['sli'].append(mfp_pts_sli_tform)
+                    mfp_plot['slice_no'].append(slice_no)
+                    mfp_plot['spifu_no'].append(spifu_no)
+                    mfp_plot['ech_ord'].append(ech_ord)
+
+                    slice_config_zem = slice_transform_zem.slice_configuration
+                    fit_matrix = svd_fit[slice_no][spifu_no]
+                    lms_config = trace.lms_config
+                    pri_ang = lms_config['pri_ang']
+                    ech_ang = lms_config['ech_ang']
+                    n_terms = Globals.svd_order
+                    matrices = {}
+                    for mat_name in Globals.matrix_names:
+                        matrix = np.zeros((n_terms, n_terms))
+                        matrices[mat_name] = matrix
+                        for row in range(0, n_terms):
+                            for col in range(0, n_terms):
+                                fit_terms = fit_matrix[mat_name][row, col]
+                                term = PolyFit.surface_model((pri_ang, ech_ang), *fit_terms)
+                                matrix[row, col] = term
+
+                    slice_transform_fit = Transform(matrices=matrices, slice_config=slice_config_zem, lms_config=lms_config)
+                    mfp_pts_fit_tform, _ = util.efp_to_mfp(slice_transform_fit, efp_points)
+                    mfp_plot['fit'].append(mfp_pts_fit_tform)
+
+                    det_x_fit = mfp_pts_fit_tform['mfp_x']
+                    det_y_fit = mfp_pts_fit_tform['mfp_y']
+                    wave_bs = np.mean(efp_w)
+                    text = fmt.format(trace.transform_fits_name, slice_no, spifu_no, ech_ord, wave_bs,
+                                      pri_ang, ech_ang, '|', det_x[0], det_y[0], '|', det_x_fit[0], det_y_fit[0], '|'
+                                      )
+                    print(text)
+
+        do_plot = True
         if do_plot:
-            plot.mfp_projections(mfp_projections, trace)
+            theta_p = r'$\phi_{pri}$' + "={:6.3f}, ".format(lms_config['pri_ang'])
+            theta_e = r'$\psi_{ech}$' + "={:6.3f}, ".format(lms_config['ech_ang'])
+            wave_text = r'$\lambda_{bs}$' + "={:6.3f}, ".format(wave_bs) + r'$\mu$m'
+
+            title = theta_p + theta_e + wave_text
+            mfp_decorations = [('ray trace', 'red', 'o', 10.),
+                               ('slice transform', 'green', 'x', 6.),
+                               ('fit transform', 'blue', '+', 6.)]
+            Plot.plot_mfp_points(mfp_plot, mfp_decorations, title=title, ref_xy=False, grid=False)
+            Plot.plot_mfp_points(mfp_plot, mfp_decorations, title=title, ref_xy=True, grid=True)
 
 test_transform_fit = True
 if test_transform_fit:
@@ -169,14 +240,14 @@ if test_transform_fit:
     print_header = True
     for test_wave in np.linspace(2.7, 5.4, 28, endpoint=True):  # Test wavelength does not match an SVD transform
         _, opticon, date_stamp, _, _, _ = filer.model_configuration
-        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
-        PolyFit.wave_to_config(test_wave, wpa_fit, wxo_fit, debug=False, select='min_ech_ang', print_header=print_header)
+        wpa_fit, wxo_fit, svd_fit = filer.read_fit_parameters(opticon)
+        PolyFit.wave_to_config(test_wave, opticon, wpa_fit, wxo_fit, debug=True, select='min_ech_ang', print_header=print_header)
         print_header = False
     print_header = True
     for test_wave in np.linspace(2.7, 2.9, 6, endpoint=True):  # Test wavelength does not match an SVD transform
         _, opticon, date_stamp, _, _, _ = filer.model_configuration
-        wpa_fit, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
-        PolyFit.wave_to_config(test_wave, wpa_fit, wxo_fit, debug=False, select='min_ech_ang', print_header=print_header)
+        wpa_fit, wxo_fit, svd_fit = filer.read_fit_parameters(opticon)
+        PolyFit.wave_to_config(test_wave, opticon, wpa_fit, wxo_fit, debug=False, select='min_ech_ang', print_header=print_header)
         print_header = False
 
 print()

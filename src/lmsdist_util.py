@@ -42,15 +42,15 @@ class Util:
         return lines
 
     @staticmethod
-    def waves_to_phases(waves, ech_orders):
+    def waves_to_phases(waves, ech_ords):
         d = Globals.rule_spacing * Globals.ge_refractive_index
-        phases = waves * ech_orders / (2.0 * d)
+        phases = waves * ech_ords / (2.0 * d)
         return phases      # phases
 
     @staticmethod
-    def phases_to_waves(phases, ech_orders):
+    def phases_to_waves(phases, ech_ords):
         d = Globals.rule_spacing * Globals.ge_refractive_index
-        waves = phases * 2.0 * d / ech_orders
+        waves = phases * 2.0 * d / ech_ords
         return waves
 
     @staticmethod
@@ -246,7 +246,7 @@ class Util:
 
         slice_no, wave, prism, ech_angle, order, im_pix_size = configuration
         for trace in traces:
-            is_order = order in trace.unique_ech_orders
+            is_order = order in trace.unique_ech_ords
             if not is_order:
                 continue
             is_slice = slice_no in trace.unique_slices
@@ -254,8 +254,8 @@ class Util:
                 continue
             for tf in trace.slice:
                 tf_config, tf_matrices, _, _, _ = tf
-                tf_ech_order, tf_slice_no, tf_spifu_no = tf_config
-                if order != tf_ech_order and slice_no != tf_slice_no:
+                tf_ech_ord, tf_slice_no, tf_spifu_no = tf_config
+                if order != tf_ech_ord and slice_no != tf_slice_no:
                     continue
                 a, b, ai, bi = tf_matrices
                 w1 = wave
@@ -307,10 +307,9 @@ class Util:
         """
         filtered_transform_list = []
         for transform in transform_list:
-            cfg = transform.configuration | transform.slice_configuration
+            cfg = transform.lms_configuration | transform.slice_configuration
             is_match = True
             for key in kwargs:
-                print(key, cfg[key], kwargs[key])
                 is_match = False if cfg[key] != kwargs[key] else is_match
             if is_match:
                 filtered_transform_list.append(transform)
@@ -358,13 +357,13 @@ class Util:
 
     @staticmethod
     def _decode_tf_list_orders(tf_list):
-        ech_orders = []
+        ech_ords = []
         for tf in tf_list:
             tokens = tf.split(',')
             eo = int(tokens[1])
-            if eo not in ech_orders:
-                ech_orders.append(eo)
-        return ech_orders
+            if eo not in ech_ords:
+                ech_ords.append(eo)
+        return ech_ords
 
     @staticmethod
     def get_transform_text(transform):
@@ -404,15 +403,14 @@ class Util:
             print(fmt.format('pri_ang', 'ech_ang', 'efp_x', 'efp_y', 'mfp_x', 'mfp_y', 'w'))
         term_values = {'slice_no': slice_no, 'spifu_no': spifu_no,
                        'pri_ang': [], 'ech_ang': [],
-                       'mfp_y': [], 'w_bs': [], 'ech_orders': [], 'matrices': []}
+                       'mfp_y': [], 'w_bs': [], 'ech_ords': [], 'matrices': []}
         for transform in transforms:
+            lms_config = transform.lms_configuration
             slice_cfg = transform.slice_configuration
             if (slice_cfg['slice_no'] != slice_no) or (slice_cfg['spifu_no'] != spifu_no):
                 continue
             # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
-            # trace = transform.trace
-            cfg = transform.configuration
-            w_min, w_max = cfg['w_min'], cfg['w_max']
+            w_min, w_max = slice_cfg['w_min'], slice_cfg['w_max']
             mfp_w_list, mfp_x_list = [], []
             for efp_w in np.linspace(w_min, w_max, 100):
                 efp_bs['efp_w'] = np.array([efp_w])
@@ -425,12 +423,12 @@ class Util:
             mfp_y = mfp_bs['mfp_y'][0]
             if debug:
                 fmt = "{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
-                print(fmt.format(cfg['pri_ang'], cfg['ech_ang'],
+                print(fmt.format(lms_config['pri_ang'], lms_config['ech_ang'],
                                  efp_bs['efp_x'][0], efp_bs['efp_y'][0],
                                  mfp_x, mfp_y, mfp_w))
-            term_values['pri_ang'].append(cfg['pri_ang'])
-            term_values['ech_ang'].append(cfg['ech_ang'])
-            term_values['ech_orders'].append(slice_cfg['ech_order'])
+            term_values['pri_ang'].append(lms_config['pri_ang'])
+            term_values['ech_ang'].append(lms_config['ech_ang'])
+            term_values['ech_ords'].append(slice_cfg['ech_ord'])
             term_values['mfp_y'].append(mfp_y)
             term_values['w_bs'].append(mfp_w)
             term_values['matrices'].append(transform.matrices)
@@ -463,12 +461,12 @@ class Util:
         bs_cfg = bs_transform.configuration
         opt_cfg_id = bs_cfg['cfg_id']
         opt_transforms = {}
-        ech_orders = []             # List of unique echelle orders in optimum transforms
+        ech_ords = []             # List of unique echelle orders in optimum transforms
         for svd_transform in svd_transforms:
             cfg = svd_transform.configuration
             if cfg['cfg_id'] != opt_cfg_id:
                 continue
-            ech_ord = cfg['ech_order']
+            ech_ord = cfg['ech_ord']
             # Option to only use specific orders for specific spifu_slices
             spec_order = False
             if spec_order:
@@ -478,14 +476,14 @@ class Util:
                     valid_spifu_nos = spifu_slice[ech_ord]
                     if spifu_no not in valid_spifu_nos:
                         continue
-            if ech_ord not in ech_orders:
-                ech_orders.append(ech_ord)
+            if ech_ord not in ech_ords:
+                ech_ords.append(ech_ord)
             slice_no = cfg['slice_no']
             spifu_no = cfg['spifu_no']
             slice_id = Globals.slice_id_fmt.format(opticon, opt_cfg_id, ech_ord, slice_no, spifu_no)
             # print('Adding slice_id= ', slice_id)
             opt_transforms[slice_id] = svd_transform
-        return opt_transforms, ech_orders
+        return opt_transforms, ech_ords
 
     @staticmethod
     def out_of_bounds(fp_id, x, y):       # Check if out of bounds
@@ -499,7 +497,7 @@ class Util:
     @staticmethod
     def efp_y_to_slice(efp_y):
         """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
-        a fraction of the slice width
+        a fraction of the slice width.
         """
         efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_as_mm
         n_slices = Globals.n_lms_slices
@@ -520,7 +518,7 @@ class Util:
         return efp_y
 
     @staticmethod
-    def efp_to_dfp(transform, affines, det_no, efp_points):
+    def efp_to_dfp(transform, affines, efp_points):
         mfp_points, _ = Util.efp_to_mfp(transform, efp_points)
         dfp_points = Util.mfp_to_dfp(affines, mfp_points)
         return dfp_points
@@ -588,11 +586,11 @@ class Util:
         for this point in the EFP.
         """
         config, matrices = transform.slice_configuration, transform.matrices
-        ech_ord = config['ech_order']
+        ech_ord = config['ech_ord']
 
         alphas, efp_y, efp_w = efp_points['efp_x'], efp_points['efp_y'], efp_points['efp_w']
-        ech_orders = np.full(len(efp_w), ech_ord)
-        phases = Util.waves_to_phases(efp_w, ech_orders)
+        ech_ords = np.full(len(efp_w), ech_ord)
+        phases = Util.waves_to_phases(efp_w, ech_ords)
 
         a, b = matrices['a'], matrices['b']
         mfp_x, mfp_y = Util.apply_svd_distortion(phases, alphas, a, b)
@@ -614,17 +612,16 @@ class Util:
         slice_phase: Intra-slice position is degenerate with wavelength. It can be passed explicitly here, with
                      the default being to assume the centre of the slice in the EFP (slice_phase = 0.).
         """
-        config = transform.configuration
-        ech_ord = config['ech_order']
-        slice_no = config['slice_no']
+        ech_ord = transform.slice_configuration['ech_ord']
+        slice_no = transform.slice_configuration['slice_no']
         mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
 
         matrices = transform.matrices
         ai, bi = matrices['ai'], matrices['bi']
         phases, alphas = Util.apply_svd_distortion(mfp_x, mfp_y, ai, bi)
 
-        ech_orders = np.full(alphas.shape, ech_ord)
-        waves = Util.phases_to_waves(phases, ech_orders)
+        ech_ords = np.full(alphas.shape, ech_ord)
+        waves = Util.phases_to_waves(phases, ech_ords)
 
         efp_y_val = Util.slice_to_efp_y(slice_no, slice_phase)
         efp_y = np.full(alphas.shape, efp_y_val)
@@ -644,7 +641,7 @@ class Util:
 
     @staticmethod
     def lookup_transform_fit(config, prism_angle, transform_fits):
-        ech_order, slice_no, spifu_no = config
+        ech_ord, slice_no, spifu_no = config
         n_slices, n_mats, n_terms, _, n_polys = transform_fits.shape
         i_slice = int(slice_no - 1)
         matrix_fits = []

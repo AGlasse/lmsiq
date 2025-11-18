@@ -8,52 +8,54 @@ from lms_globals import Globals
 class Transform:
 
     kw_comments = {'opticon': 'LMS wavelength coverage (nominal or extended)',
+                   'slice_no': 'LMS spatial IFU slice number',
+                   'spifu_no': 'LMS spectral IFU slice number',
                    'pri_ang': 'Prism rotation angle / deg.',
                    'ech_ang': 'Echelle rotation angle / deg.',
-                   'n_mats': 'No. of distortion matrices (4)',
-                   'mat_order': 'Matrix order (4x4)',
+                   'ech_ord': 'Echelle diffraction order',
                    'w_min': 'Minimum slice wavelength (micron)',
-                   'w_max': 'Maximum slice wavelength (micron)'
+                   'w_max': 'Maximum slice wavelength (micron)',
+                   'n_mats': 'No of matrices (A, B, AI, BI)',
+                   'mat_ord': 'Order of transform (4)'
                    }
 
     def __init__(self, **kwargs):
         self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
-        self.configuration = {}
-        for key in self.kw_comments:
-            self.configuration[key] = None
-        self.slice_no, self.spifu_no, self.ech_order = None, None, None
+        self.lms_configuration = Globals.lms_config_template.copy()
+        self.slice_configuration = Globals.slice_config_template.copy()
         if 'trace' in kwargs:               # Get transform from Trace object
-            self.ingest_from_trace(**kwargs)
+            trace = kwargs.get('trace')
+            for key in trace.lms_config:
+                self.lms_configuration[key] = trace.lms_config[key]
+            self.slice_configuration = kwargs.get('slice_config')
         if 'hdu_list' in kwargs:
             hdu_list = kwargs.get('hdu_list')
             ext_no = kwargs.get('ext_no')
             self.ingest_from_hdu_list(hdu_list, ext_no)
         if 'matrices' in kwargs:
             self.matrices = kwargs.get('matrices')
-        self.slice_configuration = {'slice_no': self.slice_no, 'spifu_no': self.spifu_no, 'ech_order': self.ech_order}
+            lms_config = kwargs.get('lms_config')
+            for key in lms_config:
+                self.lms_configuration[key] = lms_config[key]
+            self.slice_configuration = kwargs.get('slice_config')
         return
 
-    def ingest_from_trace(self, **kwargs):
-        trace = kwargs.get('trace')
-        self.slice_no = kwargs.get('slice_no')
-        self.spifu_no = kwargs.get('spifu_no')
-        self.ech_order = kwargs.get('ech_order')
+    def is_match(self, slice_filter):
+        slice_no_match = self.slice_configuration['slice_no'] == slice_filter['slice_no']
+        spifu_no_match = self.slice_configuration['spifu_no'] == slice_filter['spifu_no']
+        ech_ord_match = self.slice_configuration['ech_ord'] == slice_filter['ech_ord']
+        is_match = slice_no_match and spifu_no_match and ech_ord_match
+        return is_match
 
-        for key in trace.lms_config:
-            self.configuration[key] = trace.lms_config[key]
-        return
-
-    def make_hdu_primary(self, w_min, w_max):
-        cfg = self.configuration
-        cfg['n_mats'] = 4
-        cfg['mat_order'] = 4
-        cfg['w_min'] = w_min
-        cfg['w_max'] = w_max
+    def make_hdu_primary(self):
+        lms_config = self.lms_configuration            # Get basic configuration parameters
+        lms_config['n_mats'] = 4                       # and add useful header information.
+        lms_config['mat_ord'] = 4
         cards = []
-        for key in cfg:
-            if key in ['slice_no', 'spifu_no', 'ech_order']:          # Exclude slice numbers from SVD fits primary
+        for key in lms_config:
+            if key in ['slice_no', 'spifu_no', 'ech_ord']:          # Exclude slice numbers from SVD fits primary
                 continue
-            card = Card(key.upper(), cfg[key], Transform.kw_comments[key])
+            card = Card(key.upper(), lms_config[key], Transform.kw_comments[key])
             cards.append(card)
         trace_hdr = fits.Header(cards)
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
@@ -61,36 +63,32 @@ class Transform:
 
     def make_hdu_ext(self):
         mats = self.matrices
-        cfg = self.configuration
         a, b, ai, bi = mats['a'], mats['b'], mats['ai'], mats['bi']
         col_a = fits.Column(name='A', array=a.flatten(), format='E')
         col_b = fits.Column(name='B', array=b.flatten(), format='E')
         col_ai = fits.Column(name='AI', array=ai.flatten(), format='E')
         col_bi = fits.Column(name='BI', array=bi.flatten(), format='E')
 
-
-        keys = ['slice_no', 'spifu_no', 'ech_order']
-        vals = [self.slice_no, self.spifu_no, self.ech_order]
-        comments = ['Nominal config. slice number', 'Extended config. spectral slice number',
-                    'Echelle diffraction order']
+        keys = Globals.slice_config_template.keys()
+        sli_config = self.slice_configuration
         cards = []
-        for i in range(0, len(keys)):
-            card = Card(keys[i].upper(), vals[i], comments[i])
+        for key in keys:
+            val = sli_config[key]
+            card = Card(key.upper(), val, self.kw_comments[key])
             cards.append(card)
         hdr = fits.Header(cards)
-        hdu_name = "SLICE_{:d}_{:d}".format(self.slice_no, self.spifu_no)
+        hdu_name = "SLICE_{:d}_{:d}".format(sli_config['slice_no'], sli_config['spifu_no'])
         bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi],
                                                      header=hdr, name=hdu_name)
         return bintable_hdu
 
     def ingest_from_hdu_list(self, hdu_list, ext_no):
         primary_hdr = hdu_list[0].header
-        for key in self.configuration:          # Get slice 'common' parameters from primary header.
-            self.configuration[key] = primary_hdr[key.upper()]
+        for key in self.lms_configuration:          # Get slice 'common' parameters from primary header.
+            self.lms_configuration[key] = primary_hdr[key.upper()]
         hdu = hdu_list[ext_no]
-        self.slice_no = hdu.header['slice_no'.upper()]
-        self.spifu_no = hdu.header['spifu_no'.upper()]
-        self.ech_order = hdu.header['ech_order'.upper()]
+        for key in self.slice_configuration:
+            self.slice_configuration[key] = hdu.header[key.upper()]
         self.read_matrices(hdu.data)
         return
 

@@ -27,12 +27,11 @@ class Globals:
 
     # Optical configurations and focal planes
     nominal = 'nominal'
-    extended = 'spifu'
+    extended = 'extended'
     coord_in = 'efp_x', 'efp_y', 'wavelength'
     coord_out = 'det_x', 'det_y'
 
     # Zemax data descriptors
-
     dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                        coord_in, coord_out)
     dist_ext_config = ('distortion', extended, '20250110', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
@@ -45,7 +44,8 @@ class Globals:
     model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}
                             }
-    lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_order': None, 'ech_ang': None}
+    lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_ang': None}
+    slice_config_template = {'slice_no': None, 'spifu_no': None, 'ech_ord': None, 'w_min': None, 'w_max': None}
 
     # Transform parameters
     svd_order = 4

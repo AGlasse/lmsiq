@@ -133,17 +133,17 @@ class Plot:
         fig, [ax1, ax2] = plt.subplots(figsize=(10, 8), ncols=1, nrows=2,
                                        sharex=True)
         ylabel = 'Prism rotation sensitivity micron / deg' if differential else 'Prism rotation angle / deg'
-        xlabel = "Wavelength / $\mu$m"
+        xlabel = "Wavelength / " + r'$\mu$m'
 
         coeffs = wpa_fit['wpa_opt']
         y_fit = wpa_model(x, *coeffs)
-        form_text = ", $\phi_{prism} = $"
+        form_text = r', $\phi_{prism} = $'
         lam_text = ''
         for i, coeff in enumerate(coeffs):
             if i > 1:
                 lam_text = r'$\lambda^{' + str(i) + r'}$'
             form_text += "{:+6.3f}{:s}".format(coeff, lam_text) # + plus_text
-            lam_text = '$\lambda$'
+            lam_text = r'$\lambda$'
 
         title1 = 'Prism dispersion data and best fit' + form_text
         ax1.set_title(title1, loc='left')
@@ -172,7 +172,7 @@ class Plot:
         """
         x = np.array(term_values['pri_ang'])
         y = np.array(term_values['ech_ang'])
-        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_orders'])
+        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ords'])
         wxo_opt = wxo_fit['wxo_opt']       # Fit parameters
         wxo_model = surface_model((x, y), *wxo_opt)
         f_resid = (wxo - wxo_model) * 1000  # Fractional residual (for fit points)
@@ -183,16 +183,16 @@ class Plot:
                                ncols=1, nrows=1,
                                sharex=True, sharey=True)
 
-        zlabel = 'n $\lambda$ / micron'
+        zlabel = r'n $\lambda$ / $\mu$m'
         suptitle = r'$n \lambda = f(\phi_{pri}, \psi_{ech})$'
         if plot_residuals:
             suptitle = 'Residuals ' + suptitle
             z = f_resid
-            zlabel = 'n $\lambda$ residual / nano-m'
+            zlabel = r'n $\lambda$ residual / nano-m'
         fig.suptitle(suptitle)
         ax.scatter(x, y, z, color='blue')
-        ax.set_xlabel('prism angle, $\phi_{pri}$ / deg')
-        ax.set_ylabel('echelle angle, $\psi_{ech}$ / deg')
+        ax.set_xlabel(r'prism angle, $\phi_{pri}$ / deg')
+        ax.set_ylabel(r'echelle angle, $\psi_{ech}$ / deg')
         ax.set_zlabel(zlabel)
 
         if not plot_residuals:
@@ -256,8 +256,8 @@ class Plot:
                     ax.set_title(title)
                     ax.xaxis.set_major_formatter("{x:1.2f}")
                     if row == 2 and col == 1:
-                        ax.set_xlabel('$\phi_{pri}$ / deg')
-                        ax.set_ylabel('$\psi_{ech}$ / deg')
+                        ax.set_xlabel(r'$\phi_{pri}$ / deg')
+                        ax.set_ylabel(r'$\psi_{ech}$ / deg')
                         ax.set_zlabel(zlabel)
                     if plot_residuals:
                         ax.scatter(x, y, f_resid, color='black', alpha=0.5)
@@ -272,50 +272,56 @@ class Plot:
         return f_residuals
 
     @staticmethod
-    def mfp_projections(mfp_projections, trace):
+    def plot_mfp_points(mfp_plot, decorations, **kwargs):
+        xy_ref = kwargs.get('ref_xy', False)
+        do_grid = kwargs.get('grid', False)
+        title = kwargs.get('title', '')
 
-        n_ax_rows = 0
-        for slice_no in mfp_projections.keys():
-            mfp_slice = mfp_projections[slice_no]
-            for spifu_no in mfp_slice.keys():
-                n_ax_rows += 1
+        fig, ax_list = Plot.set_plot_area(xlabel="x / mm", ylabel="y / mm")     # , aspect='equal')
+        ax = ax_list[0, 0]
+        ax.set_title(title)
+        handles = []
+        slice_nos = mfp_plot['slice_no']
+        spifu_nos = mfp_plot['spifu_no']
+        ech_ords = mfp_plot['ech_ord']
 
-        trace_str = trace.__str__()
-        ea = trace.parameter['Echelle angle']
-        pa = trace.parameter['Prism angle']
-        tname = trace.parameter['name']
-        tag = '$\phi_{prism} = $'
-        suptitle = 'fit - zemax displacements for config \n' + "{:s}, {:s}{:6.3f}".format(tname, tag, pa)
-        print(suptitle)
-        fig, ax_list = Plot.set_plot_area(nrows=n_ax_rows, ncols=1, sharey=False, sharex = True,
-                                          xlabel="x / mm", ylabel="y / mm")
-        plt.suptitle(suptitle, x=0.13, y=.96, ha='left', fontsize='small')     # x=0., y=0.,
-        ax_row = 0
-        for slice_no in mfp_projections.keys():
-            mfp_slice = mfp_projections[slice_no]
-            for spifu_no in mfp_slice:
-                mfp_spifu = mfp_slice[spifu_no]
-                ax = ax_list[ax_row, 0]
-                x_ref, y_ref = mfp_spifu['zemax']['mfp_x'], mfp_spifu['zemax']['mfp_y']
-                ax.plot(x_ref, y_ref, color='black', clip_on=True,
-                        fillstyle='full', marker='.', ms=5., linestyle='None')
-                colours = ['blue', 'red']
-                i = 0
-                scale = .05
-                for key in mfp_spifu:
-                    if key == 'zemax':
-                        continue
-                    mfp = mfp_spifu[key]
-                    x, y = mfp['mfp_x'], mfp['mfp_y']
-                    u, v = x - x_ref, y - y_ref
-                    q = ax.quiver(x_ref, y_ref, u, v,
-                                  angles='xy', scale_units='xy', scale=scale,
-                                  width=0.0015, color=colours[i])
-                    i += 1
-                if ax_row == 0:
-                    ax.quiverkey(q, X=0.9, Y=1.15, U=0.18, label='10 pixels', labelpos='W', color='black')
-                ax_row += 1
-        Plot.show()
+        for i, mfp_name in enumerate(['ray', 'sli', 'fit']):
+            mfp_list = mfp_plot[mfp_name]
+            for j in range(len(mfp_list)):
+                mfp = mfp_list[j]
+                x, y = np.array(mfp['mfp_x']), np.array(mfp['mfp_y'])
+                if xy_ref:
+                    x_ref = np.array(mfp_plot['ray'][j]['mfp_x'])
+                    y_ref = np.array(mfp_plot['ray'][j]['mfp_y'])
+                    x -= x_ref
+                    y -= y_ref
+                if mfp_name == 'fit':
+                    x_lab, y_lab = np.amax(x), np.amax(y)
+                    s_label = "{:02d}_{:02d}_{:02d}".format(slice_nos[j], spifu_nos[j], ech_ords[j])
+                    ax.text(x_lab, y_lab, s_label, ha='right', va='bottom', size=12, color='blue')
+
+                label, colour, marker, msize = decorations[i]
+                handle, = ax.plot(x, y,
+                                  color=colour, marker=marker, markersize=msize,
+                                  linestyle='none', label=label)
+                if j == 0:
+                    handles.append(handle)
+        ax.legend(handles=handles)
+        xy_pix = 0.018
+        xmin, xmax = ax.get_xlim()
+        ymin, ymax = ax.get_ylim()
+        if do_grid:
+            xg = xmin
+            while xg < xmax:
+                ax.plot([xg, xg], [ymin, ymax], ls='solid', lw=0.5, color='grey')
+                xg += xy_pix
+            yg = ymin
+            while yg < ymax:
+                ax.plot([xmin, xmax], [yg, yg], ls='solid', lw=0.5, color='grey')
+                yg += xy_pix
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+        plt.show()
         return
 
     @staticmethod
@@ -423,12 +429,13 @@ class Plot:
         _, opticon, _, _, _, _ = model_config
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]'),
-                  'nm_det': ('Instantaneous wavelength coverage', 'Mosaic coverage [nm]')}
+                  'nm_det': ('Instantaneous mosaic bandwidth', 'Mosaic bandwidth [nm]')}
         title, ylabel = titles[plot_type]
         fig, ax_list = Plot.set_plot_area(xlabel=r'Wavelength / $\mu$m',
                                           ylabel=ylabel)
         fig.suptitle(title)
         ax = ax_list[0, 0]
+        slice_rgb = None
         if colour_by == 'slice':
             slice_rgb = Plot.make_rgb_gradient(np.arange(28))
         if colour_by == 'config':
@@ -440,14 +447,12 @@ class Plot:
             colour = None
             perimeter_upper, perimeter_lower = None, None
             for transform in trace.transforms:
-                config = transform.configuration
-                keys = transform.slice_specific_kws
-                slice_no = config['slice_no']
-                spifu_no = config['spifu_no']
-                # cfg_id = config['cfg_id']
+                slice_config = transform.slice_configuration
+                slice_no = slice_config['slice_no']
+                spifu_no = slice_config['spifu_no']
                 cfg = {}
-                for key in keys:
-                    cfg[key] = config[key]
+                for key in slice_config:
+                    cfg[key] = slice_config[key]
                 cfg['opticon'] = opticon
                 waves = trace.get_series('wavelength', **cfg)
                 det_x = trace.get_series('det_x', **cfg)
@@ -467,7 +472,8 @@ class Plot:
                 nm_micron = 1000.0
                 if plot_type == 'nm_det':
                     x = waves
-                    dw = (trace.wmax - trace.wmin) * nm_micron
+                    w_min, w_max = slice_config['w_min'], slice_config['w_max']
+                    dw = (w_max - w_min) * nm_micron
                     y = np.full(waves.shape, dw)
                 if plot_type == 'dispersion':
                     mm_pix = 0.018

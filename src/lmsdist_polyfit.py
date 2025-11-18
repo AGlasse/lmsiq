@@ -26,7 +26,7 @@ class PolyFit:
         return
 
     @staticmethod
-    def wave_to_config(wave, wpa_fit, wxo_fit, **kwargs):
+    def wave_to_config(wave, opticon, wpa_fit, wxo_fit, **kwargs):
         """ Find the LMS configuration (prism and echelle angles) which map a wavelength onto the centre of the
         detector mosaic, in the echelle diffraction order which has the echelle angle closest to zero.  The function
         is solved using the scipy 'fsolve' method.
@@ -46,10 +46,11 @@ class PolyFit:
             return f - wxo
 
         debug = kwargs.get('debug', False)
-        select = kwargs.get('select', None)
+        select = kwargs.get('select', 'min_ech_ang')
         print_header = kwargs.get('print_header', True)
 
-        lms_configs, opt_lms_config = [], None
+        lms_configs = []
+
         wpa_coeffs = wpa_fit['opt']
         pri_ang = PolyFit.wpa_model(wave, *wpa_coeffs)
 
@@ -57,41 +58,38 @@ class PolyFit:
         wxo_coeffs = wxo_fit['opt']
         wxo_lim = np.array([108., 115.])      # Wavelength bounds of w x order coverage (in microns)
         ech_ang_min = 100.
+        lms_config = Globals.lms_config_template.copy()
         for ech_ord in range(21, 42):
+            lms_config['wave'] = wave
+            lms_config['opticon'] = opticon
+
             wxo_tgt = wave * ech_ord
             if wxo_tgt < wxo_lim[0] or wxo_tgt > wxo_lim[1]:   # The accessible wavelength coverage in each order is wxo_lim / n
                 continue
-            ech_ang_guess = 0.0
+            ech_ang_guess = np.zeros(1)
             args = pri_ang, wxo_tgt, wxo_coeffs, debug
             ech_ang_sol, _, ier, msg = fsolve(ea_func, ech_ang_guess, args=args, full_output=True)
             ech_ang = ech_ang_sol[0]
-            abs_ech_ang = math.fabs(ech_ang)
 
-            lms_cfg = wave, pri_ang, ech_ang, ech_ord
-            if select is None:
-                lms_configs.append(lms_cfg)
+            if select == 'all':
+                lms_configs.append(lms_config)
+                lms_config = Globals.lms_config_template.copy()
             if select == 'min_ech_ang':
+                abs_ech_ang = math.fabs(ech_ang)
                 if abs_ech_ang < ech_ang_min:
                     ech_ang_min = abs_ech_ang
-                    opt_lms_config = wave, pri_ang, ech_ang, ech_ord
-            if debug:
-                if ier != 1:
-                    print(msg)
-                    print('skipping to next order')
-                    continue
-        if select == 'min_ech_ang':
-            lms_configs.append(opt_lms_config)
-        if print_header:
-            fmt1 = "{:>15s},{:>20s},{:>20s},{:>15s}"
-            print(fmt1.format('Wavelength', 'Prism Ang./deg', 'Ech Ang./deg', 'Order'))
-        fmt2 = "{:>15.3f},{:>20.3f},{:>20.3f},{:>15d}"
-        for lms_cfg in lms_configs:
-            wave, pri_ang, ech_ang, ech_ord = lms_cfg
-            print(fmt2.format(wave, pri_ang, ech_ang, ech_ord))
-        return lms_configs
+                    lms_config['pri_ang'] = pri_ang
+                    lms_config['ech_ang'] = ech_ang
+                    lms_config['ech_order'] = ech_ord
+        if select == 'all':
+            return lms_configs
+        return lms_config
 
     @staticmethod
     def create_polynomial_surface_fits(opticon, svd_transforms, plot_terms=False, plot_wxo=True):
+        """ Calculate the best fit polynomials to map from wavelength x diffractionorder to echelle angle (wxo_fit),
+        and all terms in the A, B, AI, BI transforms for all slices (term_fits).
+        """
         slice_fits = {}
         term_fits = []
         wxo_fit, wxo_fit_order = None, None
@@ -160,6 +158,8 @@ class PolyFit:
 
     @staticmethod
     def create_pa_wave_fit(opticon, waves, pri_angs):
+        """ Calculate the best fit polynomial to map from wavelength to prism angle
+        """
         order = Globals.wpa_fit_order[opticon]
         p0 = [0] * order
         wpa_opt, wpa_cov = curve_fit(PolyFit.wpa_model, xdata=waves, ydata=pri_angs, p0=p0)
@@ -198,7 +198,7 @@ class PolyFit:
         spifu_no = term_values['spifu_no']
         x = np.array(term_values['pri_ang'])
         y = np.array(term_values['ech_ang'])
-        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_orders'])
+        wxo = np.array(term_values['w_bs']) * np.array(term_values['ech_ords'])
         wxo_opt, wxo_cov = curve_fit(PolyFit.surface_model,
                                      xdata=(x, y), ydata=list(wxo), p0=[0]*n_coefficients)
         wxo_fit = {'slice_no': slice_no, 'spifu_no': spifu_no,
@@ -235,7 +235,6 @@ class PolyFit:
 
     @staticmethod
     def make_fit_transform(cfg, term_fit):
-
         pa, ea, eo = cfg['pri_ang'], cfg['ech_ang'], cfg['ech_order']
         matrices = {}
         for mat_name in Globals.matrix_names:
@@ -249,7 +248,8 @@ class PolyFit:
     def make_mfp_projection(slice_no, spifu_no, trace, svd_transform, wxo_fit, term_fits):
 
         svd_cfg = svd_transform.configuration
-        svd_slice_no = svd_cfg['slice_no']
+        svd_slice_config = svd_transform.slice_configuration
+        slice_no = svd_slice_config['slice_no']
 
         term_fit = term_fits[slice_no][spifu_no]
         fit_transform = PolyFit.make_fit_transform(svd_cfg, term_fit)

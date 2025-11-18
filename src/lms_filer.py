@@ -219,33 +219,33 @@ class Filer:
         fits_name = fmt.format(opticon[0:3], date_stamp)
         fits_path = self.tf_dir + fits_name + '.fits'
         hdu_list = fits.open(fits_path, mode='readonly')
+        print("Reading global fit parameters from file {:s}".format(fits_name))
 
+        wpa_hdr = hdu_list[1].header
+        n_wpa_coeffs = wpa_hdr['N_COEFFS']
         wpa_data = hdu_list[1].data
-        wxo_header = hdu_list[1].header
-        n_fit_coeffs = wxo_header['N_COEFFS']
-        wpa_fit = {'n_coeffs': n_fit_coeffs,  'opt': list(wpa_data[0][:])}
+        wpa_fit = {'n_coeffs': n_wpa_coeffs,  'opt': list(wpa_data[0][:])}
 
+        wxo_header = hdu_list[2].header             # Map from wavelength to echelle angle for slice 13.
+        wxo_fit_order, n_wxo_coeffs = wxo_header['ORDER'], wxo_header['N_COEFFS']
         wxo_data = hdu_list[2].data
         slice_no = int(wxo_data['SLICE_NO'][0])
         spifu_no = int(wxo_data['SPIFU_NO'][0])
-        wxo_header = hdu_list[2].header
-        fit_order, n_fit_coeffs = wxo_header['ORDER'], wxo_header['N_COEFFS']
-        wxo_fit = {'order': fit_order, 'n_coeffs': n_fit_coeffs,
+        wxo_fit = {'order': wxo_fit_order, 'n_coeffs': n_wxo_coeffs,
                    'slice_no': slice_no, 'spifu_no': spifu_no,
                    'opt': list(wxo_data[0][2:])}
 
-        term_data = np.array(hdu_list[3].data)
         term_header = hdu_list[3].header
+        n_term_coeffs = term_header['N_COEFFS']
+        term_data = np.array(hdu_list[3].data)
         svd_order = term_header['ORDER']
-        n_fit_coeffs = term_header['N_COEFFS']
-        mat_length = svd_order * svd_order
-        mat_shape = svd_order, svd_order, n_fit_coeffs,
+        # mat_length = svd_order * svd_order
+        mat_shape = svd_order, svd_order, n_term_coeffs,
         term_fits = {}
 
         # Should have 18 elements for ext, 28 for nominal
         for data_rec in np.array(term_data):
             data_array = list(data_rec)
-            # print(data_list[0:10])
             slice_no, spifu_no = int(data_array[0]), int(data_array[1])
             if slice_no not in term_fits.keys():
                 term_fits[slice_no] = {}
@@ -257,9 +257,9 @@ class Filer:
             data_col = 4
             for mat_name in Globals.matrix_names:
                 mat = term_fits[slice_no][spifu_no][mat_name]
-                mat[mat_row, mat_col] = data_array[data_col: data_col + n_fit_coeffs]
+                mat[mat_row, mat_col] = data_array[data_col: data_col + n_term_coeffs]
                 term_fits[slice_no][spifu_no][mat_name] = mat
-                data_col += n_fit_coeffs
+                data_col += n_term_coeffs
         return wpa_fit, wxo_fit, term_fits
 
     def write_affine_transform(self, trace):
@@ -313,7 +313,7 @@ class Filer:
             affines[i] = matrix
         return affines
 
-    def write_svd_transforms(self, trace):
+    def write_svd_transforms(self, trace, **kwargs):
         """ Create HDU binary data tables holding transforms for all slices in a configuration and write them
         to a fits file.  This is the data product we provide to ScopeSim and the pipeline.
         """
@@ -321,15 +321,15 @@ class Filer:
         fits_path, fits_name = None, None
         write_primary = True
         for transform in trace.transforms:
-            cfg = transform.configuration
+            lms_config = transform.lms_configuration
             if write_primary:
-                primary_hdu = transform.make_hdu_primary(trace.wmin, trace.wmax)
+                primary_hdu = transform.make_hdu_primary()
                 hdu_list = HDUList([primary_hdu])
 
-                # Create fits file with primaryHDU only
-                otag = '_nom' if cfg['opticon'] == 'nominal' else '_ext'
-                ptag = "_pa{:05d}".format(abs(int(10000. * cfg['pri_ang'])))
-                ea = cfg['ech_ang']
+                # Create fits file with primary HDU only
+                otag = '_nom' if lms_config['opticon'] == 'nominal' else '_ext'
+                ptag = "_pa{:05d}".format(abs(int(10000. * lms_config['pri_ang'])))
+                ea = lms_config['ech_ang']
                 esign = 'p' if ea > 0. else 'n'
                 etag = "_ea{:s}{:05d}".format(esign, abs(int(10000. * ea)))
                 _, _, date_stamp, _, _, _ = trace.model_config
