@@ -130,7 +130,7 @@ class Plot:
             x = x[1:]
             y = dp / dw
 
-        fig, [ax1, ax2] = plt.subplots(figsize=(10, 8), ncols=1, nrows=2,
+        fig, [ax1, ax2] = plt.subplots(figsize=(12, 8), ncols=1, nrows=2,
                                        sharex=True)
         ylabel = 'Prism rotation sensitivity micron / deg' if differential else 'Prism rotation angle / deg'
         xlabel = "Wavelength / " + r'$\mu$m'
@@ -453,10 +453,10 @@ class Plot:
                 cfg = {}
                 for key in slice_config:
                     cfg[key] = slice_config[key]
-                cfg['opticon'] = opticon
-                waves = trace.get_series('wavelength', **cfg)
-                det_x = trace.get_series('det_x', **cfg)
-                det_y = trace.get_series('det_y', **cfg)
+                # cfg['opticon'] = opticon
+                waves = trace.get_series('wavelength', cfg)
+                det_x = trace.get_series('det_x', cfg)
+                det_y = trace.get_series('det_y', cfg)
                 if colour_by == 'slice_wave':
                     rgb = Plot.make_rgb_gradient(waves)
                 if colour_by == 'slice':

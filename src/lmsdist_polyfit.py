@@ -51,11 +51,11 @@ class PolyFit:
 
         lms_configs = []
 
-        wpa_coeffs = wpa_fit['opt']
-        pri_ang = PolyFit.wpa_model(wave, *wpa_coeffs)
+        wpa_coeffs = wpa_fit['wpa_opt']
+        pri_ang = PolyFit.poly_model(wave, *wpa_coeffs)
 
         # print("Finding configuration for wavelength = {:10.3f}".format(wave))
-        wxo_coeffs = wxo_fit['opt']
+        wxo_coeffs = wxo_fit['wxo_opt']
         wxo_lim = np.array([108., 115.])      # Wavelength bounds of w x order coverage (in microns)
         ech_ang_min = 100.
         lms_config = Globals.lms_config_template.copy()
@@ -148,22 +148,22 @@ class PolyFit:
         return f
 
     @staticmethod
-    def wpa_model(x, *coeff):
+    def poly_model(x, *coeff):
+        """ Evaluate a polynomial function of the form y = c0 + c1 x + c2 x x + ..
+        """
         f = 0.
         order = len(coeff)
         for i in range(0, order):
-            x_term = np.power(x, i)
-            f += coeff[i] * x_term
+            f += coeff[i] * np.power(x, i)
         return f
 
     @staticmethod
-    def create_pa_wave_fit(opticon, waves, pri_angs):
+    def create_polynomial_fit(waves, pri_angs, poly_order=3):
         """ Calculate the best fit polynomial to map from wavelength to prism angle
         """
-        order = Globals.wpa_fit_order[opticon]
-        p0 = [0] * order
-        wpa_opt, wpa_cov = curve_fit(PolyFit.wpa_model, xdata=waves, ydata=pri_angs, p0=p0)
-        wpa_fit = {'wpa_opt': wpa_opt, 'wpa_cov': wpa_cov, 'n_coefficients': order}
+        p0 = [0] * poly_order
+        wpa_opt, wpa_cov = curve_fit(PolyFit.poly_model, xdata=waves, ydata=pri_angs, p0=p0)
+        wpa_fit = {'wpa_opt': wpa_opt, 'wpa_cov': wpa_cov, 'n_coeffs': poly_order}
         return wpa_fit
 
     @staticmethod

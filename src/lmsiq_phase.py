@@ -24,7 +24,8 @@ class Phase:
 
         mc_bounds, inter_pixels = process_control
         _, _, date_stamp, _, _, _ = iq_filer.model_configuration
-        tgt_slice_no, slice_radius = data_identifier['cube_slice_bounds']
+        tgt_slice_no, slice_radius = data_identifier['field_tgt_slice'], data_identifier['slice_radius']
+        tgt_slice_no = 13
         slice_tag = "slice_{:d}".format(tgt_slice_no)
 
         # Set up spectral shifts in detector pixels
@@ -51,9 +52,16 @@ class Phase:
                 field_nos = uni_par['field_nos']
             slice_nos = uni_par['slice_nos']
             spifu_nos = uni_par['spifu_nos']
-
-            print()
+            print('Nominal data set ')
             print("Detector diffusion = {:s}".format(str(inter_pixel)))
+            Util.print_list('configurations', config_nos)
+            Util.print_list('field numbers ', field_nos)
+            Util.print_list('slice numbers ', slice_nos)
+            Util.print_list('spifu numbers ', spifu_nos)
+            print()
+            print('Changing to..')
+            slice_nos = [13]
+            spifu_nos = [1]
             Util.print_list('configurations', config_nos)
             Util.print_list('field numbers ', field_nos)
             Util.print_list('slice numbers ', slice_nos)
@@ -97,7 +105,7 @@ class Phase:
                         xcen_shift, ycen_shift = np.zeros(shape), np.zeros(shape)
                         xfwhm_shift, phot_shift = np.zeros(shape), np.zeros(shape)
                         phot_obs_rms = {}
-                        for img_idx, img_in in enumerate(image_list):
+                        for img_idx, img_in in enumerate(image_list[0:4]):
                             t_now = time.perf_counter()
                             t_min = (t_now - t_start) / 60.
 

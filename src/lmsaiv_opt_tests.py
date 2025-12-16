@@ -1,6 +1,5 @@
 import numpy as np
 from astropy import units as u
-from scipy.sparse import lil_array
 
 from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
@@ -8,7 +7,6 @@ from lmsaiv_plot import Plot
 from lmssim_model import Model
 from lms_filer import Filer
 from lms_mosaic import Mosaic
-# from notebooks.lms_opt_01_t1 import primary_hdr
 from lmsdist_machine import DistortionMachine
 
 
@@ -22,6 +20,7 @@ class OptTests:
                             'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'Grey body iso-alpha, along slice PSF'),
                             'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, LSF'),
                             'lms_opt_01_t4': (OptTests.lms_opt_01_t4, 'Sky iso-lambda trace'),
+                            'lms_opt_02': (OptTests.lms_opt_02, 'Distortion transforms'),
                             'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
                             }
         OptTests.valid_test_names = valid_test_names
@@ -42,7 +41,7 @@ class OptTests:
         print('Test data found in folder ')
         [print("- {:s}".format(file)) for file in file_list]
         try:            # Check that 'as built' dictionary file exists
-            as_built = Filer.read_pickle(Globals.as_built_file)       # , 'rb')
+            as_built = Filer.read_pickle(Globals.as_built_file)
         except:
             as_built = {}
         method, title = OptTests.valid_test_names[test_name]
@@ -55,17 +54,17 @@ class OptTests:
         """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
         map in the AsBuilt object
         """
-        darks = Filer.read_mosaics(inc_tags=[test_name, 'nom_dark'])
+        darks = Filer.read_mosaic_list(inc_tags=[test_name, 'nom_dark'], debug=True)
         do_plot = kwargs.get('do_plot', True)
         if do_plot:
             Plot.mosaic(darks[0], title=title)
             Plot.histograms(darks[0])
         OptTools.dark_stats(darks)
 
-        floods = Filer.read_mosaics(inc_tags=[test_name, 'flood'])
+        floods = Filer.read_mosaic_list(inc_tags=[test_name, 'flood'])
         for flood in floods:
             slice_map, profiles = OptTools.flood_stats(flood)
-            do_plot = False
+            do_plot = True
             if do_plot:
                 Plot.profiles(profiles)
                 Plot.mosaic(flood, title=title, cmap='hot')        # Use cmap='hot', 'gray' etc.
@@ -123,6 +122,38 @@ class OptTests:
             val = sign * mag
             abo.append(val)
         return tuple(abo)
+
+    @staticmethod
+    def lms_opt_02(test_name, title, as_built, **kwargs):
+
+        slice_map = as_built['slice_map']
+        iso_lambdas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_lambda'])
+        do_plot = True
+        for iso_lambda in iso_lambdas:
+            lambda_traces = OptTools.extract_det_traces(iso_lambda, 'lambda', slice_map)
+            if do_plot:
+                Plot.mosaic(iso_lambda, title=iso_lambda[0], cmap='hot', overlay=lambda_traces)
+                do_plot = False
+
+        print('Analysing test data for {:s}'.format(test_name))
+        print('1. Deriving detector rotation and offset differences from iso-alpha and iso-lambda data. ')
+        print('   Note that iso-lambdas are found for each slice, since they are likely to vary in the as-built LMS.')
+        do_plot = True
+        iso_alphas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_alpha'], debug=False)
+        for iso_alpha in iso_alphas[0:1]:
+            print("\nMosaic file = {:s}".format(iso_alpha[0]))
+            alpha_traces = OptTools.extract_det_traces(iso_alpha, 'alpha', slice_map)
+            if do_plot:
+                Plot.mosaic(iso_alpha, title=iso_alpha[0], cmap='hot', overlay=alpha_traces)
+                do_plot = False
+
+        do_plot = True
+
+
+
+        print('2. Measuring CFO boresight detector rotation differences from iso-alpha and iso-lambda data ')
+        iso_alpha_mosaics = Filer.read_mosaic_list(inc_tags=[test_name, 'cfo_pnh'])
+        return as_built
 
     @staticmethod
     def lms_opt_01_t2(test_name, title, as_built, **kwargs):

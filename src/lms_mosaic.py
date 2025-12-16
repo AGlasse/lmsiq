@@ -4,11 +4,7 @@
 
 Update:
 """
-import os
 import copy
-
-import numpy as np
-from lms_globals import Globals
 
 
 class Mosaic:

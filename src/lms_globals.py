@@ -7,6 +7,7 @@ Python object to encapsulate LMS optical constants
 """
 import math
 from astropy import units as u
+import numpy as np
 
 
 class Globals:
@@ -24,6 +25,8 @@ class Globals:
 
     # Simulators
     scopesim, toysim = 'scopesim', 'toysim'
+    # Convert from scope sim detector number (hdu.header['ID'] to mosaic data list index.)
+    mos_idx = {2: 0, 1: 1, 3: 2, 4: 3}
 
     # Optical configurations and focal planes
     nominal = 'nominal'
@@ -40,7 +43,6 @@ class Globals:
                      coord_in, coord_out)
     iq_ext_config = ('iq', extended, '2024061403', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
                      coord_in, coord_out)
-
     model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}
                             }
@@ -129,4 +131,17 @@ class Globals:
     # Zemax PSF image oversampling wrt detector pixels.
     oversampling = 4
 
+    # The as_built file holds the parameters which define the instrument's performance (eg slice locations, PSF
+    # dimensions etc.).  They can be initialised to the as designed values, and then updated with as built values
+    # from performance testing.
     as_built_file = '../output/asbuilt/asbuilt'
+
+    # Geometry functions
+    @staticmethod
+    def gauss(x, a, x0, sigma):
+        y = a * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2))
+        return y
+
+    @staticmethod
+    def cubic(x, *coeffs):
+        return coeffs[0] + x * (coeffs[1] + x * (coeffs[2] + x * coeffs[3]))

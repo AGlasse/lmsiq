@@ -140,18 +140,18 @@ class Plot:
 
     @staticmethod
     def _get_config_text(ds_dict):
-        opticon = ds_dict['optical_configuration']
+        opticon = ds_dict['optical_path']
         field_no = ds_dict['field_no']
         slice_no = ds_dict['slice_no']
         spifu_no = ds_dict['spifu_no']
         wave = ds_dict['wavelength']
         text = ''
-        common_text = ' $\lambda_{cov}$, $\lambda$ ='
+        common_text = r' $\lambda_{cov}$, $\lambda$ ='
         if opticon == 'nominal':
-            fmt = "{:5.3f} $\mu$m, field={:d}, spat_slice={:d}"
+            fmt = r'{:5.3f} $\mu$m, field={:d}, spat_slice={:d}'
             text = 'Nominal' + common_text + fmt.format(wave, field_no, slice_no)
         if opticon == 'spifu':
-            fmt = "{:5.3f} $\mu$m, field={:d}, spat_slice={:d}, spec_slice={:d}"
+            fmt = r'{:5.3f} $\mu$m, field={:d}, spat_slice={:d}, spec_slice={:d}'
             text = 'Extended' + common_text + fmt.format(wave, field_no, slice_no, spifu_no)
         return text
 
@@ -209,7 +209,8 @@ class Plot:
         data_par = data_pars[type_key]
 
         title_lead = data_par['title_lead']
-        title = "{:s}\n{:s}, $\lambda$= {:5.3f} $\mu$m".format(title_lead, name, wavelength)
+        print(title_lead)
+        title = r'\n{:s},' + r'$\lambda$= {:5.3f} $\mu$m'.format(name, wavelength)
 
         fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
         ax = ax_list
@@ -444,9 +445,9 @@ class Plot:
         ax.set_title(title)
 
         for tick in ax.yaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
+            tick.label1.set_fontsize(16.0)
         for tick in ax.xaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
+            tick.label1.set_fontsize(16.0)
 
         y_perfect, y_design = data[:, 0], data[:, 1]
         y_mcs = data[:, 2:]

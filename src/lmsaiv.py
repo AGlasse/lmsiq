@@ -6,7 +6,7 @@ _ = Globals
 opt_tests = OptTests()
 print(opt_tests)
 
-test_name = 'lms_opt_01_t2'
+test_name = 'lms_opt_02'
 fmt = "lmsopt - Analysing test data for {:s} - {:s}"
 print(fmt.format(test_name, 'started'))
 print()

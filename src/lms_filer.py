@@ -13,32 +13,31 @@ import numpy as np
 class Filer:
 
     analysis_types = ['distortion', 'iq']
-    model_configuration = None
-    trace_file, poly_file, wcal_file, stats_file, tf_fit_file = None, None, None, None, None
-    base_results_path = None
-    data_folder = None
-    cube_folder, iq_png_folder = None, None
-    slice_results_path, dataset_results_path = None, None
-    pdp_path, profiles_path, centroids_path = None, None, None
-    test_data_folder, tf_dir = None, None
+    test_data_folder = None
 
-    def __init__(self, analysis_type, opticon):
+    def __init__(self):
+        self.model_configuration = None
+        self.data_folder, self.sim_folder, self.output_folder = None, None, None
+        self.tf_dir, self.trace_file, self.poly_file = None, None, None
+        self.wcal_file, self.stats_file, self.tf_fit_file, self.cube_folder = None, None, None, None
+        return
+
+    def set_configuration(self, analysis_type, opticon):
         model_configuration = Globals.model_configurations[analysis_type][opticon]
         analysis_type, opticon, date_stamp, _, _, _ = model_configuration
-        # Filer.wpa_fit_order = Globals.wpa_fit_order_dict[opticon]
-        Filer.model_configuration = model_configuration
+        self.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, opticon, date_stamp)
-        Filer.data_folder = Filer.get_folder('../data/model/' + sub_folder)
-        Filer.sim_folder = Filer.get_folder('../data/sim/' + sub_folder)
-        Filer.output_folder = Filer.get_folder('../output/' + sub_folder)
-        file_leader = Filer.output_folder + sub_folder.replace('/', '_')
-        Filer.tf_dir = Filer.get_folder(Filer.output_folder + 'fits')
-        Filer.trace_file = file_leader + '_trace'  # All ray coordinates
-        Filer.poly_file = file_leader + '_dist_poly.txt'
-        Filer.wcal_file = file_leader + '_dist_wcal.txt'  # Echelle angle as function of wavelength
-        Filer.stats_file = file_leader + '_dist_stats.txt'
-        Filer.tf_fit_file = file_leader + '_dist_tf_fit'  # Use pkl files to write objects directly
-        Filer.cube_folder = Filer.get_folder(Filer.output_folder + '/cube')
+        self.data_folder = Filer.get_folder('../data/model/' + sub_folder)
+        self.sim_folder = Filer.get_folder('../data/sim/' + sub_folder)
+        self.output_folder = Filer.get_folder('../output/' + sub_folder)
+        file_leader = self.output_folder + sub_folder.replace('/', '_')
+        self.tf_dir = Filer.get_folder(self.output_folder + 'fits')
+        self.trace_file = file_leader + '_trace'  # All ray coordinates
+        self.poly_file = file_leader + '_dist_poly.txt'
+        self.wcal_file = file_leader + '_dist_wcal.txt'        # Echelle angle as function of wavelength
+        self.stats_file = file_leader + '_dist_stats.txt'
+        self.tf_fit_file = file_leader + '_dist_tf_fit'        # Use pkl files to write objects directly
+        self.cube_folder = Filer.get_folder(self.output_folder + '/cube')
         return
 
     @staticmethod
@@ -46,9 +45,7 @@ class Filer:
         """ Read in a Zemax model (PSF) image, with the image data in the primary extension.
         """
         hdu_list = fits.open(path, mode='readonly')
-        hdr = hdu_list[0].header
-        hdu = hdu_list[0].data
-        return hdr, hdu
+        return hdu_list
 
     @staticmethod
     def write_zemax_fits(path, header, hdu):
@@ -61,20 +58,32 @@ class Filer:
         return
 
     @staticmethod
-    def read_mosaic(folder, file_name):
-        data_ext_nos = [2, 1, 3, 4]             # HDU order is anti-clockwise in ScopeSim, left right in lmsiq.
+    def read_mosaic(folder, file_name, debug=False):
+        # data_ext_nos = [2, 1, 3, 4]             # HDU order is anti-clockwise in ScopeSim, left right in lmsiq.
         path = folder + '/' + file_name
-        hdu_list_in = fits.open(path, mode='readonly')
-        primary_hdr = hdu_list_in[0].header
-        hdu_list = []       # Re-order hdus
-        for i in range(0, 4):
-            idx = data_ext_nos[i]
-            hdu_list.append(hdu_list_in[idx])
+        hdu_in_list = fits.open(path, mode='readonly')
+        primary_hdr = hdu_in_list[0].header
+        hdu_list = [None]*4       # Re-order hdus
+        for hdu_in in hdu_in_list[1:]:
+            det_no = int(hdu_in.header['ID'])
+            x = hdu_in.header['CRVAL1D']
+            y = hdu_in.header['CRVAL2D']
+            mos_idx = Globals.mos_idx[det_no]
+            if debug:
+                fmt = "Storing ScopeSim det_no= {:d} (x, y) = ({:6.3f}, {:6.3f}), at mosaic list index= {:d}"
+                print(fmt.format(det_no, x, y, mos_idx))
+            hdu_list[mos_idx] = hdu_in
         mosaic = file_name, primary_hdr, hdu_list
         return mosaic
 
     @staticmethod
-    def read_mosaic_list(inc_tags=[], exc_tags=[]):
+    def read_mosaic_list(inc_tags=[], exc_tags=[], **kwargs):
+        """ Read an LMS data file into a mosaic tuple.  For ScopeSim data, the HDU.header['ID'] holds the detector
+        number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.   Here, T=Top (slices 15 to 28,
+        B = Bottom (slices 1 to 14), L = Left (short wavelength), R = Right (long wavelength).
+        We write these into the mosaic tuple as a list, with indices = 0 (TL), 1 (TR), 2 (BL), 3 (BR).
+        """
+        debug = kwargs.get('debug', False)
         mosaic_list = []
         folder = Filer.test_data_folder
         file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
@@ -86,7 +95,7 @@ class Filer:
             return mosaic_list
 
         for file_name in file_list:
-            mosaic = Filer.read_mosaic(folder, file_name)
+            mosaic = Filer.read_mosaic(folder, file_name, debug=debug)
             mosaic_list.append(mosaic)
         return mosaic_list
 
@@ -139,11 +148,11 @@ class Filer:
         hdu_list = HDUList([primary_hdu])
 
         wpa_col_names = []
-        for i in range(0, wpa_fit['n_coefficients']):
+        n_coeffs = wpa_fit['n_coeffs']
+        for i in range(0, n_coeffs):
             wpa_col_names.append("WP{:d}".format(i))
         wpa_data = wpa_fit['wpa_opt']     # All slices have the same wxo fit parameters...
         wpa_table = Table(data=np.array(wpa_data), names=wpa_col_names)
-        n_coeffs = wpa_fit['n_coefficients']
         wpa_cards = [Card('DESCR', 'Fit parms to map wavelength to prism angle', ''),
                      Card('N_COEFFS', n_coeffs, 'No. of polynomial fit coefficients')
                      ]
@@ -224,7 +233,7 @@ class Filer:
         wpa_hdr = hdu_list[1].header
         n_wpa_coeffs = wpa_hdr['N_COEFFS']
         wpa_data = hdu_list[1].data
-        wpa_fit = {'n_coeffs': n_wpa_coeffs,  'opt': list(wpa_data[0][:])}
+        wpa_fit = {'n_coeffs': n_wpa_coeffs,  'wpa_opt': list(wpa_data[0][:])}
 
         wxo_header = hdu_list[2].header             # Map from wavelength to echelle angle for slice 13.
         wxo_fit_order, n_wxo_coeffs = wxo_header['ORDER'], wxo_header['N_COEFFS']
@@ -233,13 +242,12 @@ class Filer:
         spifu_no = int(wxo_data['SPIFU_NO'][0])
         wxo_fit = {'order': wxo_fit_order, 'n_coeffs': n_wxo_coeffs,
                    'slice_no': slice_no, 'spifu_no': spifu_no,
-                   'opt': list(wxo_data[0][2:])}
+                   'wxo_opt': list(wxo_data[0][2:])}
 
         term_header = hdu_list[3].header
         n_term_coeffs = term_header['N_COEFFS']
         term_data = np.array(hdu_list[3].data)
         svd_order = term_header['ORDER']
-        # mat_length = svd_order * svd_order
         mat_shape = svd_order, svd_order, n_term_coeffs,
         term_fits = {}
 

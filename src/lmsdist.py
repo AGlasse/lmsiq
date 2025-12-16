@@ -25,9 +25,10 @@ print('lmsdist, distortion model - Starting')
 analysis_type = 'distortion'            # Used for file handling (types = 'iq', 'distortion' or 'sky'
 
 """ SET MODEL CONFIGURATION HERE """
-opticon = Globals.nominal                     # 'nominal' or 'extended'
+opticon = Globals.extended                     # 'nominal' or 'extended'
 
-filer = Filer(analysis_type, opticon)
+filer = Filer()
+filer.set_configuration(analysis_type, opticon)
 polyfit = PolyFit(opticon)
 
 print("- optical path  = {:s}".format(opticon))
@@ -45,6 +46,7 @@ util = Util()
 plot = Plot()
 
 n_mats = Globals.n_svd_matrices
+filer.set_configuration(analysis_type, opticon)
 st_file = open(filer.stats_file, 'w')
 
 run_config = 4, 2
@@ -53,12 +55,12 @@ st_hdr = "Trace individual"
 rt_text_block = ''
 
 generate_transforms = False
+do_first_plot = True
 if generate_transforms:
-    suppress_plots = False  # f = Plot first trace
     print()
     print("Generating distortion transforms (and prism angle fit parameters)")
     fmt = "- reading Zemax ray trace data from folder {:s}"
-    print("Suppressing plots = {:s}".format(str(suppress_plots)))
+    print("Plot first configuration = {:s}".format(str(do_first_plot)))
     print(fmt.format(zem_folder))
 
     # Select *.csv files
@@ -75,15 +77,15 @@ if generate_transforms:
         print(file_name)
         zf_file = zem_folder + file_name
         trace = Trace(cfg_id=cfg_id, silent=True)
-        trace.load(zf_file, Filer.model_configuration, do_plot=False)
+        trace.load(zf_file, filer.model_configuration, do_plot=False)
         trace.find_wavelength_bounds()
         debug_first = False
         offset_data_list.append(trace.offset_data)
-        if not suppress_plots:
-            trace.plot_fit_maps(plotdiffs=False, subset=True, field=True)
-            trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
+        if do_first_plot:
             trace.plot_focal_planes()
-            suppress_plots = False
+            trace.plot_fit_maps(plotdiffs=False, subset=True, field=True)
+            # trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
+            do_first_plot = False
 
         fits_name = filer.write_svd_transforms(trace, do_plot=True)
         trace.transform_fits_name = fits_name
@@ -96,14 +98,14 @@ if generate_transforms:
     print(Filer.trace_file)
     Filer.write_dill(Filer.trace_file, traces)
 
-calibrate_wavelength = False
+calibrate_wavelength = True
 if calibrate_wavelength:
     first_plot = True
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
     wcal = {}
     traces = Filer.read_dill(filer.trace_file)
-    model_config = Filer.model_configuration
+    model_config = filer.model_configuration
     # plot.series('nm_det', traces, model_config)
     if first_plot:
         plot.series('dispersion', traces, model_config)
@@ -119,22 +121,55 @@ if fit_transforms:
     # through the slit at the pre-disperser output (this is calculated for spatial slice number 13).
     # For the extended mode, the fit directs spectral slice number 3 through the slit.
     # _, opticon, _, _, _, _ = filer.model_configuration
-    opt_tag = 'nom' if opticon == Globals.nominal else 'ext'
-    svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
 
-    # Generate and save a polynomial fit for the function prism_angle(wavelength).
-    traces = Filer.read_dill(filer.trace_file)
-    wave_boresights, prism_angles = [], []   # Wavelength which passes through Int Foc Plane origin.
-    for trace in traces:
-        wave_bs, pri_ang = trace.get_ifp_boresight(opticon)
-        wave_boresights.append(wave_bs)
-        prism_angles.append(pri_ang)
-    wpa_fit  = polyfit.create_pa_wave_fit(opticon, wave_boresights, prism_angles)
-    wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms)
+    # Generate and save a polynomial fit for the function pri_ang = prism_angle(wavelength).  This function
+    # is intended to return the prism angle which will map a wavelength to the centre of the mosaic (mfp_x = 0.)
+    # when the echelle angle is equal to zero.  We don't have complete ray trace data for ech_ang = 0, so we
+    # interpolate across available trace ech_ang values on a per order basis.  We also don't have sufficient ray trace
+    # data for the extended mode, so we use the nominal mode fit, which should be identical since the MSA comes after
+    # the pre-disperser.
+    opt_tag = 'ext'
+    if opticon == Globals.nominal:
+        opt_tag = 'nom'
+        all_boresights = []                         # All boresights, including non-zero echelle angles
+        boresight_waves, prism_angles = [], []      # Wavelength which passes through Int Foc Plane origin.
+        traces = Filer.read_dill(filer.trace_file)
+        for trace in traces:
+            boresight = trace.get_ifp_boresight(opticon)
+            all_boresights.append(boresight)
+        all_boresights = np.array(all_boresights)        # Row content is wavelength, pri_ang, ech_ang, ech_ord
+        ech_orders = all_boresights[:, 3]
+        unique_ech_orders = np.unique(ech_orders)
+        for ech_order in unique_ech_orders:
+            idx = ech_orders == ech_order
+            order_boresight_waves = all_boresights[idx, 0]
+            order_prism_angles = all_boresights[idx, 1]
+            order_ech_angles = all_boresights[idx, 2]
+            ea_wave_fit = polyfit.create_polynomial_fit(order_ech_angles, order_boresight_waves, poly_order=3)
+            ea_wave_coeff = ea_wave_fit['wpa_opt']
+            boresight_wave = polyfit.poly_model(0., *ea_wave_coeff)     # Wavelength for ech_ang = 0.
+            boresight_waves.append(boresight_wave)
+            wave_pa_fit = polyfit.create_polynomial_fit(order_boresight_waves, order_prism_angles, poly_order=3)
+            wave_pa_coeff = wave_pa_fit['wpa_opt']
+            boresight_pa = polyfit.poly_model(boresight_wave, *wave_pa_coeff)
+            prism_angles.append(boresight_pa)
+        poly_order = Globals.wpa_fit_order[opticon]
+        wpa_fit  = polyfit.create_polynomial_fit(boresight_waves, prism_angles, poly_order=poly_order)
+        if is_first:
+            plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, boresight_waves, prism_angles)
+            is_first = False
+    else:
+        filer.set_configuration('distortion', Globals.nominal)
+        wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
+        print('Reading in ''nominal'' mode prism calibration for use in extended mode. ')
+
+    # Create transform term fits and write to file.
+    filer.set_configuration(analysis_type, opticon)
+    svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
+    wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
     filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
-    if is_first:
-        plot.wave_v_prism_angle(wpa_fit, polyfit.wpa_model, wave_boresights, prism_angles)
-        is_first = False
+
+
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
 # coordinates.  using 1) the specific transform for the trace at the Zemax location, 2) the model fit transforms

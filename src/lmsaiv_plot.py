@@ -26,7 +26,7 @@ class Plot:
         fig.suptitle(title)
         grid = ImageGrid(fig, 111,
                          nrows_ncols=(2, 2),
-                         axes_pad=0.15,
+                         axes_pad=(0.15, 0.15),
                          share_all=True,
                          cbar_location="right",
                          cbar_mode="single",
@@ -36,6 +36,9 @@ class Plot:
         # Set plot limits
         xmin, xmax = 0, hdus[0].shape[0]
         ymin, ymax = 0, hdus[0].shape[1]
+        bounds = kwargs.get('bounds', (xmin, xmax, ymin, ymax))
+        xmin, xmax, ymin, ymax = bounds
+
         vmin, vmax = 1.E6, -1.E6
         for hdu in hdus:
             vmin_hdu, vmax_hdu = np.nanmin(hdu.data), np.nanmax(hdu.data)
@@ -45,9 +48,15 @@ class Plot:
             vmin = kwargs.get('vmin', np.nanmin(hdus))
         if 'vmax' in kwargs:
             vmax = kwargs.get('vmax', np.nanmax(hdus))
-        for det_idx, ax in enumerate(grid):
+        ax, im = None, None
+        for hdu in hdus:
+            det_no = int(hdu.header['ID'])
+            det_idx = Globals.mos_idx[det_no]
+            # det_idx = det_no - 1
+            ax = grid[det_idx]
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
+            # ax.set_title("SS_DET_{:d}".format(det_no))
             ax.set_aspect('equal', 'box')
             image = hdus[det_idx].data
             mask = kwargs.get('mask', None)
@@ -66,9 +75,23 @@ class Plot:
                 ax.plot(x, yrmin, marker='o', ms=2.0, color='red', linestyle='none')
                 yrmax = sb['det_row_max'][idx]
                 ax.plot(x, yrmax, marker='o', ms=2.0, color='green', linestyle='none')
+            overlay = kwargs.get('overlay', None)
+            if overlay is not None:
+                is_alpha = overlay['type'] == 'alpha'
+                det_nos = np.array(overlay['det_no'])
+                indices = np.argwhere(det_no == det_nos)
+                if len(indices) < 1:
+                    continue
 
-
+                for idx in indices[:, 0]:
+                    pt_u_coords = overlay['pt_u_coords'][idx]
+                    pt_v_coords = overlay['pt_v_coords'][idx]
+                    xs = pt_u_coords if is_alpha else pt_v_coords
+                    ys = pt_v_coords if is_alpha else pt_u_coords
+                    # ys_fit = Globals.cubic(xs, *popts[idx]) if is_alpha else Globals.cubic(ys, *popts)
+                    ax.plot(xs, ys, marker='o', ms=2.0, color='red', linestyle='none')
         ax.cax.colorbar(im)
+
         plt.show()
         return
 

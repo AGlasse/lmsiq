@@ -7,8 +7,9 @@ from lms_obs_map import ObsMap
 from lmssim_scope import Scope
 from lmssim_toy import Toy
 
-sim_test_name = 'lms_opt_01_t2_nom_wcu_grid'       # 'lms_opt_01_t2'
-force_simulator = Globals.scopesim   # Set = None to use simulator specified in lms-opt-config.csv
+sim_test_name = 'lms_opt_02'       # 'lms_opt_01_t2'
+simulator = Globals.scopesim
+print('Simulating measurements for test {:s} using {:s}'.format(sim_test_name, simulator))
 
 
 def run(test_name):
@@ -25,15 +26,10 @@ def run(test_name):
     obs_map = ObsMap()
 
     sim_config = obs_map.get_configuration(test_name)
-    for obs_name in sim_config:
-        obs_cfg = sim_config[obs_name]
-        simulator = obs_cfg['simulator']
-        if force_simulator is not None:
-            simulator = force_simulator
-        if simulator == Globals.scopesim:
-            scope.run(sim_config)
-        if simulator == Globals.toysim:
-            toy.run(sim_config)
+    if simulator == Globals.scopesim:
+        scope.run(sim_config)
+    if simulator == Globals.toysim:
+        toy.run(sim_config)
     return
 
 run(sim_test_name)

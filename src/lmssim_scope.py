@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import scopesim as sim
+import astropy.units as u
 
 
 class Scope:
@@ -15,6 +16,7 @@ class Scope:
     def run(self, sim_configs):
         for obs_name in sim_configs:
             sim_config = sim_configs[obs_name]
+            # print(sim_config)
             opticon = sim_config['opticon']
             mode = {'nominal': 'wcu_lms', 'extended': 'wcu_lms_extended'}[opticon]
             cmds = sim.UserCommands(use_instrument="METIS", set_modes=[mode])
@@ -27,6 +29,7 @@ class Scope:
             cmds["!OBS.pupil_transmission"] = pup_trans
 
             metis = sim.OpticalTrain(cmds)
+            splist = metis['lms_spectral_traces']
             wcu = metis['wcu_source']
 
             wcu_aper = float(sim_config['wcu_aper'])
@@ -35,12 +38,16 @@ class Scope:
             wcu_x = float(sim_config['wcu_x'])
             wcu_y = float(sim_config['wcu_y'])
             wcu_shift = wcu_x, wcu_y
-
-            wcu.set_bb_aperture(wcu_aper)
+            if sim_config['bgd_src'] == 'wcu_lt':
+                metis["wcu_source"].set_lamp("laser")
+            if sim_config['bgd_src'] == 'wcu_bb':
+                metis["wcu_source"].set_lamp("bb")
+                metis["wcu_source"].set_temperature(bb_temp=1200 * u.K, is_temp=320 * u.K, wcu_temp=295 * u.K)
+            wcu.set_bb_aperture(value=wcu_aper)
             wcu.set_fpmask(maskname=wcu_mask, angle=wcu_angle, shift=wcu_shift)
-            print(wcu)
-
+            print(metis)
             metis.effects.pprint_all()
+            print(wcu)
             n_obs = int(sim_config['nobs'])
             for obs_idx in range(0, n_obs):
                 metis.observe()

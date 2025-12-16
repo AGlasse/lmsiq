@@ -55,23 +55,23 @@ class Toy:
             lms_pp1 = obs_cfg['lms_pp1']
             model_config = model_configurations[opticon]
             PolyFit(opticon)                    # Instantiate the polynomial fit tools.
-            filer = Filer(model_config)
+            filer = Filer()
+            filer.set_configuration(analysis_type, opticon)
 
             # Calculate the prism and grating angles required to observe the target wavelength.
             # We use the nominal mode prism > wavelength calibration for all cases.
-            nom_config = model_configurations[Globals.nominal]
-            nom_filer = Filer(nom_config)
-            wpa_fit, _, _ = nom_filer.read_fit_parameters(Globals.nominal)
+            filer.set_configuration(analysis_type, Globals.nominal)
+            wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
             _, wxo_fit, term_fits = filer.read_fit_parameters(opticon)
-            lms_cfg = PolyFit.wave_to_config(wave_cen.value / 1000., wpa_fit, wxo_fit, select='min_ech_ang')
+            lms_cfg = PolyFit.wave_to_config(wave_cen.value / 1000., opticon, wpa_fit, wxo_fit, select='min_ech_ang')
             fit_slice_transforms = PolyFit.make_slice_transforms(lms_cfg, term_fits)
-
-
             date_stamp = model_config[2]
 
             # Read header and data shape (only) in from the template.
             data_exts = [1, 2, 3, 4]
-            primary_header, data_list = filer.read_zemax_fits('../config/sim_template.fits', data_exts=data_exts)
+            hdu_list = filer.read_zemax_fits('../config/sim_template.fits', data_exts=data_exts)
+            primary_header = hdu_list[0].header
+            data_list = hdu_list[1].data
             det_shape = data_list[0].shape
             _, n_det_cols = det_shape
 

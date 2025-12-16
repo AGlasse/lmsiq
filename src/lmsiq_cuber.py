@@ -25,7 +25,8 @@ class Cuber:
         t_start = time.perf_counter()
         ds_dict, lsf_data = None, None
         axes = ['across-slice', 'along-slice']
-
+        opticon = data_identifier['optical_path']
+        dist_filer.set_configuration('distortion', opticon)
         traces = dist_filer.read_pickle(dist_filer.trace_file)
 
         profile_folder = iq_filer.get_folder(iq_filer.output_folder + 'profiles')

@@ -1,33 +1,45 @@
-id,simulator,opticon,wave_cen,dit,ndit,nobs,bgd_src,wcu_aper,wcu_mask,wcu_angle,wcu_x,wcu_y,cfo_mask,lms_pp1
-lms_cal_2s_1f,scopesim,nominal,4600,2.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
-lms_cal_20s_1f,scopesim,nominal,4600,20.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
-lms_cal_2s_10f,scopesim,nominal,4600,2.,10,1,wcu_bb,0.02,open,0.,0.,0.,open,open
-lms_opt_01_t1_nom_dark1,scopesim,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
-lms_opt_01_t1_nom_flood,scopesim,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
-# lms_opt_01_t1_ext_flood,scopesim,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
-lms_opt_01_t2_nom_dark,scopesim,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
-lms_opt_01_t2_nom_wcu_grid_bgd_w4700_ap000_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,grid_lm_combi,0.,0.,0.,open,open
-lms_opt_01_t2_nom_wcu_grid_ill_w4700_ap000_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,grid_lm_combi,0.,0.,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.,0.,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.,0.,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bp175,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.000,0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bp175,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.000,0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bm175,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.000,-0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bm175,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.000,-0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,0.000,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bp000,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,0.000,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bp175,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bp175,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bm175,scopesim,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,-0.175,0.,open,open
-lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bm175,scopesim,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,-0.175,0.,open,open
-lms_opt_01_t3,scopesim,procedural,-,-,-,-,-,-,-,-,-
-lms_opt_01_t4_nom_a,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-1.1,+0.5
-lms_opt_01_t4_nom_b,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+1.1,-0.5
-lms_opt_01_t4_nom_c,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+0.5,+1.1
-lms_opt_01_t4_nom_d,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-0.5,-1.1
-lms_opt_01_t4_ext_a,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-1.1,0.0
-lms_opt_01_t4_ext_b,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+1.1,0.0
-lms_opt_01_t4_ext_c,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+0.5,+0.1
-lms_opt_01_t4_ext_d,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-0.5,-0.1
-lms_opt_01_t4_nom_e,scopesim,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,0.0,0.0
+id,opticon,wave_cen,dit,ndit,nobs,bgd_src,wcu_aper,wcu_mask,wcu_angle,wcu_x,wcu_y,cfo_mask,lms_pp1
+lms_cal_2s_1f,nominal,4600,2.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
+lms_cal_20s_1f,nominal,4600,20.,1,1,wcu_bb,0.02,open,0.,0.,0.,open,open
+lms_cal_2s_10f,nominal,4600,2.,10,1,wcu_bb,0.02,open,0.,0.,0.,open,open
+lms_opt_01_t1_nom_dark1,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
+lms_opt_01_t1_nom_flood,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+lms_opt_01_t1_ext_flood,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+# lms_opt_01_t2_nom_dark,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
+#
+lms_opt_02_nom_wcu_open_bb_w4705_iso_alpha_bs,nominal,4705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,0.0,0.,open,open
+lms_opt_02_nom_wcu_open_bb_w4705_iso_alpha_n,nominal,4705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,0.32,0.,open,open
+lms_opt_02_nom_wcu_open_bb_w4705_iso_alpha_s,nominal,4705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,-0.32,0.,open,open
+lms_opt_02_nom_wcu_open_bb_w4705_iso_alpha_w,nominal,4705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,0.,0.20,open,open
+lms_opt_02_nom_wcu_open_bb_w4705_iso_alpha_e,nominal,4705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,0.,-0.20,open,open
+lms_opt_02_nom_wcu_grid_lt_w4705_iso_lambda,nominal,4705,.005,120,1,wcu_lt,1.0,open,0.,0.,0.,open,open
+# lms_opt_02_nom_wcu_open_lt_w4705_ap000_bp000,nominal,4705,5,120,1,wcu_lt,0.001,open,0.,0.,0.,open,open
+# lms_opt_02_nom_wcu_pinhole_bb_w3705_ap000_bp000,nominal,3705,5,120,1,wcu_bb,1.0,pinhole_lm,0.,0.,0.,open,open
+# lms_opt_02_nom_wcu_grid_bb_w3705_ap000_bp000,nominal,3705,5,120,1,wcu_bb,1.0,grid_lm,0.,0.,0.,open,open
+# lms_opt_02_nom_wcu_open_bb_w4705_ap000_bp000,nominal,4700,5,120,1,wcu_bb,0.9,open,0.,0.,0.,open,open
+# lms_opt_02_nom_wcu_grid_lt_w4705_ap000_bp000,nominal,4705,5,120,1,wcu_lt,1,grid_lm,0.,0.,0.,open,open
+#
+# lms_opt_01_t2_nom_wcu_grid_ill_w4700_ap000_bp000,nominal,4700,5,12,1,wcu_bb,1.0,grid_lm_combi,0.,0.,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bp000,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.,0.,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bp000,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.,0.,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bp175,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.000,0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bp175,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.000,0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap000_bm175,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.000,-0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap000_bm175,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.000,-0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bp000,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,0.000,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bp000,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,0.000,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bp175,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bp175,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_bgd_w4700_ap350_bm175,nominal,4700,5,12,1,wcu_bb,0.0,pinhole_lm,0.350,-0.175,0.,open,open
+# lms_opt_01_t2_nom_wcu_pnh_ill_w4700_ap350_bm175,nominal,4700,5,12,1,wcu_bb,1.0,pinhole_lm,0.350,-0.175,0.,open,open
+# lms_opt_01_t3,procedural,-,-,-,-,-,-,-,-,-
+# lms_opt_01_t4_nom_a,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-1.1,+0.5
+# lms_opt_01_t4_nom_b,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+1.1,-0.5
+# lms_opt_01_t4_nom_c,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+0.5,+1.1
+# lms_opt_01_t4_nom_d,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-0.5,-1.1
+# lms_opt_01_t4_ext_a,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-1.1,0.0
+# lms_opt_01_t4_ext_b,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+1.1,0.0
+# lms_opt_01_t4_ext_c,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,+0.5,+0.1
+# lms_opt_01_t4_ext_d,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,-0.5,-0.1
+# lms_opt_01_t4_nom_e,nominal,3390,60.,12,1,wcu_ls,wcupnh,open,0.0,0.0
 

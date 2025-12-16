@@ -175,7 +175,9 @@ class Model:
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
                 file_path = dataset_folder + iq_path
-                hdr, psf = filer.read_zemax_fits(file_path)
+                hdu_list = filer.read_zemax_fits(file_path)
+                hdr, psf = hdu_list[0].header, hdu_list[0].data
+
                 # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
                 if downsample:
                     oversampling = 4
@@ -313,7 +315,9 @@ class Model:
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
                 file_path = dataset_folder + iq_path
-                hdr, psf = filer.read_zemax_fits(file_path)
+                hdu_list = filer.read_zemax_fits(file_path)
+                hdr, psf = hdu_list[0].header, hdu_list[0].data
+
                 # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
                 if downsample:
                     oversampling = 4
