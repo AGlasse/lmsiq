@@ -8,6 +8,7 @@ from lmssim_model import Model
 from lms_filer import Filer
 from lms_mosaic import Mosaic
 from lmsdist_machine import DistortionMachine
+from lmsaiv_opt02 import Opt02
 
 
 class OptTests:
@@ -17,17 +18,15 @@ class OptTests:
     def __init__(self):
         Filer.set_test_data_folder('scopesim')
         valid_test_names = {'lms_opt_01_t1': (OptTests.lms_opt_01_t1, 'Field of view'),
-                            'lms_opt_01_t2': (OptTests.lms_opt_01_t2, 'Grey body iso-alpha, along slice PSF'),
-                            'lms_opt_01_t3': (OptTests.lms_opt_01_t3, 'Laser iso-lambda, LSF'),
                             'lms_opt_01_t4': (OptTests.lms_opt_01_t4, 'Sky iso-lambda trace'),
-                            'lms_opt_02': (OptTests.lms_opt_02, 'Distortion transforms'),
+                            'lms_opt_02': (Opt02.run, 'Distortion transforms and PSF'),
                             'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
                             }
         OptTests.valid_test_names = valid_test_names
         return
 
     def __str__(self):
-        text = 'OptTests available for tests.. \n'
+        text = 'OptTests available for analysis.. \n'
         for test_name in self.valid_test_names:
             test = self.valid_test_names[test_name]
             text += "{:<20s},{:<20s} \n".format(test_name, test[1])
@@ -40,6 +39,7 @@ class OptTests:
         file_list = Filer.get_file_list(Filer.test_data_folder, inc_tags=[test_name])
         print('Test data found in folder ')
         [print("- {:s}".format(file)) for file in file_list]
+        print()
         try:            # Check that 'as built' dictionary file exists
             as_built = Filer.read_pickle(Globals.as_built_file)
         except:
@@ -54,7 +54,8 @@ class OptTests:
         """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
         map in the AsBuilt object
         """
-        darks = Filer.read_mosaic_list(inc_tags=[test_name, 'nom_dark'], debug=True)
+        inc_tags = [test_name, 'nom_dark']
+        darks = Filer.read_mosaic_list(inc_tags)
         do_plot = kwargs.get('do_plot', True)
         if do_plot:
             Plot.mosaic(darks[0], title=title)
@@ -123,37 +124,98 @@ class OptTests:
             abo.append(val)
         return tuple(abo)
 
-    @staticmethod
-    def lms_opt_02(test_name, title, as_built, **kwargs):
-
-        slice_map = as_built['slice_map']
-        iso_lambdas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_lambda'])
-        do_plot = True
-        for iso_lambda in iso_lambdas:
-            lambda_traces = OptTools.extract_det_traces(iso_lambda, 'lambda', slice_map)
-            if do_plot:
-                Plot.mosaic(iso_lambda, title=iso_lambda[0], cmap='hot', overlay=lambda_traces)
-                do_plot = False
-
-        print('Analysing test data for {:s}'.format(test_name))
-        print('1. Deriving detector rotation and offset differences from iso-alpha and iso-lambda data. ')
-        print('   Note that iso-lambdas are found for each slice, since they are likely to vary in the as-built LMS.')
-        do_plot = True
-        iso_alphas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_alpha'], debug=False)
-        for iso_alpha in iso_alphas[0:1]:
-            print("\nMosaic file = {:s}".format(iso_alpha[0]))
-            alpha_traces = OptTools.extract_det_traces(iso_alpha, 'alpha', slice_map)
-            if do_plot:
-                Plot.mosaic(iso_alpha, title=iso_alpha[0], cmap='hot', overlay=alpha_traces)
-                do_plot = False
-
-        do_plot = True
-
-
-
-        print('2. Measuring CFO boresight detector rotation differences from iso-alpha and iso-lambda data ')
-        iso_alpha_mosaics = Filer.read_mosaic_list(inc_tags=[test_name, 'cfo_pnh'])
-        return as_built
+    # @staticmethod
+    # def lms_opt_02(test_name, title, as_built, **kwargs):
+    #     print('Analysing test data for {:s}, {:s}'.format(test_name, title))
+    #
+    #     debug = kwargs.get('debug', 'off')
+    #     slice_map = as_built['slice_map']
+    #     Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+    #
+    #     # Set up a misaligned detector
+    #     test_det_no = 2
+    #     test_det_offset = 0, 0
+    #     test_det_rot_deg = 0.3
+    #
+    #     print('1. Use iso-lambda traces to measure the intra-detector gap.  Assumes that the laser lines are')
+    #     print('   spaced according to a smooth polynomial. Note that iso-lambdas are found for each slice, ')
+    #     print('   since they are likely to vary in the as-built LMS.')
+    #
+    #     iso_lambdas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_lambda'], debug=True)
+    #
+    #     do_plot = True
+    #     for iso_lambda in iso_lambdas:
+    #         lambda_traces = OptTools.extract_det_traces(iso_lambda, 'lambda', slice_map)
+    #         if do_plot:
+    #             Plot.mosaic(iso_lambda, title=iso_lambda[0], cmap='hot', overlay=lambda_traces)
+    #             do_plot = False
+    #     print('   - !! Analysis of iso_lambdas to find detector gap not yet implemented !!')
+    #
+    #
+    #
+    #     print('1. Deriving detector rotation and offset differences from iso-alpha data. ')
+    #     do_plot = True
+    #     # Extract iso-alpha traces as a list of polynomials
+    #     alpha_traces = None
+    #     iso_alphas = Filer.read_mosaic_list(inc_tags=[test_name, 'iso_alpha'], debug=False)
+    #     for iso_alpha in iso_alphas[0:1]:
+    #         print("\nMosaic file = {:s}".format(iso_alpha[0]))
+    #         iso_alpha = OptTools.transform_detector_image(iso_alpha,
+    #                                                       det_no=test_det_no,
+    #                                                       xy_pix=test_det_offset,
+    #                                                       angle=test_det_rot_deg)
+    #         alpha_traces = OptTools.extract_det_traces(iso_alpha, 'alpha', slice_map)
+    #         if do_plot:
+    #             Plot.mosaic(iso_alpha, title=iso_alpha[0], cmap='hot')
+    #             Plot.mosaic(iso_alpha, title=iso_alpha[0], cmap='hot', overlay=alpha_traces)
+    #             do_plot = False
+    #     # Find pairs of iso-alphas for short and long wave traces.
+    #     slice_pairs = []
+    #     n_traces = len(alpha_traces['trace_idx'])
+    #     for idx1 in range(n_traces):
+    #         trace_idx1 = alpha_traces['trace_idx'][idx1]
+    #         slice_1 = alpha_traces['slice_no'][idx1]
+    #         for idx2 in range(idx1 + 1, n_traces):
+    #             slice_2 = alpha_traces['slice_no'][idx2]
+    #             if slice_1 == slice_2:
+    #                 trace_idx2 = alpha_traces['trace_idx'][idx2]
+    #                 slice_pairs.append((slice_1, trace_idx1, trace_idx2))
+    #                 continue
+    #     # Define a fiducial position at the mosaic centre in polynomial pixel column coordinates
+    #     col_half_gap = 1000. * Globals.det_gap / Globals.nom_pix_pitch
+    #     fmt = None
+    #     if debug == 'low':
+    #         fmt = "{:>10s},{:>10s},{:>12s},{:>20s},{:>24s},{:>24s},{:>24s},"
+    #         print(fmt.format('Det_SW', 'Slice', 'Row_SW', 'Row_LW - Row_SW at', 'Equivalent rotation', 'SW dispersion wrt', 'LW dispersion wrt'))
+    #         print(fmt.format('      ', 'No.', 'fiducial', 'mosaic centre', '(cw det 23) / deg.', 'row / deg.', 'row / deg.'))
+    #         fmt = "{:>10d},{:>10d},{:>12.2f},{:>20.2f},{:>24.3f},{:>24.3f},{:>24.3f},"
+    #     for slice_no, trace_idx1, trace_idx2 in slice_pairs:
+    #         det_1 = alpha_traces['det_no'][trace_idx1]
+    #         idx_sw, idx_lw = trace_idx1, trace_idx2
+    #         det_sw = det_1
+    #         if det_1 in [2, 4]:
+    #             idx_sw, idx_lw = trace_idx2, trace_idx1
+    #             det_sw = alpha_traces['det_no'][idx_sw]
+    #         col_fid_sw = Globals.det_format[0] + col_half_gap
+    #         col_fid_lw = -col_half_gap
+    #         popt_sw = alpha_traces['popt'][idx_sw]
+    #         popt_lw = alpha_traces['popt'][idx_lw]
+    #         row_fid_sw = Globals.cubic(col_fid_sw, *popt_sw)
+    #         row_fid_lw = Globals.cubic(col_fid_lw, *popt_lw)
+    #         delta_row_fid = row_fid_lw - row_fid_sw
+    #         # Calculate the angle between polynomials at the mosaic centre.
+    #         deg_rad = 180./math.pi
+    #         rel_rot_angle = deg_rad * delta_row_fid / Globals.det_format[0]
+    #         # Calculate the angle between the alpha trace (dispersion) and the detector row at the centre column
+    #         col_cen = Globals.det_format[0] / 2
+    #         disp_row_angle_sw = deg_rad * Globals.cubic(col_cen, *popt_sw, gradient=True)
+    #         disp_row_angle_lw = deg_rad * Globals.cubic(col_cen, *popt_lw, gradient=True)
+    #
+    #         if debug == 'low':
+    #             print(fmt.format(det_sw, slice_no, row_fid_sw, delta_row_fid, rel_rot_angle, disp_row_angle_sw, disp_row_angle_lw))
+    #
+    #     iso_alpha_mosaics = Filer.read_mosaic_list(inc_tags=[test_name, 'cfo_pnh'])
+    #     return as_built
 
     @staticmethod
     def lms_opt_01_t2(test_name, title, as_built, **kwargs):
@@ -182,23 +244,6 @@ class OptTests:
             profiles = OptTools.extract_alpha_traces(mosaic)
             Plot.profiles(profiles)
             Plot.mosaic(mosaic)
-        return
-
-    @staticmethod
-    def lms_opt_01_t3(name, title):
-        """ Laser generated iso-lambda images at a range of wavelengths and field positions.
-        Extract efp_x, efp_y, efp_w data for transform calculations
-        """
-        print('Running ' + name + ' ' + title)
-        for cfg_tag in ['nom', 'ext']:
-            for wav_tag in ['w2700', 'w4700']:
-                for a_tag in ['am200', 'ap000', 'ap200']:
-                    for b_tag in ['bm200', 'bp000', 'bp200']:
-                        obs_tags = [cfg_tag, wav_tag, a_tag, b_tag]
-                        mosaics = OptTests.read_mosaics(name, inc_tags=obs_tags)
-                        for mosaic in mosaics:
-                            tools.plot_mosaic(mosaic)
-
         return
 
     @staticmethod

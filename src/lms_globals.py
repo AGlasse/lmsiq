@@ -11,6 +11,10 @@ import numpy as np
 
 
 class Globals:
+    # program control
+    debug_levels = {'off': 0, 'low': 1, 'medium': 2, 'high': 3}
+    debug_level = 'high'
+
     # Constants
     mas_as = 1000.
     deg_rad = 180. / math.pi
@@ -86,12 +90,6 @@ class Globals:
     efp_x_fov_mm = alpha_fov / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
     efp_y_fov_mm = beta_fov / efp_as_mm
 
-    debug = False
-    if debug:
-        fmt = "{:>30s} = {:5.3f} x {:5.3f} {:s}"
-        print(fmt.format('EFP field of view, alpha, beta', efp_x_fov_mm, efp_y_fov_mm, 'mm'))
-        print(fmt.format('', alpha_fov, beta_fov, 'arcseconds'))
-
     # Diffraction grating parameters
     blaze_angle = 51.23                                     # Echelle blaze angle (deg)
     rule_spacing = 18.2			                            # Echelle rule spacing [um]
@@ -136,6 +134,15 @@ class Globals:
     # from performance testing.
     as_built_file = '../output/asbuilt/asbuilt'
 
+    @staticmethod
+    def is_debug(db_level_query):
+        db_val_set = Globals.debug_levels[Globals.debug_level]
+        if db_val_set == 0:
+            return False
+        db_val_query = Globals.debug_levels[db_level_query]
+        is_debug = db_val_query <= db_val_set
+        return is_debug
+
     # Geometry functions
     @staticmethod
     def gauss(x, a, x0, sigma):
@@ -143,5 +150,37 @@ class Globals:
         return y
 
     @staticmethod
-    def cubic(x, *coeffs):
-        return coeffs[0] + x * (coeffs[1] + x * (coeffs[2] + x * coeffs[3]))
+    def polynomial(x, *coeffs, gradient=False):
+        """
+        Evaluate a polynomial at a specific x value.
+        :param x:
+        :param coeffs:  Polynomial coefficients (from scipy.optimize.curve_fit)
+        :param gradient:  If True, calculate the gradient 'dy_dx' instead of the 'y' value.
+        :return: y(x) or dy_dx(x) if gradient is True.
+        """
+        order = len(coeffs) - 1         # order = highest exponent (last term).
+        if gradient:
+            dy_dx = 0.
+            for exp in range(1, order+1):
+                dy_dx += coeffs[exp] * exp * (x ** (exp-1))
+            return dy_dx
+        else:
+            y = 0.
+            for exp in range(0, order+1):
+                y += coeffs[exp] * (x ** exp)
+            return y
+
+    @staticmethod
+    def cubic(x, *coeffs, gradient=False):
+        """
+        Evaluate a cubic polynomial at a specific x value.
+        :param x:
+        :param coeffs:  Polynomial coefficients (from scipy.optimize.curve_fit)
+        :param gradient:  If True, calculate the gradient 'dy_dx' instead of the 'y' value.
+        :return:
+        """
+        if gradient:
+            val = coeffs[1] + x * (coeffs[2] + x * coeffs[3])
+        else:
+            val = coeffs[0] + x * (coeffs[1] + x * (coeffs[2] + x * coeffs[3]))
+        return val

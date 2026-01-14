@@ -13,6 +13,30 @@ class Plot:
         return
 
     @staticmethod
+    def gap_samples(gap_samples, thetas):
+        figsize = [8, 8]
+        fig, axes = plt.subplots(nrows=2, ncols=1, figsize=figsize,
+                                 sharex='all', squeeze=True)
+
+        gap_data = np.array(gap_samples)
+        sw_mos_idxs = gap_data[:, 0]
+        slices = gap_data[:, 2]
+        rows = gap_data[:, 3]
+        gaps = gap_data[:, 4]
+        for pane, sw_mos_idx in enumerate(np.unique(sw_mos_idxs)):
+            idx, = np.where(sw_mos_idxs == sw_mos_idx)
+            x = rows[idx]
+            y = gaps[idx]
+            ax = axes[pane]
+            ax.set_title('theta {:d} = {:8.3f} deg.'.format(int(sw_mos_idx), thetas[sw_mos_idx]))
+            ax.set_xlabel('Row')
+            ax.set_ylabel("Intra mosaic gap {:d}-{:d}".format(int(sw_mos_idx), int(sw_mos_idx) + 1))
+            ax.plot(x, y, linestyle='none', marker='x', color='blue')
+        plt.show()
+        return
+
+
+    @staticmethod
     def mosaic(mosaic, **kwargs):
         file_name, hdr, hdus = mosaic
 

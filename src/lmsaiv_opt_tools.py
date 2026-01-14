@@ -2,6 +2,7 @@ import math
 import numpy as np
 import astropy.units as u
 import copy
+import scipy
 from scipy.optimize import curve_fit, OptimizeWarning
 from lms_globals import Globals
 
@@ -15,7 +16,7 @@ class OptTools:
     @staticmethod
     def copy_mosaic(mosaic, clear_data=False, copy_name=''):
         file_name, hdr, hdus = mosaic
-        moscopy_hdus = []
+        moscopy_hdus, moscopy_hdr = [], None
         for hdu in hdus:
             moscopy_hdr = copy.deepcopy(hdu.header)
             moscopy_hdu = hdu.copy()
@@ -193,76 +194,88 @@ class OptTools:
         print("Aspect ratio (alpha/beta) = {:5.3f}:1 (cf METIS-3667, shall be 1:1 < ar < 2:1)".format(aspect_ratio))
         return slice_map, profiles
 
+    # @staticmethod
+    # def extract_alpha_traces(mosaic, col_start=400, col_end=1600, col_spacing=100):
+    #     """ For a spectral image of a compact source, extract a set of along-column profiles
+    #     col_spacing: column gap between profiles.
+    #     """
+    #     mos_name, mos_primary_header, mos_hdus = mosaic
+    #     trace_id = 0
+    #     alpha_traces = {'name': mos_name, 'det_no': [], 'trace_id': [],
+    #                     'popt': [], 'popt_err': [], 'rot_angle': []}
+    #     col_hw = int(col_spacing / 2)
+    #     cols = list(range(col_start, col_end, col_spacing))
+    #
+    #     for i, hdu in enumerate(mos_hdus):
+    #         # Identify the alpha traces in this detector by collapsing along rows.
+    #         image = hdu.data
+    #         s_row_aves = np.mean(image, axis=1)
+    #         s_row_stds = np.std(image, axis=1)
+    #         bgd_noise = np.median(s_row_stds)                # Background noise
+    #         r_max_list = []
+    #         more_traces = True
+    #         text = ''
+    #         while more_traces:
+    #             r_max = np.argmax(s_row_aves)           # Brightest row
+    #             r1, r2 = r_max - 20, r_max + 20     # Rows to use for trace analysis
+    #             # Find the trace coordinates by fitting gaussians
+    #             snr = s_row_aves[r_max] / bgd_noise
+    #             more_traces = snr > 10
+    #             if more_traces:
+    #                 text += ", {:d} ".format(r_max)
+    #                 r_max_list.append(r_max)
+    #                 s_row_aves[r1:r2] = s_row_aves[r1]
+    #         print("Detector {:d}.  Found {:d} alpha traces, at rows{:s}".format(i+1, len(r_max_list), text))
+    #         r_hw = 15       # Half width in rows of strip to search for trace
+    #         for r_max in r_max_list:
+    #             r1, r2 = r_max - r_hw, r_max + r_hw     # Rows to use for trace analysis
+    #             # Find the trace coordinates by fitting gaussians
+    #             pt_row_coords, pt_col_coords = [], []
+    #             for col in cols:
+    #                 c1, c2 = col - col_hw, col + col_hw
+    #                 z_vals = np.mean(image[r1:r2, c1:c2], axis=1)
+    #                 r_vals = np.array(list(range(r1, r2)))
+    #                 r_max = np.argmax(z_vals)
+    #                 z_max = z_vals[r_max]
+    #                 r_sigma = 1.0
+    #                 p0_guess = [z_max, r1 + r_hw, r_sigma]
+    #                 try:
+    #                     gopt, gcov = curve_fit(Globals.gauss, r_vals, z_vals,
+    #                                            p0=p0_guess)
+    #                     r_gauss_peak = gopt[1]
+    #                     pt_row_coords.append(r_gauss_peak)
+    #                     pt_col_coords.append(col)
+    #                 except:
+    #                     print('Gaussian fit failed')
+    #
+    #             # Remove the peak to find next brightest.  Quit when snr < 100
+    #             mean_row = np.mean(pt_row_coords)
+    #             p0_guess = [mean_row, 0., 0., 0.]
+    #             popt, pcov = curve_fit(Globals.cubic, pt_col_coords, pt_row_coords,
+    #                                    p0=p0_guess)
+    #             trace_id += 1
+    #             alpha_traces['trace_id'].append(trace_id)
+    #             alpha_traces['det_no'].append(i + 1)
+    #             alpha_traces['popt'].append(popt)
+    #             alpha_traces['popt_err'].append(np.sqrt(np.diag(pcov)))
+    #             rot_angle = math.atan(popt[1]) * 180 / np.pi
+    #             alpha_traces['rot_angle'].append(rot_angle)
+    #
+    #             s_row_aves[r1:r2] = s_row_aves[r1-1]
+    #
+    #     return alpha_traces
+
     @staticmethod
-    def extract_alpha_traces(mosaic, col_start=400, col_end=1600, col_spacing=100):
-        """ For a spectral image of a compact source, extract a set of along-column profiles
-        col_spacing: column gap between profiles.
-        """
+    def transform_detector_image(mosaic, det_no, xy_pix=(0, 0), angle=0.0):
         mos_name, mos_primary_header, mos_hdus = mosaic
-        trace_id = 0
-        alpha_traces = {'name': mos_name, 'det_no': [], 'trace_id': [],
-                        'popt': [], 'popt_err': [], 'rot_angle': []}
-        col_hw = int(col_spacing / 2)
-        cols = list(range(col_start, col_end, col_spacing))
-
-        for i, hdu in enumerate(mos_hdus):
-            # Identify the alpha traces in this detector by collapsing along rows.
-            image = hdu.data
-            s_row_aves = np.mean(image, axis=1)
-            s_row_stds = np.std(image, axis=1)
-            bgd_noise = np.median(s_row_stds)                # Background noise
-            r_max_list = []
-            more_traces = True
-            text = ''
-            while more_traces:
-                r_max = np.argmax(s_row_aves)           # Brightest row
-                r1, r2 = r_max - 20, r_max + 20     # Rows to use for trace analysis
-                # Find the trace coordinates by fitting gaussians
-                snr = s_row_aves[r_max] / bgd_noise
-                more_traces = snr > 10
-                if more_traces:
-                    text += ", {:d} ".format(r_max)
-                    r_max_list.append(r_max)
-                    s_row_aves[r1:r2] = s_row_aves[r1]
-            print("Detector {:d}.  Found {:d} alpha traces, at rows{:s}".format(i+1, len(r_max_list), text))
-            r_hw = 15       # Half width in rows of strip to search for trace
-            for r_max in r_max_list:
-                r1, r2 = r_max - r_hw, r_max + r_hw     # Rows to use for trace analysis
-                # Find the trace coordinates by fitting gaussians
-                pt_row_coords, pt_col_coords = [], []
-                for col in cols:
-                    c1, c2 = col - col_hw, col + col_hw
-                    z_vals = np.mean(image[r1:r2, c1:c2], axis=1)
-                    r_vals = np.array(list(range(r1, r2)))
-                    r_max = np.argmax(z_vals)
-                    z_max = z_vals[r_max]
-                    r_sigma = 1.0
-                    p0_guess = [z_max, r1 + r_hw, r_sigma]
-                    try:
-                        gopt, gcov = curve_fit(Globals.gauss, r_vals, z_vals,
-                                               p0=p0_guess)
-                        r_gauss_peak = gopt[1]
-                        pt_row_coords.append(r_gauss_peak)
-                        pt_col_coords.append(col)
-                    except:
-                        print('Gaussian fit failed')
-
-                # Remove the peak to find next brightest.  Quit when snr < 100
-                mean_row = np.mean(pt_row_coords)
-                p0_guess = [mean_row, 0., 0., 0.]
-                popt, pcov = curve_fit(Globals.cubic, pt_col_coords, pt_row_coords,
-                                       p0=p0_guess)
-                trace_id += 1
-                alpha_traces['trace_id'].append(trace_id)
-                alpha_traces['det_no'].append(i + 1)
-                alpha_traces['popt'].append(popt)
-                alpha_traces['popt_err'].append(np.sqrt(np.diag(pcov)))
-                rot_angle = math.atan(popt[1]) * 180 / np.pi
-                alpha_traces['rot_angle'].append(rot_angle)
-
-                s_row_aves[r1:r2] = s_row_aves[r1-1]
-
-        return alpha_traces
+        det_idx = det_no - 1
+        cosa = math.cos(math.radians(angle))
+        sina = math.sin(math.radians(angle))
+        img = mos_hdus[det_idx].data
+        tr_mat = np.array([[cosa, sina, 0.], [-sina, cosa, 0.], [0., 0., 1.]])
+        rotimg = scipy.ndimage.affine_transform(img, tr_mat, cval=0.1)
+        mos_hdus[det_idx].data = rotimg
+        return mosaic
 
     @staticmethod
     def extract_det_traces(mosaic, type, slice_map, **kwargs):
@@ -275,17 +288,17 @@ class OptTools:
         """
         popt, pcov = None, None
 
-        debug = kwargs.get('debug', False)
         is_alpha = type == 'alpha'
-
         mos_name, mos_primary_header, mos_hdus = mosaic
-        trace_id = 0
-        det_traces = {'name': mos_name, 'type': type, 'det_no': [], 'trace_id': [], 'slice_no': [],
+        trace_idx = 0
+        det_traces = {'name': mos_name, 'type': type, 'det_no': [], 'mos_idx': [],
+                      'trace_idx': [], 'slice_no': [],
                       'pt_u_coords': [], 'pt_v_coords':[], 'u_mean':[], 'v_max':[],
                       'popt': [], 'popt_err': [], 'rot_angle': []}
         _, _, slice_map_hdus = slice_map
         for i, hdu in enumerate(mos_hdus):
             det_no = int(hdu.header['ID'].strip())
+            mos_idx = Globals.mos_idx[det_no]
             # print(i, det_no, hdu.header['ID'])
             image = np.array(hdu.data)
             slice_map_data = np.array(slice_map_hdus[i].data)
@@ -297,9 +310,8 @@ class OptTools:
                 rs_min, rs_max = np.amin(idx[:, 0]), np.amax(idx[:, 0])
                 u_off = 0 if is_alpha else rs_min
                 slice_image = np.array(image[rs_min:rs_max, :])             # Extract slice image
-                # We start by assuming there is only one trace per slice.
-                # We locate it by collapsing along rows (for iso-alpha) or columns (for iso-lambda)
-                # We use notation, u = along trace, v = orthogonal to trace
+                # We locate traces by collapsing along rows (for iso-alpha) or columns (for iso-lambda)
+                # Notation, u = along trace, v = orthogonal to trace
                 axis = 1 if is_alpha else 0
                 v_max_list = []
                 # Loop to find all traces in this slice image.
@@ -308,8 +320,8 @@ class OptTools:
                 repeat = True
                 s_aves = np.mean(slice_image, axis=axis)
                 while repeat:
-                    v_max = np.argmax(s_aves)                   # Brightest row (alpha) / column (lambda)
-                    v1_sig, v2_sig = v_max - 5, v_max + 5             # Rows/cols to use for trace analysis
+                    v_max = np.argmax(s_aves)                           # Brightest row (alpha) / column (lambda)
+                    v1_sig, v2_sig = v_max - 5, v_max + 5               # Rows/cols to use for trace analysis
                     v1_clr, v2_clr = v_max - 10, v_max + 10
                     signal = np.mean(s_aves[v1_sig:v2_sig])
                     snr = (signal - bgd) / noise
@@ -320,7 +332,7 @@ class OptTools:
                         v_max_list.append(v_max)
                         s_aves[v1_clr:v2_clr] = bgd
                 if len(v_max_list) < 1:
-                    if debug:
+                    if Globals.is_debug('medium'):
                         print('No traces found for det_no ', det_no, ', slice_no ', slice_no)
                     continue
                 u_count = slice_image.shape[1] if is_alpha else slice_image.shape[0]
@@ -329,9 +341,9 @@ class OptTools:
                 u_start, u_end = u_interval, u_count - u_interval
                 u_list = list(range(u_start, u_end, u_interval))
                 u_hw, v_hw = 5, 10       # Sample half width in along and across trace dimensions to fit gaussian.
-                pt_u_coords, pt_v_coords = [], []
                 for v_max in v_max_list:
                     v1, v2 = v_max - v_hw, v_max + v_hw  # Across trace rows/cols to use for trace analysis
+                    pt_u_coords, pt_v_coords = [], []
                     for u in u_list:
                         # Find the trace coordinates by fitting gaussians
                         u1, u2 = u - u_hw, u + u_hw
@@ -354,12 +366,12 @@ class OptTools:
                     u_mean = np.mean(pt_u_coords)
                     p0_guess = [u_mean, 0., 0., 0.]
                     try:
-                        popt, pcov = curve_fit(Globals.cubic, pt_u_coords, pt_v_coords, p0=p0_guess)
+                        popt, pcov = curve_fit(Globals.polynomial, pt_u_coords, pt_v_coords, p0=p0_guess)
                     except (RuntimeError, OptimizeWarning):
                         print('!! Error finding polynomial trace fit !!')
-                    trace_id += 1
-                    det_traces['trace_id'].append(trace_id)
+                    det_traces['trace_idx'].append(trace_idx)
                     det_traces['det_no'].append(det_no)
+                    det_traces['mos_idx'].append(mos_idx)
                     det_traces['slice_no'].append(slice_no)
                     det_traces['popt'].append(popt)
                     det_traces['popt_err'].append(np.sqrt(np.diag(pcov)))
@@ -368,14 +380,18 @@ class OptTools:
                     det_traces['u_mean'].append(u_mean)
                     det_traces['v_max'].append(v_max)
                     # Calculate rotation angle using fit at slice endpoints
-                    v_start = Globals.cubic(u_start + u_off, *popt)
-                    v_end = Globals.cubic(u_end + u_off, *popt)
+                    v_start = Globals.polynomial(u_start + u_off, *popt)
+                    v_end = Globals.polynomial(u_end + u_off, *popt)
 
                     dv_du = (v_end - v_start) / (u_end - u_start)
-                    print(u_start, u_end, v_start, v_end, dv_du)
+                    # print(u_start, u_end, v_start, v_end, dv_du)
                     rot_angle = dv_du * 180 / np.pi
                     det_traces['rot_angle'].append(rot_angle)
-        OptTools._print_det_traces(det_traces, type)
+                    trace_idx += 1
+
+        print("{:d} traces found.".format(len(det_traces['det_no'])))
+        if Globals.is_debug('medium'):
+            OptTools._print_det_traces(det_traces, type)
         return det_traces
 
     @staticmethod
@@ -385,12 +401,12 @@ class OptTools:
         print(fmt.format('Trace ID', 'Det. no.', 'Slice no.', 'u_mean', 'v_max', 'Rot angle / deg'))
         fmt = "{:10d},{:10d},{:10d},{:12.1f},{:12.1f},{:20.3f}"
         for i in range(len(det_traces['det_no'])):
-            trace_id = det_traces['trace_id'][i]
+            trace_idx = det_traces['trace_idx'][i]
             det_no = det_traces['det_no'][i]
             slice_no = det_traces['slice_no'][i]
             mean_v = det_traces['popt'][i][0]
             u_mean = det_traces['u_mean'][i]
             v_max = det_traces['v_max'][i]
             rot_angle = det_traces['rot_angle'][i]
-            print(fmt.format(trace_id, det_no, slice_no, u_mean, v_max, rot_angle))
+            print(fmt.format(trace_idx, det_no, slice_no, u_mean, v_max, rot_angle))
         return

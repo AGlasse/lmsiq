@@ -58,9 +58,13 @@ class Filer:
         return
 
     @staticmethod
-    def read_mosaic(folder, file_name, debug=False):
-        # data_ext_nos = [2, 1, 3, 4]             # HDU order is anti-clockwise in ScopeSim, left right in lmsiq.
+    def read_mosaic(folder, file_name):
+        """ Read in fits file containing LMS detector images.
+        :return mosaic tuple (file name, primary extension header, hdu list)
+        """
         path = folder + '/' + file_name
+        if Globals.is_debug('low'):
+            print("Reading {:s}".format(path))
         hdu_in_list = fits.open(path, mode='readonly')
         primary_hdr = hdu_in_list[0].header
         hdu_list = [None]*4       # Re-order hdus
@@ -69,21 +73,23 @@ class Filer:
             x = hdu_in.header['CRVAL1D']
             y = hdu_in.header['CRVAL2D']
             mos_idx = Globals.mos_idx[det_no]
-            if debug:
-                fmt = "Storing ScopeSim det_no= {:d} (x, y) = ({:6.3f}, {:6.3f}), at mosaic list index= {:d}"
+            if Globals.is_debug('high'):
+                fmt = "- storing ScopeSim det_no= {:d} (x, y) = ({:6.3f}, {:6.3f}), at mosaic list index= {:d}"
                 print(fmt.format(det_no, x, y, mos_idx))
             hdu_list[mos_idx] = hdu_in
         mosaic = file_name, primary_hdr, hdu_list
         return mosaic
 
     @staticmethod
-    def read_mosaic_list(inc_tags=[], exc_tags=[], **kwargs):
+    def read_mosaic_list(*args):
         """ Read an LMS data file into a mosaic tuple.  For ScopeSim data, the HDU.header['ID'] holds the detector
         number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.   Here, T=Top (slices 15 to 28,
         B = Bottom (slices 1 to 14), L = Left (short wavelength), R = Right (long wavelength).
         We write these into the mosaic tuple as a list, with indices = 0 (TL), 1 (TR), 2 (BL), 3 (BR).
         """
-        debug = kwargs.get('debug', False)
+        n_args = len(args)
+        inc_tags = args[0]
+        exc_tags = args[1] if n_args > 1 else []
         mosaic_list = []
         folder = Filer.test_data_folder
         file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
@@ -95,7 +101,7 @@ class Filer:
             return mosaic_list
 
         for file_name in file_list:
-            mosaic = Filer.read_mosaic(folder, file_name, debug=debug)
+            mosaic = Filer.read_mosaic(folder, file_name)
             mosaic_list.append(mosaic)
         return mosaic_list
 
