@@ -14,7 +14,6 @@ from lms_globals import Globals
 from lmsdist_util import Util
 from lmsdist_plot import Plot
 from lms_transform import Transform
-# from src.lmsdist import efp_points
 
 
 class Trace:
@@ -26,7 +25,8 @@ class Trace:
     nominal_efp_map = {'efp_x': 'fp2_x', 'efp_y': 'fp2_y'}
     nominal_series_names = {'slit_x': 'float', 'slit_y': 'float'}
     spifu_efp_map = {'efp_x': 'fp1_x', 'efp_y': 'fp1_y'}
-    spifu_series_names = {'sp_slicer_x': 'float', 'sp_slicer_y': 'float'}
+    spifu_series_names = {'sp_slicer_x': 'float', 'sp_slicer_y': 'float',
+                          'chief_ray_vignetted?': 'float'}
 
     nominal_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
                             'Slicer': ('slicer_x', 'slicer_y'),
@@ -135,9 +135,6 @@ class Trace:
             transform.slice_configuration['w_min'] = efp_points['efp_w'][0]
             transform.slice_configuration['w_max'] = efp_points['efp_w'][1]
         return
-
-
-
 
     def __str__(self):
         fmt = "{:s}, EA={:6.3f} deg, PA={:6.3f} deg, "
@@ -394,6 +391,14 @@ class Trace:
         dw = waves - wfit
         return dw
 
+    def get_plot_title(self):
+        theta_p = r'$\phi_{pri}$' + "={:6.3f}, ".format(self.lms_config['pri_ang'])
+        theta_e = r'$\psi_{ech}$' + "={:6.3f}, ".format(self.lms_config['ech_ang'])
+        wave_ref = self._get_wave_reference()
+        wave_text = r'$\lambda_{bs}$' + "={:6.3f}, ".format(wave_ref) + r'$\mu$m'
+        title = theta_p + theta_e + wave_text
+        return title
+
     def plot_slice_map(self, sno, **kwargs):
         """ Plot the planes in FP2 (nxlambda/2d, y) and at the detector (x, y)
         which are used to find the transforms """
@@ -439,21 +444,25 @@ class Trace:
         :param kwargs:  suppress, True = suppress plot
                         colour_scheme, colour code points by colour_scheme = string
                                         'wavelength'
-                                        'slice_no'
+                                        'slice_no',
+                                        'mono'
         :return:
         """
         suppress = kwargs.get('suppress', False)
         if suppress:
             return
 
-        fp_plot_mask = {'LMS EFP': False, 'Slicer': False,
-                        'IFU': False, 'Slit': True, 'SP slicer': True, 'Detector': True}
+        fp_plot_mask = {'LMS EFP': False, 'Slicer': False, 'IFU': False,
+                        'Slit': True, 'SP slicer': True, 'Detector': True}
         focal_planes = Trace.spifu_focal_planes if self.is_extended else Trace.nominal_focal_planes
 
         n_focal_planes = len(focal_planes)
-        colour_scheme = kwargs.get('colour_scheme', 'wavelength')
+        colour_scheme = kwargs.get('colour_scheme', 'blue')
+
+        suptitle = self.get_plot_title()
+
         rgb = self._create_wave_colours(colour_scheme)
-        rgb_masked = self._apply_mask(rgb.copy())
+        rgb_masked = self._apply_masks(rgb.copy())
 
         plot = Plot()
 
@@ -461,6 +470,7 @@ class Trace:
         ylabel = 'Y [mm]'
         title = ''
         fig, ax_list = plot.set_plot_area(title=self.__str__(), nrows=1, ncols=n_focal_planes)
+        fig.suptitle(suptitle, fontsize=20)
         for pane, title in enumerate(focal_planes):
             if fp_plot_mask[title]:
                 rgb = rgb_masked
@@ -473,7 +483,7 @@ class Trace:
             ax.set_xlabel(xlabel)
             if pane == 0:
                 ax.set_ylabel(ylabel)
-            Plot.plot_points(ax, x, y, fs='full', ms=1.0, mk='o', rgb=rgb)
+            Plot.plot_points(ax, x, y, fs='full', ms=3.0, mk='o', rgb=rgb)
         plot.show()
         return
 
@@ -603,19 +613,24 @@ class Trace:
         if not silent:
             fmt = 'Rays hitting any detector = {:10d} / {:10d}'
             print(fmt.format(n_hits, n_pts))
-        self.mask = mask
+        self.series['mask'] = mask
         return
 
-    def _apply_mask(self, rgb):
-        mask = self.mask
-        mask_indices = np.argwhere(mask == 0)
-        grey = [.3, .3, .3]
-        rgb[mask_indices, :] = grey
+    def _apply_masks(self, rgb):
+        palette = {'chief_ray_vignetted?': ([1., 0., 1.], '!='),
+                   'mask': ([.3, .3, .3], '==')}
+
+        for pal in palette:
+            colour, lop = palette[pal]
+            mask = self.series[pal]
+            condition = mask == 0 if lop == '==' else mask != 0
+            mask_indices = np.argwhere(condition)
+            rgb[mask_indices, :] = colour
         return rgb
 
     def _create_wave_colours(self, colour_scheme):
-
-        rgb = None
+        n_pts = len(self.series['wavelength'])
+        rgb = np.array([[.3, .3, 1.]]*n_pts)              # Default is blue
         if colour_scheme == 'wavelength':
             waves = self.series['wavelength']
             rgb = Plot.make_rgb_gradient(waves)

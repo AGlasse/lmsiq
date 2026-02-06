@@ -28,7 +28,7 @@ class Globals:
     pix_spec_res_el = 2.5       # Pixels per spectral resolution element
 
     # Simulators
-    scopesim, toysim = 'scopesim', 'toysim'
+    scopesim_id, toysim_id = 'scopesim', 'toysim'
     # Convert from scope sim detector number (hdu.header['ID'] to mosaic data list index.)
     mos_idx = {2: 0, 1: 1, 3: 2, 4: 3}
 
@@ -41,8 +41,8 @@ class Globals:
     # Zemax data descriptors
     dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                        coord_in, coord_out)
-    dist_ext_config = ('distortion', extended, '20250110', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                       coord_in, coord_out)
+    dist_ext_config = ('distortion', extended, '20260112', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                       coord_in, coord_out)     # 20250110, 20260112
     iq_nom_config = ('iq', nominal, '2024073000', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                      coord_in, coord_out)
     iq_ext_config = ('iq', extended, '2024061403', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
@@ -83,6 +83,8 @@ class Globals:
     # Plate scale at detector
     alpha_pix = 8.7 * u.mas                                   #
     beta_slice = 20.7 * u.mas
+
+    intra_slice_gap = 20           # Nominal gap between slices in pixels.
 
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov = 0.897 * u.arcsec
@@ -135,6 +137,16 @@ class Globals:
     as_built_file = '../output/asbuilt/asbuilt'
 
     @staticmethod
+    def set_debug_level(new_debug_level):
+        Globals.debug_level = new_debug_level
+        debug_levels = list(Globals.debug_levels.keys())
+        debug_text = "Debug level set to '{:s}'.  ['{:s}'".format(new_debug_level, debug_levels[0])
+        for dlt in debug_levels[1:]:
+            debug_text += ", '{:s}'".format(dlt)
+        print(debug_text + ']')
+        return
+
+    @staticmethod
     def is_debug(db_level_query):
         db_val_set = Globals.debug_levels[Globals.debug_level]
         if db_val_set == 0:
@@ -150,37 +162,23 @@ class Globals:
         return y
 
     @staticmethod
-    def polynomial(x, *coeffs, gradient=False):
+    def polynomial(x, *opt, gradient=False):
         """
         Evaluate a polynomial at a specific x value.
-        :param x:
-        :param coeffs:  Polynomial coefficients (from scipy.optimize.curve_fit)
+        :param x:  The input variable.
+        :param *opt:  Polynomial coefficients (from scipy.optimize.curve_fit)
         :param gradient:  If True, calculate the gradient 'dy_dx' instead of the 'y' value.
+        :param covariance:  If True, calculate the error.
         :return: y(x) or dy_dx(x) if gradient is True.
         """
-        order = len(coeffs) - 1         # order = highest exponent (last term).
+        order = len(opt) - 1         # order = highest exponent (last term).
         if gradient:
             dy_dx = 0.
             for exp in range(1, order+1):
-                dy_dx += coeffs[exp] * exp * (x ** (exp-1))
+                dy_dx += opt[exp] * exp * (x ** (exp-1))
             return dy_dx
         else:
             y = 0.
             for exp in range(0, order+1):
-                y += coeffs[exp] * (x ** exp)
-            return y
-
-    @staticmethod
-    def cubic(x, *coeffs, gradient=False):
-        """
-        Evaluate a cubic polynomial at a specific x value.
-        :param x:
-        :param coeffs:  Polynomial coefficients (from scipy.optimize.curve_fit)
-        :param gradient:  If True, calculate the gradient 'dy_dx' instead of the 'y' value.
-        :return:
-        """
-        if gradient:
-            val = coeffs[1] + x * (coeffs[2] + x * coeffs[3])
-        else:
-            val = coeffs[0] + x * (coeffs[1] + x * (coeffs[2] + x * coeffs[3]))
-        return val
+                y += opt[exp] * (x ** exp)
+        return y

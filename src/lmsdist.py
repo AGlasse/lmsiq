@@ -21,7 +21,9 @@ from lms_transform import Transform
 from lmsdist_polyfit import PolyFit
 
 print('lmsdist, distortion model - Starting')
-
+_ = Globals()
+base_debug_level = 'low'
+Globals.debug_level = base_debug_level
 analysis_type = 'distortion'            # Used for file handling (types = 'iq', 'distortion' or 'sky'
 
 """ SET MODEL CONFIGURATION HERE """
@@ -37,9 +39,7 @@ print("- output coords = {:s}, {:s}".format(Globals.coord_out[0], Globals.coord_
 
 # File locations and names
 zem_folder = filer.data_folder
-
 detector = Detector()
-
 focal_planes = {''}
 
 util = Util()
@@ -54,13 +54,11 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-generate_transforms = False
-do_first_plot = True
+generate_transforms = True
 if generate_transforms:
     print()
     print("Generating distortion transforms (and prism angle fit parameters)")
     fmt = "- reading Zemax ray trace data from folder {:s}"
-    print("Plot first configuration = {:s}".format(str(do_first_plot)))
     print(fmt.format(zem_folder))
 
     # Select *.csv files
@@ -71,7 +69,6 @@ if generate_transforms:
     offset_data_list = []
     traces = []
     a_rms_list = []
-    debug_first = True          # Print debugging information for first trace only.
 
     for cfg_id, file_name in enumerate(file_list):
         print(file_name)
@@ -79,39 +76,43 @@ if generate_transforms:
         trace = Trace(cfg_id=cfg_id, silent=True)
         trace.load(zf_file, filer.model_configuration, do_plot=False)
         trace.find_wavelength_bounds()
-        debug_first = False
+        # debug_first = False
         offset_data_list.append(trace.offset_data)
-        if do_first_plot:
+        if Globals.is_debug('low'):
             trace.plot_focal_planes()
             trace.plot_fit_maps(plotdiffs=False, subset=True, field=True)
-            # trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
-            do_first_plot = False
+            trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
+            # Avoid plotting every time for 'low' debug setting
+            if Globals.debug_level in ['low', 'medium']:
+                Globals.debug_level = 'off'
 
         fits_name = filer.write_svd_transforms(trace, do_plot=True)
         trace.transform_fits_name = fits_name
         traces.append(trace)
         a_rms_list.append(trace.a_rms)
 
+    Globals.debug_level = base_debug_level
     filer.write_affine_transform(Trace)
     a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
     print("a_rms = {:10.3f} microns".format(a_rms * 1000.))
-    print(Filer.trace_file)
-    Filer.write_dill(Filer.trace_file, traces)
+    print(filer.trace_file)
+    Filer.write_dill(filer.trace_file, traces)
 
-calibrate_wavelength = True
-if calibrate_wavelength:
+plot_dispersion = True
+if plot_dispersion:
     first_plot = True
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
-    wcal = {}
     traces = Filer.read_dill(filer.trace_file)
     model_config = filer.model_configuration
     # plot.series('nm_det', traces, model_config)
-    if first_plot:
+    if Globals.is_debug('low'):
         plot.series('dispersion', traces, model_config)
         plot.series('coverage', traces[0:1], model_config)
         plot.series('coverage', traces, model_config)
-        first_plot = False
+        if Globals.debug_level in ['low', 'medium']:
+            Globals.debug_level = 'off'
+        Globals.debug_level = base_debug_level
 
 fit_transforms = True
 is_first = True
@@ -155,7 +156,7 @@ if fit_transforms:
             prism_angles.append(boresight_pa)
         poly_order = Globals.wpa_fit_order[opticon]
         wpa_fit  = polyfit.create_polynomial_fit(boresight_waves, prism_angles, poly_order=poly_order)
-        if is_first:
+        if Globals.is_debug('low'):
             plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, boresight_waves, prism_angles)
             is_first = False
     else:
@@ -168,8 +169,6 @@ if fit_transforms:
     svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
     wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
     filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
-
-
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
 # coordinates.  using 1) the specific transform for the trace at the Zemax location, 2) the model fit transforms
@@ -198,7 +197,7 @@ if evaluate_transforms:
         spifu_nos = trace.unique_spifu_slices
         ech_ords = trace.unique_ech_ords
 
-        mfp_plot = {'slice_no': [], 'spifu_no': [], 'ech_ord': [], 'ray': [], 'sli': [], 'fit': []}
+        mfp_plot_points = {'slice_no': [], 'spifu_no': [], 'ech_ord': [], 'ray': [], 'sli': [], 'fit': []}
         for slice_no in slice_nos:
             for spifu_no in spifu_nos:
                 for ech_ord in ech_ords:
@@ -220,11 +219,11 @@ if evaluate_transforms:
                     det_x = trace.get_series('det_x', slice_filter)
                     det_y = trace.get_series('det_y', slice_filter)
                     mfp_pts_ray = {'mfp_x': det_x, 'mfp_y': det_y}
-                    mfp_plot['ray'].append(mfp_pts_ray)
-                    mfp_plot['sli'].append(mfp_pts_sli_tform)
-                    mfp_plot['slice_no'].append(slice_no)
-                    mfp_plot['spifu_no'].append(spifu_no)
-                    mfp_plot['ech_ord'].append(ech_ord)
+                    mfp_plot_points['ray'].append(mfp_pts_ray)
+                    mfp_plot_points['sli'].append(mfp_pts_sli_tform)
+                    mfp_plot_points['slice_no'].append(slice_no)
+                    mfp_plot_points['spifu_no'].append(spifu_no)
+                    mfp_plot_points['ech_ord'].append(ech_ord)
 
                     slice_config_zem = slice_transform_zem.slice_configuration
                     fit_matrix = svd_fit[slice_no][spifu_no]
@@ -244,7 +243,7 @@ if evaluate_transforms:
 
                     slice_transform_fit = Transform(matrices=matrices, slice_config=slice_config_zem, lms_config=lms_config)
                     mfp_pts_fit_tform, _ = util.efp_to_mfp(slice_transform_fit, efp_points)
-                    mfp_plot['fit'].append(mfp_pts_fit_tform)
+                    mfp_plot_points['fit'].append(mfp_pts_fit_tform)
 
                     det_x_fit = mfp_pts_fit_tform['mfp_x']
                     det_y_fit = mfp_pts_fit_tform['mfp_y']
@@ -256,16 +255,16 @@ if evaluate_transforms:
 
         do_plot = True
         if do_plot:
-            theta_p = r'$\phi_{pri}$' + "={:6.3f}, ".format(lms_config['pri_ang'])
-            theta_e = r'$\psi_{ech}$' + "={:6.3f}, ".format(lms_config['ech_ang'])
-            wave_text = r'$\lambda_{bs}$' + "={:6.3f}, ".format(wave_bs) + r'$\mu$m'
-
-            title = theta_p + theta_e + wave_text
+            title = trace.get_plot_title()
+            # theta_p = r'$\phi_{pri}$' + "={:6.3f}, ".format(lms_config['pri_ang'])
+            # theta_e = r'$\psi_{ech}$' + "={:6.3f}, ".format(lms_config['ech_ang'])
+            # wave_text = r'$\lambda_{bs}$' + "={:6.3f}, ".format(wave_bs) + r'$\mu$m'
+            # title = theta_p + theta_e + wave_text
             mfp_decorations = [('ray trace', 'red', 'o', 10.),
                                ('slice transform', 'green', 'x', 6.),
                                ('fit transform', 'blue', '+', 6.)]
-            Plot.plot_mfp_points(mfp_plot, mfp_decorations, title=title, ref_xy=False, grid=False)
-            Plot.plot_mfp_points(mfp_plot, mfp_decorations, title=title, ref_xy=True, grid=True)
+            Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=False, grid=False)
+            Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=True, grid=True)
 
 test_transform_fit = True
 if test_transform_fit:

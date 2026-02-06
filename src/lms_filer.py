@@ -106,9 +106,11 @@ class Filer:
         return mosaic_list
 
     @staticmethod
-    def write_mosaic(path, primary_header, hdu_list_in):
+    def write_mosaic(folder, mosaic):
         """ Write a Zemax image into the primary extension of a new fits file.
         """
+        file_name, primary_header, hdu_list_in = mosaic
+        path = folder + '/' + file_name
         primary_hdu = PrimaryHDU(header=primary_header)
         hdu_list = HDUList([primary_hdu])
         for hdu in hdu_list_in:

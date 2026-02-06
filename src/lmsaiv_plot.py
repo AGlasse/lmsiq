@@ -13,14 +13,12 @@ class Plot:
         return
 
     @staticmethod
-    def gap_samples(gap_samples, thetas):
+    def gap_samples(gap_samples, gap_thetas):
         figsize = [8, 8]
         fig, axes = plt.subplots(nrows=2, ncols=1, figsize=figsize,
                                  sharex='all', squeeze=True)
-
         gap_data = np.array(gap_samples)
-        sw_mos_idxs = gap_data[:, 0]
-        slices = gap_data[:, 2]
+        sw_mos_idxs = np.int64(gap_data[:, 0])
         rows = gap_data[:, 3]
         gaps = gap_data[:, 4]
         for pane, sw_mos_idx in enumerate(np.unique(sw_mos_idxs)):
@@ -28,9 +26,18 @@ class Plot:
             x = rows[idx]
             y = gaps[idx]
             ax = axes[pane]
-            ax.set_title('theta {:d} = {:8.3f} deg.'.format(int(sw_mos_idx), thetas[sw_mos_idx]))
+            m = int(sw_mos_idx)
+            title = ''
+            for key in gap_thetas:
+                theta = gap_thetas[key]
+                sw_mos_idx, lw_mos_idx, theta, theta_err, mean_gap = theta
+                if sw_mos_idx == m:
+                    tag = r'{:d}{:d}'.format(int(sw_mos_idx), int(lw_mos_idx))
+                    title = r'$\theta_{:s}$ = {:8.3f}$\pm${:5.3f} deg.'.format(tag, theta, theta_err)
+
+            ax.set_title(title)
             ax.set_xlabel('Row')
-            ax.set_ylabel("Intra mosaic gap {:d}-{:d}".format(int(sw_mos_idx), int(sw_mos_idx) + 1))
+            ax.set_ylabel("Intra mosaic gap {:d}{:d}".format(m, m+1))
             ax.plot(x, y, linestyle='none', marker='x', color='blue')
         plt.show()
         return
@@ -43,11 +50,11 @@ class Plot:
         cmap_name = kwargs.get('cmap', 'hot')
         cmap = mpl.colormaps[cmap_name]
         sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
-        title = kwargs.get('title', file_name)
-
+        title = kwargs.get('title', '-')
+        suptitle = file_name + '\n' + title
         # Set up figure and image grid
         fig = plt.figure(figsize=(8, 7))
-        fig.suptitle(title)
+        fig.suptitle(suptitle)
         grid = ImageGrid(fig, 111,
                          nrows_ncols=(2, 2),
                          axes_pad=(0.15, 0.15),
@@ -112,6 +119,7 @@ class Plot:
                     pt_v_coords = overlay['pt_v_coords'][idx]
                     xs = pt_u_coords if is_alpha else pt_v_coords
                     ys = pt_v_coords if is_alpha else pt_u_coords
+
                     # ys_fit = Globals.cubic(xs, *popts[idx]) if is_alpha else Globals.cubic(ys, *popts)
                     ax.plot(xs, ys, marker='o', ms=2.0, color='red', linestyle='none')
         ax.cax.colorbar(im)
