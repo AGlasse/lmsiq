@@ -39,7 +39,7 @@ class Opt01:
         floods = Filer.read_mosaic_list(['lms_opt_01', 'flood'])
         for flood in floods:
             slice_map, profiles = Opt01.flood_stats(flood)
-            # do_plot = True
+            Opt01.print_inter_slice(slice_map)
             if Globals.is_debug('low'):
                 Plot.profiles(profiles)
                 Plot.mosaic(flood, title=title, cmap='hot')        # Use cmap='hot', 'gray' etc.
@@ -97,7 +97,7 @@ class Opt01:
         alpha_cut = 0.5
         print()
         print("File = {:s}".format(file_name))
-        fmt = "Dark pixels defined as those < {:.0f}th percentile signal level"
+        fmt = "Dark pixels are defined as those < {:.0f}th percentile signal level"
         print(fmt.format(dark_pctile))
         fmt = "Illuminated pixels defined as those brighter than the {:.0f}th percentile signal level"
         print(fmt.format(bright_pctile))
@@ -123,6 +123,7 @@ class Opt01:
         alpha_det = [0.]*4
         for hdu in hdus:
             det_no = int(hdu.header['ID'])
+
             det_idx = det_no - 1
             slice_coords = {'det_no': det_no, 'slice_nos': [], 'cols': [], 'row_mins': [], 'row_maxs': []}
 
@@ -185,11 +186,12 @@ class Opt01:
                     illum_rows = row_off - row_on
                     illum_rows_sum += illum_rows
 
-            # Create the slice map from the table of slice bounds.
+            # Create the slice map (and calculate the intra-slice gap) from the table of slice bounds.
             poly_degree = 2 if n_profiles > 3 else n_profiles - 1
 
             slice_nos = np.array(slice_coords['slice_nos'], dtype='int64')
             unique_slice_nos = np.unique(slice_nos)
+
             slice_map_name, slice_map_hdr, slice_map_hdus = slice_map
             slice_map_hdu = slice_map_hdus[det_idx]
             for slice_no in unique_slice_nos:
@@ -220,6 +222,35 @@ class Opt01:
         aspect_ratio = alpha_ext / beta_ext
         print("Aspect ratio (alpha/beta) = {:5.3f}:1 (cf METIS-3667, shall be 1:1 < ar < 2:1)".format(aspect_ratio))
         return slice_map, profiles
+
+    @staticmethod
+    def print_inter_slice(slice_map):
+        """ Brute force calculation of inter slice gap from slice map """
+        _, _, hdu_list = slice_map
+        fmt = "{:>12s},{:>12s},{:>12s},{:>12s},"
+        print(fmt.format('Detector', 'Slice No.', 'Slice No.', 'Minimum'))
+        print(fmt.format('No.', 'A', 'B', 'Gap'))
+        fmt = "{:>12d},{:>12d},{:>12d},{:>12d},"
+        for hdu in hdu_list:
+            header, img = hdu.header, hdu.data
+            det_no = int(header['ID'])
+            # Sufficient to find slice numbers by searching along the central column (1024)
+            values = np.unique(img[:, 1024])
+            slice_nos = values[values > 0]
+            for slice_no in slice_nos[1:]:
+                gap_list = []
+                for c in range(0, 2048):
+                    cut = img[:, c]
+                    row_a_top = np.argwhere(cut == slice_no - 1)[-1]
+                    row_b_bot = np.argwhere(cut == slice_no)[0]      # Get indices of non-slice pixels.
+                    gap_list.append(row_b_bot - row_a_top)
+                gaps = np.array(gap_list)
+                print(fmt.format(det_no, int(slice_no - 1), int(slice_no), gaps.min()))
+
+        print("Inter slice gap calculation")
+        return
+
+
 
     @staticmethod
     def _parse_abo(file_name):

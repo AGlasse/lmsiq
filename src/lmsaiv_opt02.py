@@ -221,7 +221,7 @@ class Opt02:
                 print(fmt.format(umi0, umi1, slice_no, u_mean, gap))
 
         dist_points = Opt02.find_trace_intersections(alpha_traces, lambda_traces)
-
+        as_built['dist_points'] = dist_points
         return as_built
 
     @staticmethod
@@ -242,7 +242,6 @@ class Opt02:
 
         for det_no in range(1, 5):
             cond = np.array(alpha_traces['det_no']) == det_no
-            ab = np.asarray(cond)
             a_det_filter = np.array(alpha_traces['det_no']) == det_no
             w_det_filter = np.array(lambda_traces['det_no']) == det_no
             for slice_no in range(1, 29):
@@ -275,9 +274,7 @@ class Opt02:
                         points['row'].append(y)
                         if Globals.is_debug('low'):
                             print(fmt.format(det_no, slice_no, x, y))
-
-        dist_points = None
-        return dist_points
+        return points
 
     @staticmethod
     def psf(test_name, title, as_built, **kwargs):

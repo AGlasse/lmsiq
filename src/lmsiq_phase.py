@@ -134,7 +134,7 @@ class Phase:
                                                    'sampled at\ndetector']
                                     Plot.images([im_shifted, im_ipc, im_det],
                                                 title=title, pane_titles=pane_titles,
-                                                nrowcol=(1, 3), png_path=png_path)
+                                                nrowcol=(1, 3))   # png_path=png_path
 
                                     is_first_dataset = False
 

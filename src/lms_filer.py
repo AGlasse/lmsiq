@@ -374,21 +374,21 @@ class Filer:
             hdu_list.close()
         return transform_list
 
-    @staticmethod
-    def read_dill(dill_path):
-        if dill_path[-4:] != '.dil':
-            dill_path += '.dil'
-        dill_file = open(dill_path, 'rb')
-        python_object = dill.load(dill_file)
-        dill_file.close()
-        return python_object
-
-    @staticmethod
-    def write_dill(dill_path, python_object):
-        dill_file = open(dill_path + '.dil', 'wb')
-        dill.dump(python_object, dill_file)
-        dill_file.close()
-        return
+    # @staticmethod
+    # def read_dill(dill_path):
+    #     if dill_path[-4:] != '.dil':
+    #         dill_path += '.dil'
+    #     dill_file = open(dill_path, 'rb')
+    #     python_object = dill.load(dill_file)
+    #     dill_file.close()
+    #     return python_object
+    #
+    # @staticmethod
+    # def write_dill(dill_path, python_object):
+    #     dill_file = open(dill_path + '.dil', 'wb')
+    #     dill.dump(python_object, dill_file)
+    #     dill_file.close()
+    #     return
 
     @staticmethod
     def read_pickle(pickle_path):

@@ -35,31 +35,31 @@ for f in range(0, 18):
     fts_spifu[f+1] = 12 + f % 3
 
 # Data descriptor: optical_path, mc_bounds, dist_date_stamp, field_to_tgt_slice_map, slice_radius, label
-data_dictionary = {'2024032400': (nominal, 'all', '20240109', fts_efp, 4,
-                                  "toroidal M12, EFP fields 1-9, full LM-bands"),
-                   '2024032401': (extended, 'all', '20240109', {1: 13, 2: 13, 3: 13}, 1,
-                                  "extended coverage, toroidal M12"),
-                   '2024043000': (nominal, 'all', '20240305', fts_dfp, 0,
-                                  "torM12, defocus .0,.05,.1 mm, wave 2.7 um"),
-                   '2024050700': (nominal, 'all', '20240305', fts_dfp, 0,
-                                  "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 4.57 um"),
-                   '2024050701': (nominal, 'all', '20240305', fts_dfp, 0,
-                                  "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 5.00 um"),
-                   '2024050702': (nominal, 'all', '20240305', fts_dfp, 0,
-                                  "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 5.24 um"),
-
-                   '2024060700': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus   0 um'),
-                   '2024060705': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus  50 um'),
-                   '2024060710': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus 100 um'),
-                   '2024060720': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus 200 um'),
-
+data_dictionary = {
+                   # '2024032400': (nominal, 'all', '20240109', fts_efp, 4,
+                   #                "toroidal M12, EFP fields 1-9, full LM-bands"),
+                   # '2024032401': (extended, 'all', '20240109', {1: 13, 2: 13, 3: 13}, 1,
+                   #                "extended coverage, toroidal M12"),
+                   # '2024043000': (nominal, 'all', '20240305', fts_dfp, 0,
+                   #                "torM12, defocus .0,.05,.1 mm, wave 2.7 um"),
+                   # '2024050700': (nominal, 'all', '20240305', fts_dfp, 0,
+                   #                "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 4.57 um"),
+                   # '2024050701': (nominal, 'all', '20240305', fts_dfp, 0,
+                   #                "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 5.00 um"),
+                   # '2024050702': (nominal, 'all', '20240305', fts_dfp, 0,
+                   #                "torM12, DFP fields 10-12, defocus .0,.05,.1 mm, wave 5.24 um"),
+                   #
+                   # '2024060700': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus   0 um'),
+                   # '2024060705': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus  50 um'),
+                   # '2024060710': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus 100 um'),
+                   # '2024060720': (nominal, 'all', '20240305', fts_dfp, 0, 'spherical M12, defocus 200 um'),
                    '2024073000': (nominal, 'all', '20240109', fts_efp, 4,
                                   "spherical M12, EFP fields 1-9, full LM-bands"),
                    '2024061403': (extended, 'all', '20231009', fts_spifu, 0,
                                   "METIS_M19manufacture_errors (updated)"),
                    }
 
-iq_date_stamp = '2024061403'
+iq_date_stamp = '2024073000'
 opticon, mc_bounds, dist_date_stamp, field_tgt_slice, slice_radius, data_label = data_dictionary[iq_date_stamp]
 data_identifier = {'optical_path': opticon,
                    'iq_date_stamp': iq_date_stamp,
@@ -72,17 +72,20 @@ data_identifier = {'optical_path': opticon,
 fmt = "Analysing dataset for {:s} optical path, dated {:s}"
 print(fmt.format(opticon, iq_date_stamp))
 
+_ = Globals()
+base_debug_level = 'off'
+Globals.set_debug_level(base_debug_level)
+
 # Initialise static classes
-globals = Globals()
 analyse = Analyse()
 plot = Plot()
 detector = Detector()
 util = Util()
 fitsio = FitsIo(opticon)
 
-model_configuration = analysis_type, opticon, iq_date_stamp, None, None, None
+# model_configuration = analysis_type, opticon, iq_date_stamp, None, None, None
 iq_filer = Filer()
-iq_filer.set_configuration(analysis_type, opticon)
+iq_filer.set_configuration('iq', opticon)
 
 image_manager = ImageManager()
 image_manager.make_dictionary(data_identifier, iq_filer)
@@ -107,7 +110,7 @@ if req_mc_bounds is not None:
 process_control = mc_bounds, inter_pixels
 
 # Analyse Zemax data
-process_phase_data = True
+process_phase_data = False
 if process_phase_data:
     # Calculate the impact of sub-pixel shifts on photometry and line centroiding.
     print("\nProcessing centroid shift impact for dataset {:s}".format(iq_date_stamp))
@@ -121,10 +124,11 @@ if build_cubes:
     print('\nReconstructing cubes and analysing slice profile data')
     print('-----------------------------------------------------')
     cuber = Cuber()
-    dist_model_configuration = 'distortion', opticon, dist_date_stamp, None, None, None
+    # dist_model_configuration = 'distortion', opticon, dist_date_stamp, None, None, None
     dist_filer = Filer()
-    dist_filer.set_configuration(analysis_type, opticon)
-    cuber.build(data_identifier, process_control, image_manager, iq_filer, dist_filer, debug=False)
+    dist_filer.set_configuration('distortion', opticon)
+    cuber.build(data_identifier, process_control, image_manager, iq_filer, dist_filer,
+                debug=False, plot_to_png=False)
 
 plot_cubes = True
 if plot_cubes:

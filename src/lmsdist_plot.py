@@ -345,46 +345,6 @@ class Plot:
         return
 
     @staticmethod
-    def dispersion(traces, optical_configuration):
-        ax_list = Plot.set_plot_area('Wavelength coverage',
-                                     xlabel="Wavelength / micron",
-                                     ylabel="Prism angle + 0.02 x Echelle angle ")
-        ax = ax_list[0, 0]
-        ccs4_colours = mcolors.CSS4_COLORS
-        if optical_configuration == Globals.extended:
-            ccs4_colours = mcolors.TABLEAU_COLORS
-
-        colours = sorted(ccs4_colours,
-                         key=lambda c: tuple(mcolors.rgb_to_hsv(mcolors.to_rgb(c))),
-                         reverse=True)
-        colour_iterator = iter(colours)
-        config_colour = {}
-
-        for trace in traces[0:-1]:
-            ech_angle, prism_angle = trace.parameter['Echelle angle'], trace.parameter['Prism angle']
-            tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-            config_colour[tag] = next(colour_iterator, 'black')
-            for tf in trace.slice:
-                config, matrices, offset_corrections, rays, wave_bounds = tf
-                label, slice_no, spifu_no = config
-                waves, _, _, det_x, det_y, _, _ = rays
-                dw_dlmspix = (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])
-                x = waves[1:]
-                y = dw_dlmspix
-
-                # x_label, y_label = x[0], y[0]
-
-                tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-                colour = config_colour[tag]
-                ax.plot(x, y, color=colour, clip_on=True,
-                        fillstyle='none', marker='.', mew=1.0, ms=3, linestyle='None')
-
-                label = "{:d}".format(int(label))
-                if spifu_no != -1:
-                    label += "/{:d}".format(int(spifu_no))
-        Plot.show()
-
-    @staticmethod
     def _cycle_ijk(ijk, dir):
         for v in range(0, 3):
             ijk[v] += dir
@@ -476,7 +436,7 @@ class Plot:
                     dw = (w_max - w_min) * nm_micron
                     y = np.full(waves.shape, dw)
                 if plot_type == 'dispersion':
-                    mm_pix = 0.018
+                    mm_pix = Globals.nom_pix_pitch / 1000.
                     dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])  # nm / pix
                     x = waves[1:]
                     y = dw_dlmspix

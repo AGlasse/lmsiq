@@ -1,5 +1,7 @@
 import numpy as np
 import time
+
+from lms_globals import Globals
 from lmsiq_fitsio import FitsIo
 from lms_wcal import Wcal
 from lmsdist_util import Util
@@ -21,7 +23,7 @@ class Cuber:
         """ Build fits cubes (alpha, beta, lambda, configuration, field_position) from the slice images,
         optionally including detector diffusion.
         """
-        debug = kwargs.get('debug', False)
+        plot_to_png = kwargs.get('plot_to_png', False)
         t_start = time.perf_counter()
         ds_dict, lsf_data = None, None
         axes = ['across-slice', 'along-slice']
@@ -85,10 +87,11 @@ class Cuber:
                             for slice_no in range(slice_start, slice_end+1):
                                 t_now = time.perf_counter()
                                 t_min = (t_now - t_start) / 60.
-                                plot_slicer_images = False
-                                if plot_slicer_images:
+                                if Globals.is_debug('low'):
                                     # Don't include IFU image in analysis, just plot it.
                                     selection = {'config_no': config_no,
+                                                 'slice_no': slice_no,
+                                                 'spifu_no': spifu_no,
                                                  'field_no': field_no,
                                                  'focus_shift': focus,
                                                  'focal_plane': 'slicer',
@@ -96,13 +99,15 @@ class Cuber:
                                                  }
                                     slicer_obs_list = image_manager.load_dataset(iq_filer, selection)
                                     slicer_folder = '/slicer_image'
-                                    png_name = "slicer_config{:02d}_{:s}".format(config_no, ipc_tag)
-                                    png_folder = iq_filer.get_folder(iq_filer.output_folder + slicer_folder)
-                                    png_path = png_folder + png_name
-                                    title = png_name
-                                    Plot.images(slicer_obs_list,
-                                                figsize=[8, 10], nrowcol=(2, 2), shrink=1.0, colourbar=True,
-                                                title=title, do_log=True, png_path=png_path)
+                                    plot_title = "slicer_config{:02d}_{:s}".format(config_no, ipc_tag)
+                                    png_path = None
+                                    if plot_to_png:
+                                        png_folder = iq_filer.get_folder(iq_filer.output_folder + slicer_folder)
+                                        png_path = png_folder + plot_title
+                                    if Globals.is_debug('low'):
+                                        Plot.images(slicer_obs_list[0][:4],
+                                                    figsize=[8, 10], nrowcol=(2, 2), shrink=1.0, colourbar=True,
+                                                    title=plot_title, do_log=True, png_path=png_path)
 
                                 selection = {'config_no': config_no,
                                              'field_no': field_no,
@@ -113,15 +118,13 @@ class Cuber:
                                              'mc_bounds': mc_bounds,
                                              }
 
-                                # t1 = time.perf_counter()
                                 images, ds_dict = image_manager.load_dataset(iq_filer,
                                                                              selection,
                                                                              # xy_shift=(10, -5, -5),
                                                                              debug=False
                                                                              )
                                 if images is None:      # No images found
-                                    if debug:
-                                        print('No images found, exiting cuber.build')
+                                    print('No images found, exiting cuber.build')
                                     continue
 
                                 fmt = "\r- diffusion {:s}, field {:02d}, spifu_no {:01d}, configuration {:03d}," + \
@@ -154,13 +157,13 @@ class Cuber:
                                     write_pickle = False
                                     if write_pickle:
                                         iq_filer.write_pickle(lsf_path, (lsf_data, ds_dict))
-                                    Plot.plot_cube_profile('lsf', lsf_data, lsf_name,
-                                                           ds_dict, axis_name,
-                                                           xlim=[-6., 6.],
-                                                           png_path=lsf_path)
-                                    dw_dx = Analyse.get_dispersion(ds_dict, traces)  # nm / mm
-                                    dw_dx_mean, dw_dx_std = dw_dx
-                                    dw_lmspix = dw_dx_mean * Detector.det_pix_size / 1000.  # nm / pixel
+                                    if Globals.is_debug('low'):
+                                        Plot.plot_cube_profile('lsf', lsf_data, lsf_name,
+                                                               ds_dict, axis_name,
+                                                               xlim=[-6., 6.],
+                                                               png_path=lsf_path)
+                                    dw_dx = Analyse.get_dispersion(ds_dict, traces)  # micron / mm
+                                    dw_lmspix = dw_dx * Detector.det_pix_size         # nm / pixel
                                     # Add FWHM values to summary table (params v wavelength/field etc.)
                                     field_series = {'ipc_on': inter_pixel, 'field_no': field_no,
                                                     'spifu_no': spifu_no, 'config_no': config_no,
@@ -381,8 +384,8 @@ class Cuber:
 
             abs_id = optical_path
             abscissae = {'spifu': ('spifu_no', 'Spectral IFU slice no.', [0.5, 6.5]),
-                         'nominal': ('wavelength', 'Wavelength $\mu$m', [2.67, 6.72]),
-                         'defocus': ('defocus', 'Wavelength $\mu$m', [2.67, 6.72])
+                         'nominal': ('wavelength', r'Wavelength $\mu$m', [2.67, 6.72]),
+                         'defocus': ('defocus', r'Wavelength $\mu$m', [2.67, 6.72])
                          }
             abs_id = 'defocus' if is_defocus else abs_id
             abscissa = abscissae[abs_id]
@@ -394,7 +397,7 @@ class Cuber:
             ordinates = {'lsf_gau_fwhms': ('lsf_gau_fwhms', 'FWHM / pix.', lsf_fwhm_lims[optical_path]),
                          'acr_gau_fwhms': ('acr_gau_fwhms', 'FWHM / slice', acr_fwhm_lims[optical_path]),
                          'alo_gau_fwhms': ('alo_gau_fwhms', 'FWHM / pix.', alo_fwhm_lims[optical_path]),
-                         'srps': ('srps', 'SRP ($\lambda / \Delta\lambda$)', srp_lims[optical_path]),
+                         'srps': ('srps', r'SRP ($\lambda / \Delta\lambda$)', srp_lims[optical_path]),
                          'strehls': ('strehls', 'Strehl', [0.4, 1.1])}
             mc_percentiles = [(10, 'dashed', 1.0), (90, 'dashed', 1.0)]
 

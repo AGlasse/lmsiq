@@ -11,7 +11,8 @@ class OptTests:
 
     def __init__(self):
         Filer.set_test_data_folder('scopesim')
-        # Test dictionary, note that the key comprises 'data_source_' + 'analysis' (eg 'lms_opt_01_' + 'fov'
+        # Test dictionary, note that the key comprises 'data_source_' + 'analysis' (eg 'lms_opt_01_' + 'fov'.  This
+        # supports the fact that an analysis project (Jupyter notebook) may use data from several tests.
         optical_test = {'lms_opt_01_fov': (Opt01.fov, 'Field of view and RSRF'),
                         'lms_opt_02_dist': (Opt02.dist, 'Distortion transforms and enslitted profiles'),
                         'lms_opt_03_psf': (Opt03.psf, 'Monochomatic Point and line spread function'),
@@ -22,20 +23,25 @@ class OptTests:
 
     def __str__(self):
         text = 'Valid analysis methods, \n'
-        for key in OptTests.optical_test:
-            test = OptTests.optical_test[key]
-            text += "{:<20s},{:<20s} \n".format(key, test[1])
+        for cap_name in OptTests.optical_test:
+
+            test = OptTests.optical_test[cap_name]
+            text += "{:<20s},{:<20s} \n".format(cap_name, test[1])
         return text
 
     @staticmethod
     def run(cap_name, **kwargs):
         if cap_name not in OptTests.optical_test.keys():
-            print("Test {:s} not found !!!".format(cap_name))
-            return
-        file_list = Filer.get_file_list(Filer.test_data_folder, inc_tags=[cap_name])
-        print('Test data found in folder ')
-        [print("- {:s}".format(file)) for file in file_list]
+            print("Analysis project {:s} not found !!!".format(cap_name))
+            quit()
+
+        test_name = cap_name[0:10]
+        file_list = Filer.get_file_list(Filer.test_data_folder, inc_tags=[test_name])
+        print("Test data for {:s} found in folder ".format(test_name))
+        for file in file_list:
+            print("- {:s}".format(file))
         print()
+
         try:            # Import or create 'as built' object.
             as_built = Filer.read_pickle(Globals.as_built_file)
         except FileNotFoundError:

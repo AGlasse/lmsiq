@@ -14,7 +14,7 @@ from os import listdir
 from lms_filer import Filer
 from lmsdist_util import Util
 from lmsdist_plot import Plot
-from lmsdist_trace import Trace
+from lmsdist_trace import RayTrace
 from lms_globals import Globals
 from lms_detector import Detector
 from lms_transform import Transform
@@ -73,7 +73,7 @@ if generate_transforms:
     for cfg_id, file_name in enumerate(file_list):
         print(file_name)
         zf_file = zem_folder + file_name
-        trace = Trace(cfg_id=cfg_id, silent=True)
+        trace = RayTrace(cfg_id=cfg_id, silent=True)
         trace.load(zf_file, filer.model_configuration, do_plot=False)
         trace.find_wavelength_bounds()
         # debug_first = False
@@ -92,18 +92,18 @@ if generate_transforms:
         a_rms_list.append(trace.a_rms)
 
     Globals.debug_level = base_debug_level
-    filer.write_affine_transform(Trace)
+    filer.write_affine_transform(RayTrace)
     a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
     print("a_rms = {:10.3f} microns".format(a_rms * 1000.))
     print(filer.trace_file)
-    Filer.write_dill(filer.trace_file, traces)
+    Filer.write_pickle(filer.trace_file, traces)
 
 plot_dispersion = True
 if plot_dispersion:
     first_plot = True
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
-    traces = Filer.read_dill(filer.trace_file)
+    traces = Filer.read_pickle(filer.trace_file)
     model_config = filer.model_configuration
     # plot.series('nm_det', traces, model_config)
     if Globals.is_debug('low'):
@@ -134,7 +134,7 @@ if fit_transforms:
         opt_tag = 'nom'
         all_boresights = []                         # All boresights, including non-zero echelle angles
         boresight_waves, prism_angles = [], []      # Wavelength which passes through Int Foc Plane origin.
-        traces = Filer.read_dill(filer.trace_file)
+        traces = Filer.read_pickle(filer.trace_file)
         for trace in traces:
             boresight = trace.get_ifp_boresight(opticon)
             all_boresights.append(boresight)
@@ -175,7 +175,7 @@ if fit_transforms:
 # (generated for the prism and echelle angles).
 evaluate_transforms = True
 if evaluate_transforms:
-    traces = Filer.read_dill(filer.trace_file)            # Use the ray trace data
+    traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
     _, opticon, date_stamp, _, _, _ = filer.model_configuration
     affines = filer.read_fits_affine_transform(date_stamp)
     spifu_no = 0

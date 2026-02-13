@@ -41,25 +41,29 @@ class Analyse:
         return y
 
     @staticmethod
-    def get_dispersion(ds_dict, traces):
+    def get_dispersion(ds_dict, ray_traces):
         """ Get the mean dispersion at the passed wavelength from the 'trace' objects generated using
         the distortion model.  For now this just works by interpolating the wave v dw_dx_mean values
         for all traces.
         """
         wave = ds_dict['wavelength']
 
-        wave_list, dw_dx_mean_list, dw_dx_std_list = [], [], []
-        for trace in traces:
-            wave_list.append(trace.mean_wavelength)
-            dw_dx_mean, dw_dx_std = trace.dw_dx
-            dw_dx_mean_list.append(dw_dx_mean)
-            dw_dx_std_list.append(dw_dx_std)
-        wave_means = np.array(wave_list)
-        sort_indices = np.argsort(wave_means)
-        w_sort = wave_means[sort_indices]
-        dw_dx_means = np.array(dw_dx_mean_list)[sort_indices]
-        dw_dx_stds = np.array(dw_dx_std_list)[sort_indices]
-        dw_dx = np.interp(wave, w_sort, dw_dx_means), np.interp(wave, w_sort, dw_dx_stds)
+        # wave_list, dw_dx_mean_list, dw_dx_std_list = [], [], []
+        dw_min, trace_dw_min = 999., None
+        for trace in ray_traces:
+            wave_ref = trace.wave_reference
+            dw = abs(wave_ref - wave)
+            if dw < dw_min:
+                trace_dw_min = trace
+                dw_min = dw
+        waves = trace_dw_min.get_series('wavelength', ds_dict)
+        det_x = trace_dw_min.get_series('det_x', ds_dict)
+        dw_dx = (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])
+        ws = waves[1:]
+        sort_indices = np.argsort(ws)
+        w_sort = ws[sort_indices]
+        dw_dx_sort = dw_dx[sort_indices]
+        dw_dx = np.interp(wave, w_sort, dw_dx_sort)
         return dw_dx
 
     @staticmethod

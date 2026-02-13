@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
 @author Alistair Glasse
-Python object to encapsulate ray trace data for the LMS
+Python object to encapsulate ray trace data for a specific LMS opto-mechanical configuration (prism and echelle angle
+etc.)
 
 18/12/18  Created class (Glasse)
 """
@@ -16,7 +17,7 @@ from lmsdist_plot import Plot
 from lms_transform import Transform
 
 
-class Trace:
+class RayTrace:
 
     # Configuration dicts.  Note lms_config is instantiated from Globals.
     series_names = {'ech_ord': 'int', 'slice_no': 'int', 'sp_slice': 'int',
@@ -56,6 +57,7 @@ class Trace:
         self.unique_slices = None
         self.unique_spifu_slices = None
         self.unique_waves = None
+        self.wave_reference = None
         self.n_rays = None
         return
 
@@ -65,7 +67,7 @@ class Trace:
         @author: Alistair Glasse
         Read Zemax ray trace data
         """
-        Trace.model_config = model_config
+        RayTrace.model_config = model_config
         analysis_type, opticon, date_stamp, optical_path_label, coord_in, coord_out = model_config
         self.csv_name = path.split('/')[-1]
         self.is_extended = opticon == Globals.extended
@@ -104,7 +106,7 @@ class Trace:
         self._create_mask(silent)
         do_plot = kwargs.get('do_plot', True)
         self.create_svd_transforms(do_plot=do_plot)
-        Trace.create_affine_transforms()
+        RayTrace.create_affine_transforms()
         return
 
     def _get_wave_reference(self):
@@ -118,7 +120,7 @@ class Trace:
     def find_wavelength_bounds(self):
         """ Find the wavelength bounds for each slice by back projecting from the detectors.
         """
-        affines = Trace.affines
+        affines = RayTrace.affines
         for transform in self.transforms:
             # Start by finding the detector and row for the slice centre.
             slice_no = transform.slice_configuration['slice_no']
@@ -138,7 +140,7 @@ class Trace:
 
     def __str__(self):
         fmt = "{:s}, EA={:6.3f} deg, PA={:6.3f} deg, "
-        opticon = Trace.model_config[1]
+        opticon = RayTrace.model_config[1]
         string = fmt.format(opticon, self.lms_config['ech_ang'], self.lms_config['pri_ang'])
         smin, smax = self.unique_slices[0], self.unique_slices[-1]
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
@@ -167,7 +169,7 @@ class Trace:
             affines[i, 1, :] = [sx * sin_theta, +sy * cos_theta, sy * y_mfp_org]
             affines[i, 2, :] = [0., 0., 1.]
             affines[i+n_dets] = np.linalg.inv(affines[i])
-        Trace.affines = affines
+        RayTrace.affines = affines
         return
 
     def get_ifp_boresight(self, opticon):
@@ -399,7 +401,7 @@ class Trace:
         title = theta_p + theta_e + wave_text
         return title
 
-    def plot_slice_map(self, sno, **kwargs):
+    def plot_slice_map(self, slice_no, **kwargs):
         """ Plot the planes in FP2 (nxlambda/2d, y) and at the detector (x, y)
         which are used to find the transforms """
         suppress = kwargs.get('suppress', False)
@@ -409,14 +411,15 @@ class Trace:
         plot = Plot()
         titles = ['LMS EFP', 'Detector']
 
-        phase = self.get('phase', slice=sno)
-        alpha = self.get('fp2_x', slice=sno)
-        det_x = self.get('det_x', slice=sno)
-        det_y = self.get('det_y', slice=sno)
+        series_filter = {'slice_no': slice_no}
+        phase = self.get_series('phase', series_filter)
+        alpha = self.get_series('fp2_x', series_filter)
+        det_x = self.get_series('det_x', series_filter)
+        det_y = self.get_series('det_y', series_filter)
 
         xlabels = ['Phase (n lambda / 2 d)', 'X [mm]']
         ylabels = ['alpha [mm]', 'Y [mm]']
-        fig_title = "{:s}, slice= {:d}".format(self.parameter['name'], sno)
+        fig_title = "{:s}, slice= {:d}".format(self.parameter['name'], slice_no)
         ax_list = plot.set_plot_area(fig_title, nrows=1, ncols=2)
 
         xs = [phase, det_x]
@@ -454,7 +457,7 @@ class Trace:
 
         fp_plot_mask = {'LMS EFP': False, 'Slicer': False, 'IFU': False,
                         'Slit': True, 'SP slicer': True, 'Detector': True}
-        focal_planes = Trace.spifu_focal_planes if self.is_extended else Trace.nominal_focal_planes
+        focal_planes = RayTrace.spifu_focal_planes if self.is_extended else RayTrace.nominal_focal_planes
 
         n_focal_planes = len(focal_planes)
         colour_scheme = kwargs.get('colour_scheme', 'blue')
@@ -500,7 +503,7 @@ class Trace:
         line_iter = iter(line_list)
 
         # Read configuration parameters
-        efp_map = Trace.spifu_efp_map if self.is_extended else Trace.nominal_efp_map
+        efp_map = RayTrace.spifu_efp_map if self.is_extended else RayTrace.nominal_efp_map
         efp_x_name = efp_map['efp_x']
         efp_y_name = efp_map['efp_y']
         lms_config = Globals.lms_config_template.copy()
@@ -538,11 +541,11 @@ class Trace:
                 ser_tag = 'slice_no'
             zem_column[ser_tag] = i, zem_tag
 
-        series_names = Trace.series_names
+        series_names = RayTrace.series_names
         if self.is_extended:
-            series_names.update(Trace.spifu_series_names)
+            series_names.update(RayTrace.spifu_series_names)
         else:
-            series_names.update(Trace.nominal_series_names)
+            series_names.update(RayTrace.nominal_series_names)
 
         fp_list = coord_in + coord_out
         for key in fp_list:

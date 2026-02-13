@@ -210,7 +210,7 @@ class Plot:
 
         title_lead = data_par['title_lead']
         print(title_lead)
-        title = r'\n{:s},' + r'$\lambda$= {:5.3f} $\mu$m'.format(name, wavelength)
+        title = r'\n{:s},'.format(name) + r'$\lambda$= {:5.3f} $\mu$m'.format(wavelength)
 
         fig, ax_list = plt.subplots(1, 1, figsize=(10, 8))
         ax = ax_list
@@ -249,10 +249,12 @@ class Plot:
             ax.set_xlim(xlim)
 
         ax.set_title(title, fontsize=16.0)
-        for tick in ax.yaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
-        for tick in ax.xaxis.get_major_ticks():
-            tick.label.set_fontsize(16.0)
+        plt.xticks(fontsize=16.0)
+        plt.yticks(fontsize=16.0)
+        # for tick in ax.yaxis.get_major_ticks():
+        #     tick.label.set_fontsize(16.0)
+        # for tick in ax.xaxis.get_major_ticks():
+        #     tick.label.set_fontsize(16.0)
         ax.xaxis.grid()
         ax.yaxis.grid()
         if xlog:
@@ -444,10 +446,12 @@ class Plot:
         title = title1 + '\n' + title2
         ax.set_title(title)
 
-        for tick in ax.yaxis.get_major_ticks():
-            tick.label1.set_fontsize(16.0)
-        for tick in ax.xaxis.get_major_ticks():
-            tick.label1.set_fontsize(16.0)
+        plt.xticks(fontsize=16.0)
+        plt.yticks(fontsize=16.0)
+        # for tick in ax.yaxis.get_major_ticks():
+        #     tick.label1.set_fontsize(16.0)
+        # for tick in ax.xaxis.get_major_ticks():
+        #     tick.label1.set_fontsize(16.0)
 
         y_perfect, y_design = data[:, 0], data[:, 1]
         y_mcs = data[:, 2:]
