@@ -1,11 +1,22 @@
 id,opticon,wave_cen,dit,ndit,nobs,bgd_src,wcu_aper,wcu_mask,wcu_angle,wcu_x,wcu_y,cfo_mask,lms_pp1
 # lms_opt_01_nom_dark1,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
 # lms_opt_01_nom_flood,nominal,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+# lms_opt_01_ext_dark1,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,closed
+# lms_opt_01_ext_w4700_flood,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+lms_opt_01_ext_w4500_flood,extended,4500,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+lms_opt_01_ext_w4700_flood,extended,4700,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
+lms_opt_01_ext_w4730_flood,extended,4730,5.0,10,1,wcu_bb,0.05,open,0.,0.,0.,open,open
 #
-lms_opt_02_nom_w4705_iso_alpha_bgd,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,10.,10.,open,open
-lms_opt_02_nom_w4705_iso_alpha_grid,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,0.,0.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_pnh_lm_0,nominal,4705,5.0,120,1,wcu_bb,1.,pinhole_lm,0.,0.,0.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_pnh_lm_2,nominal,4705,5.0,120,1,wcu_bb,1.,pinhole_lm,0.,0.2,0.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_pnh_lm_4,nominal,4705,5.0,120,1,wcu_bb,1.,pinhole_lm,0.,0.4,0.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_grid,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,0.,0.,open,open
+# lms_opt_02_nom_w4705_iso_lambda_bgd,nominal,4705,5,120,1,wcu_bb,0.1,open,0.,10.,10.,open,open
+# lms_opt_02_nom_w4705_iso_lambda_sig_bs,nominal,4705,.01,5,1,wcu_lt,0.1,open,0.,0.,0.,open,open
+# lms_opt_02_ext_w4705_iso_lambda_bgd,extended,4705,5,120,1,wcu_bb,0.1,open,0.,10.,10.,open,open
+# lms_opt_02_ext_w4730_iso_lambda_sig_bs,extended,4730,.01,5,1,wcu_lt,0.1,open,0.,0.,0.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_bgd,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,10.,10.,open,open
+# lms_opt_02_nom_w4705_iso_alpha_grid,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,0.,0.,open,open
 # lms_opt_02_nom_w4705_iso_alpha_pnh_n,nominal,4705,5.0,120,1,wcu_bb,1.,grid_lm,0.,0.32,0.,open,open
 # lms_opt_02_nom_w4705_iso_alpha_pnh_w,nominal,4705,5,120,1,wcu_bb,0.1,grid_lm,0.,0.,0.20,open,open
-lms_opt_02_nom_w4705_iso_lambda_bgd,nominal,4705,5,120,1,wcu_bb,0.1,open,0.,10.,10.,open,open
-lms_opt_02_nom_w4705_iso_lambda_sig_bs,nominal,4705,.01,5,1,wcu_lt,0.1,open,0.,0.,0.,open,open
 #

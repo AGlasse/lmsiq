@@ -23,7 +23,7 @@ from lmsdist_polyfit import PolyFit
 print('lmsdist, distortion model - Starting')
 _ = Globals()
 base_debug_level = 'low'
-Globals.debug_level = base_debug_level
+Globals.set_debug_level(base_debug_level)
 analysis_type = 'distortion'            # Used for file handling (types = 'iq', 'distortion' or 'sky'
 
 """ SET MODEL CONFIGURATION HERE """
@@ -64,27 +64,27 @@ if generate_transforms:
     # Select *.csv files
     file_list = listdir(zem_folder)
     file_list = [f for f in file_list if '.csv' in f]
+    if opticon == Globals.extended:
+        file_list = [f for f in file_list if 'in-band' in f]
 
     n_traces = len(file_list)
     offset_data_list = []
     traces = []
     a_rms_list = []
+    debug_once = Globals.is_debug('low')
 
     for cfg_id, file_name in enumerate(file_list):
-        print(file_name)
+        if Globals.is_debug('low'):
+            print('- reading Zemax model ray trace data file {:s}'.format(file_name))
         zf_file = zem_folder + file_name
         trace = RayTrace(cfg_id=cfg_id, silent=True)
         trace.load(zf_file, filer.model_configuration, do_plot=False)
         trace.find_wavelength_bounds()
-        # debug_first = False
         offset_data_list.append(trace.offset_data)
-        if Globals.is_debug('low'):
+        if debug_once:
             trace.plot_focal_planes()
-            trace.plot_fit_maps(plotdiffs=False, subset=True, field=True)
             trace.plot_fit_maps(plotdiffs=True, subset=True, field=True)
-            # Avoid plotting every time for 'low' debug setting
-            if Globals.debug_level in ['low', 'medium']:
-                Globals.debug_level = 'off'
+            debug_once = False
 
         fits_name = filer.write_svd_transforms(trace, do_plot=True)
         trace.transform_fits_name = fits_name
@@ -100,73 +100,66 @@ if generate_transforms:
 
 plot_dispersion = True
 if plot_dispersion:
-    first_plot = True
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
     traces = Filer.read_pickle(filer.trace_file)
     model_config = filer.model_configuration
-    # plot.series('nm_det', traces, model_config)
     if Globals.is_debug('low'):
         plot.series('dispersion', traces, model_config)
         plot.series('coverage', traces[0:1], model_config)
         plot.series('coverage', traces, model_config)
-        if Globals.debug_level in ['low', 'medium']:
-            Globals.debug_level = 'off'
-        Globals.debug_level = base_debug_level
 
 fit_transforms = True
-is_first = True
 if fit_transforms:
-    # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism angle
-    # is provided as a function of wavelength, reflecting the requirement that the target wavelength must be directed
-    # through the slit at the pre-disperser output (this is calculated for spatial slice number 13).
-    # For the extended mode, the fit directs spectral slice number 3 through the slit.
-    # _, opticon, _, _, _, _ = filer.model_configuration
+    # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism
+    # angle is calculated (first) as a function of wavelength, for echelle angle = 0, (the blaze angle).
+    # reflecting the requirement that the target wavelength must be directed through the curved slit at the
+    # pre-disperser output.  For the nominal mode, this is calculated for spatial slice number 'slice_no' 13).
+    # For the extended mode, it is for spectral slice number 'spifu_no' 3 and slice_no 13 through the slit.
 
-    # Generate and save a polynomial fit for the function pri_ang = prism_angle(wavelength).  This function
-    # is intended to return the prism angle which will map a wavelength to the centre of the mosaic (mfp_x = 0.)
-    # when the echelle angle is equal to zero.  We don't have complete ray trace data for ech_ang = 0, so we
-    # interpolate across available trace ech_ang values on a per order basis.  We also don't have sufficient ray trace
-    # data for the extended mode, so we use the nominal mode fit, which should be identical since the MSA comes after
-    # the pre-disperser.
-    opt_tag = 'ext'
-    if opticon == Globals.nominal:
-        opt_tag = 'nom'
-        all_boresights = []                         # All boresights, including non-zero echelle angles
-        boresight_waves, prism_angles = [], []      # Wavelength which passes through Int Foc Plane origin.
-        traces = Filer.read_pickle(filer.trace_file)
-        for trace in traces:
-            boresight = trace.get_ifp_boresight(opticon)
-            all_boresights.append(boresight)
-        all_boresights = np.array(all_boresights)        # Row content is wavelength, pri_ang, ech_ang, ech_ord
-        ech_orders = all_boresights[:, 3]
-        unique_ech_orders = np.unique(ech_orders)
-        for ech_order in unique_ech_orders:
-            idx = ech_orders == ech_order
-            order_boresight_waves = all_boresights[idx, 0]
-            order_prism_angles = all_boresights[idx, 1]
-            order_ech_angles = all_boresights[idx, 2]
-            ea_wave_fit = polyfit.create_polynomial_fit(order_ech_angles, order_boresight_waves, poly_order=3)
-            ea_wave_coeff = ea_wave_fit['wpa_opt']
-            boresight_wave = polyfit.poly_model(0., *ea_wave_coeff)     # Wavelength for ech_ang = 0.
-            boresight_waves.append(boresight_wave)
-            wave_pa_fit = polyfit.create_polynomial_fit(order_boresight_waves, order_prism_angles, poly_order=3)
-            wave_pa_coeff = wave_pa_fit['wpa_opt']
-            boresight_pa = polyfit.poly_model(boresight_wave, *wave_pa_coeff)
-            prism_angles.append(boresight_pa)
-        poly_order = Globals.wpa_fit_order[opticon]
-        wpa_fit  = polyfit.create_polynomial_fit(boresight_waves, prism_angles, poly_order=poly_order)
-        if Globals.is_debug('low'):
-            plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, boresight_waves, prism_angles)
-            is_first = False
-    else:
-        filer.set_configuration('distortion', Globals.nominal)
-        wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
-        print('Reading in ''nominal'' mode prism calibration for use in extended mode. ')
+    opt_tag = opticon[0: 3]
+    # if opticon == Globals.nominal:
+    #     opt_tag = 'nom'
+    all_boresights = []                         # All boresights, including non-zero echelle angles
+    traces = Filer.read_pickle(filer.trace_file)
+    for trace in traces:
+        boresight = trace.get_ifp_boresight(opticon)        # wave, pa, ea, eorder
+        all_boresights.append(boresight)
+    all_boresights = np.array(all_boresights)        # Row content is wavelength, pri_ang, ech_ang, ech_ord
+    ech_orders = all_boresights[:, 3]
+    unique_ech_orders = np.unique(ech_orders)
+
+    # We want to find pa = f(wave), which places the wave on the mosaic origin for ech_angle = 0.  We therefore
+    # select all boresights for a specific order (wavelength) and interpolate pa v ech_angle to find pa(ea=0).
+    ea_zero_waves, ea_zero_pas = [], []      # Wavelength which passes through the prism exit focal plane origin.
+    for ech_order in unique_ech_orders:
+        idx = ech_orders == ech_order
+        order_boresight_waves = all_boresights[idx, 0]
+        order_prism_angles = all_boresights[idx, 1]
+        order_ech_angles = all_boresights[idx, 2]
+        ea_wave_fit = polyfit.create_polynomial_fit(order_ech_angles, order_boresight_waves, poly_order=3)
+        ea_wave_coeff = ea_wave_fit['wpa_opt']
+        ea_zero_wave = polyfit.poly_model(0., *ea_wave_coeff)     # Wavelength for ech_ang = 0.
+        ea_zero_waves.append(ea_zero_wave)
+        wave_pa_fit = polyfit.create_polynomial_fit(order_boresight_waves, order_prism_angles, poly_order=3)
+        wave_pa_coeff = wave_pa_fit['wpa_opt']
+        ea_zero_pa = polyfit.poly_model(ea_zero_wave, *wave_pa_coeff)
+        ea_zero_pas.append(ea_zero_pa)
+    poly_order = Globals.wpa_fit_order[opticon]
+    wpa_fit  = polyfit.create_polynomial_fit(ea_zero_waves, ea_zero_pas, poly_order=poly_order)
+    if Globals.is_debug('low'):
+        plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, ea_zero_waves, ea_zero_pas,
+                                all_boresights)
+    filer.set_configuration('distortion', Globals.nominal)
+    # wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
+    # print('Reading in ''nominal'' mode prism calibration for use in extended mode. ')
+    # plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, ea_zero_waves, ea_zero_pas,
+    #                         all_boresights)
 
     # Create transform term fits and write to file.
     filer.set_configuration(analysis_type, opticon)
     svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
+    # wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
     wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
     filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
 
@@ -188,6 +181,7 @@ if evaluate_transforms:
     print(fmt.format('file name', '-', '-', '-', 'efp_w0',
                      'pri_ang', 'ech_ang', '|', 'mfp_x0', 'mfp_y0', '|', 'mfp_x0', 'mfp_y0', '|'))
     fmt = '{:45s},{:8d},{:8d},{:8d},{:10.3f},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s}'
+    debug_once = Globals.is_debug('low')
     for trace in traces:
         lms_config, wave_bs = None, None
         inc_tags = [trace.transform_fits_name]
@@ -216,9 +210,9 @@ if evaluate_transforms:
                     efp_y = trace.get_series('efp_y', slice_filter)
                     efp_points = {'efp_x': efp_x, 'efp_y': efp_y, 'efp_w': efp_w}
                     mfp_pts_sli_tform, _ = util.efp_to_mfp(slice_transform_zem, efp_points)
-                    det_x = trace.get_series('det_x', slice_filter)
-                    det_y = trace.get_series('det_y', slice_filter)
-                    mfp_pts_ray = {'mfp_x': det_x, 'mfp_y': det_y}
+                    mfp_x = trace.get_series('mfp_x', slice_filter)
+                    mfp_y = trace.get_series('mfp_y', slice_filter)
+                    mfp_pts_ray = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
                     mfp_plot_points['ray'].append(mfp_pts_ray)
                     mfp_plot_points['sli'].append(mfp_pts_sli_tform)
                     mfp_plot_points['slice_no'].append(slice_no)
@@ -245,26 +239,28 @@ if evaluate_transforms:
                     mfp_pts_fit_tform, _ = util.efp_to_mfp(slice_transform_fit, efp_points)
                     mfp_plot_points['fit'].append(mfp_pts_fit_tform)
 
-                    det_x_fit = mfp_pts_fit_tform['mfp_x']
-                    det_y_fit = mfp_pts_fit_tform['mfp_y']
+                    mfp_x_fit = mfp_pts_fit_tform['mfp_x']
+                    mfp_y_fit = mfp_pts_fit_tform['mfp_y']
                     wave_bs = np.mean(efp_w)
                     text = fmt.format(trace.transform_fits_name, slice_no, spifu_no, ech_ord, wave_bs,
-                                      pri_ang, ech_ang, '|', det_x[0], det_y[0], '|', det_x_fit[0], det_y_fit[0], '|'
+                                      pri_ang, ech_ang, '|', mfp_x[0], mfp_y[0], '|', mfp_x_fit[0], mfp_y_fit[0], '|'
                                       )
                     print(text)
 
-        do_plot = True
-        if do_plot:
+        if Globals.is_debug('low'):
             title = trace.get_plot_title()
             # theta_p = r'$\phi_{pri}$' + "={:6.3f}, ".format(lms_config['pri_ang'])
             # theta_e = r'$\psi_{ech}$' + "={:6.3f}, ".format(lms_config['ech_ang'])
             # wave_text = r'$\lambda_{bs}$' + "={:6.3f}, ".format(wave_bs) + r'$\mu$m'
             # title = theta_p + theta_e + wave_text
-            mfp_decorations = [('ray trace', 'red', 'o', 10.),
-                               ('slice transform', 'green', 'x', 6.),
-                               ('fit transform', 'blue', '+', 6.)]
-            Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=False, grid=False)
-            Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=True, grid=True)
+
+            if debug_once:
+                mfp_decorations = [('ray trace', 'red', 'o', 10.),
+                                   ('slice transform', 'green', 'x', 6.),
+                                   ('fit transform', 'blue', '+', 6.)]
+                Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=False, grid=False)
+                Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=True, grid=True)
+                debug_once = False
 
 test_transform_fit = True
 if test_transform_fit:

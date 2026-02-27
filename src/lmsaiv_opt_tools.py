@@ -57,7 +57,7 @@ class OptTools:
             fmt = "{:8d},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
 
             for i, hdu in enumerate(hdus):
-                el_adu = hdu.header['HIERARCH ESO DET3 CHIP GAIN']
+                el_adu = float(hdu.header['HIERARCH ESO DET3 CHIP GAIN'])
                 median = np.median(hdu.data)
                 stdev = np.std(hdu.data)
                 median_current = median * el_adu / dit

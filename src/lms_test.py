@@ -16,7 +16,7 @@ poly_file = '../output/lms_dist_poly_old.txt'
 # Define test point(s) (wavelength/um, alpha/as, beta/as)
 wave = 4.70
 alpha = 0.3
-fp2_x = alpha / Globals.efp_as_mm
+fp2_x = alpha / Globals.efp_arcsec_mm
 beta = 0.1
 slice = int(15 + 28 * beta / Globals.beta_fov)
 print("Slice= {:d}".format(slice))

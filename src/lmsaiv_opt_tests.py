@@ -9,8 +9,8 @@ class OptTests:
 
     optical_test = None
 
-    def __init__(self):
-        Filer.set_test_data_folder('scopesim')
+    def __init__(self, test_data_folder):
+        Filer.set_test_data_folder(test_data_folder)
         # Test dictionary, note that the key comprises 'data_source_' + 'analysis' (eg 'lms_opt_01_' + 'fov'.  This
         # supports the fact that an analysis project (Jupyter notebook) may use data from several tests.
         optical_test = {'lms_opt_01_fov': (Opt01.fov, 'Field of view and RSRF'),

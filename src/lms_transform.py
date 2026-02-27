@@ -1,4 +1,5 @@
 import pickle
+
 from astropy.io import fits
 from astropy.io.fits import Card
 import numpy as np
@@ -21,23 +22,25 @@ class Transform:
 
     def __init__(self, **kwargs):
         self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
-        self.lms_configuration = Globals.lms_config_template.copy()
-        self.slice_configuration = Globals.slice_config_template.copy()
-        if 'trace' in kwargs:               # Get transform from Trace object
-            trace = kwargs.get('trace')
-            for key in trace.lms_config:
-                self.lms_configuration[key] = trace.lms_config[key]
-            self.slice_configuration = kwargs.get('slice_config')
+        self.lms_configuration = kwargs.get('lms_config', Globals.lms_config_template.copy())
+        self.slice_configuration = kwargs.get('slice_config', Globals.slice_config_template.copy())
         if 'hdu_list' in kwargs:
             hdu_list = kwargs.get('hdu_list')
             ext_no = kwargs.get('ext_no')
             self.ingest_from_hdu_list(hdu_list, ext_no)
         if 'matrices' in kwargs:
             self.matrices = kwargs.get('matrices')
-            lms_config = kwargs.get('lms_config')
-            for key in lms_config:
-                self.lms_configuration[key] = lms_config[key]
-            self.slice_configuration = kwargs.get('slice_config')
+        return
+
+    def ingest_from_hdu_list(self, hdu_list, ext_no):
+        primary_hdr = hdu_list[0].header
+        self.lms_configuration = Globals.lms_config_template.copy()
+        for key in self.lms_configuration:          # Get slice 'common' parameters from primary header.
+            self.lms_configuration[key] = primary_hdr[key.upper()]
+        hdu = hdu_list[ext_no]
+        for key in self.slice_configuration:
+            self.slice_configuration[key] = hdu.header[key.upper()]
+        self.read_matrices(hdu.data)
         return
 
     def is_match(self, slice_filter):
@@ -81,16 +84,6 @@ class Transform:
         bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi],
                                                      header=hdr, name=hdu_name)
         return bintable_hdu
-
-    def ingest_from_hdu_list(self, hdu_list, ext_no):
-        primary_hdr = hdu_list[0].header
-        for key in self.lms_configuration:          # Get slice 'common' parameters from primary header.
-            self.lms_configuration[key] = primary_hdr[key.upper()]
-        hdu = hdu_list[ext_no]
-        for key in self.slice_configuration:
-            self.slice_configuration[key] = hdu.header[key.upper()]
-        self.read_matrices(hdu.data)
-        return
 
     def read_matrices(self, table):
         """ Read the transform matrices from a fits hdu table object.

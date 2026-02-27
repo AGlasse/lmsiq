@@ -28,57 +28,115 @@ class Opt01:
         """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
         map in the AsBuilt object
         """
-        inc_tags = ['lms_opt_01', 'nom_dark']
-        darks = Filer.read_mosaic_list(inc_tags)
-        # do_plot = kwargs.get('do_plot', True)
-        if Globals.is_debug('low'):
-            Plot.mosaic(darks[0], title=title)
-            Plot.histograms(darks[0])
-        OptTools.dark_stats(darks)
-
-        floods = Filer.read_mosaic_list(['lms_opt_01', 'flood'])
-        for flood in floods:
-            slice_map, profiles = Opt01.flood_stats(flood)
-            Opt01.print_inter_slice(slice_map)
+        for opticon in [Globals.extended]:      # , Globals.nominal]:
+            opticon_tag = opticon[0:3]
+            inc_tags = ['lms_opt_01', '_dark', opticon_tag]
+            darks = Filer.read_mosaic_list(inc_tags)
+            # do_plot = kwargs.get('do_plot', True)
             if Globals.is_debug('low'):
-                Plot.profiles(profiles)
-                Plot.mosaic(flood, title=title, cmap='hot')        # Use cmap='hot', 'gray' etc.
-                Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
-            as_built['slice_map'] = slice_map
+                Plot.mosaic(darks[0], title=title)
+                Plot.histograms(darks[0])
+            OptTools.dark_stats(darks)
 
-        # Generate relative response tuple.
-        cols = np.arange(0, 4096, 1)
-        for flood in floods:
-            slice_map = as_built['slice_map']
-            rrf = OptTools.copy_mosaic(slice_map, copy_name='rel_res_function')
-            rrf_name, rrf_primary_header, rrf_hdus = rrf
-            Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
-            name, primary_hdr, hdus = flood
-            wave_mosaic_cen = primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
-            _, _, slice_map_hdus = slice_map
-            for i in range(0, 4):
-                slice_map_data = slice_map_hdus[i].data
-                slice_mask = np.where(slice_map_data > 0., 1., 0.)
-                # Very approximate dispersion...!
-                hdr = hdus[i].header
-                flood_image = hdus[i].data
-                x_det_cen = float(hdr['X_CEN']) * u.mm
-                n_det_cols = float(hdr['X_SIZE'])
-                pix_size = hdr['HIERARCH pixel_size'] * u.mm
-                c_det_cen = x_det_cen / pix_size
-                c_det_org = c_det_cen - n_det_cols / 2
-                disp = .08 * u.micron / (2. * n_det_cols)
-                waves = wave_mosaic_cen + disp * (c_det_org + cols)
-                flux = Model.black_body(waves, tbb=1000.)
-                n_det_rows = int(hdr['Y_SIZE'])
-                rrf_image = rrf_hdus[i].data
-                for row in range(0, n_det_rows):
-                    idx = np.argwhere(slice_mask[row] > 0.)
-                    rrf_image[row, idx] = flood_image[row, idx] / flux[idx]
-                rrf_hdus[i].data = rrf_image
-            Plot.mosaic(rrf, title='Rel Response Function', cmap='grey', mask=(0.0, 'black'))
+            # Create slice map, encoded by slice number as N = slice_no + 100 x spifu_no
+            floods = Filer.read_mosaic_list(['lms_opt_01', 'flood', opticon_tag])
+            for flood in floods:
+                slice_map, profiles = Opt01.flood_stats(flood)
+                Opt01.print_inter_slice(slice_map)
+                if Globals.is_debug('low'):
+                    Plot.profiles(profiles)
+                    Plot.mosaic(flood, title=title, cmap='hot')        # Use cmap='hot', 'gray' etc.
+                    Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+                as_built['slice_map'] = slice_map
+
+            # Generate relative response tuple.
+            cols = np.arange(0, 4096, 1)
+            for flood in floods:
+                slice_map = as_built['slice_map']
+                rrf = OptTools.copy_mosaic(slice_map, copy_name='rel_res_function')
+                rrf_name, rrf_primary_header, rrf_hdus = rrf
+                Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+                name, primary_hdr, hdus = flood
+                wave_mosaic_cen = primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
+                _, _, slice_map_hdus = slice_map
+                for i in range(0, 4):
+                    slice_map_data = slice_map_hdus[i].data
+                    slice_mask = np.where(slice_map_data > 0., 1., 0.)
+                    # Very approximate dispersion...!
+                    hdr = hdus[i].header
+                    flood_image = hdus[i].data
+                    x_det_cen = float(hdr['X_CEN']) * u.mm
+                    n_det_cols = float(hdr['X_SIZE'])
+                    pix_size = hdr['HIERARCH pixel_size'] * u.mm
+                    c_det_cen = x_det_cen / pix_size
+                    c_det_org = c_det_cen - n_det_cols / 2
+                    disp = .08 * u.micron / (2. * n_det_cols)
+                    waves = wave_mosaic_cen + disp * (c_det_org + cols)
+                    flux = Model.black_body(waves, tbb=1000.)
+                    n_det_rows = int(hdr['Y_SIZE'])
+                    rrf_image = rrf_hdus[i].data
+                    for row in range(0, n_det_rows):
+                        idx = np.argwhere(slice_mask[row] > 0.)
+                        rrf_image[row, idx] = flood_image[row, idx] / flux[idx]
+                    rrf_hdus[i].data = rrf_image
+                Plot.mosaic(rrf, title='Rel Response Function', cmap='grey', mask=(0.0, 'black'))
         print('Done')
         return as_built
+
+    @staticmethod
+    def find_slices(mosaic):
+        """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
+        """
+        file_name, hdr, hdus = mosaic
+        opticon = hdr['HIERARCH ESO INS MODE']
+
+        # Set up slice map object to hold slice images
+        slice_map = OptTools.copy_mosaic(mosaic, clear_data=True, copy_name='slice_map')
+
+        u.arcsec2 = u.arcsec * u.arcsec
+
+        dark_pctile = 10.
+        bright_pctile = 90.         # Choose the bright pixel limit to avoid hot pixels.
+        alpha_cut = 0.5
+        print()
+        print("File = {:s}".format(file_name))
+        fmt = "Dark pixels are defined as those < {:.0f}th percentile signal level"
+        print(fmt.format(dark_pctile))
+        fmt = "Illuminated pixels defined as those brighter than the {:.0f}th percentile signal level"
+        print(fmt.format(bright_pctile))
+        fmt = "alpha extent of each slice defined as distance between {:3.2f} of bright level"
+        print(fmt.format(alpha_cut))
+        fmt = "Illuminated pixel x slice fov = {} x {} mas"
+        print(fmt.format(Globals.alpha_pix, Globals.beta_slice))
+        profile_cols = {1: [600, 800, 1000, 1200], 3: [600, 700, 800, 1200],
+                        2: [1000, 1800, 1900, 2000], 4: [1000, 1800, 1900, 2000]}
+
+        print()
+        fmt = "{:>10s},{:>10s},{:>10s},{:>10s}"
+        print(fmt.format('Detector', 'dark',  'bright',    'illum.'))
+        print(fmt.format('        ', 'level', 'level',        'fov'))
+        print(fmt.format('        ', 'DN',       'DN',  '[sq_asec]'))
+        fmt = "{:>10d},{:>10.2e},{:>10.2e},{:>10.3f}"
+
+        # Separate slices by finding cuts in d_signal / d_row
+        n_slices = 28 if '_nom_' in file_name else 3
+        n_spifus = 0 if '_nom_' in file_name else 6
+
+        profiles = []
+        alpha_det = [0.]*4
+        for hdu in hdus:
+            det_no = int(hdu.header['ID'])
+
+            det_idx = det_no - 1
+            slice_coords = {'det_no': det_no, 'slice_nos': [], 'cols': [], 'row_mins': [], 'row_maxs': []}
+
+            n_profiles = len(profile_cols[det_no])
+            dark_level, bright_level = 0., 0.           # Average signal cut levels for this detector
+            for pr_col in profile_cols[det_no]:
+                pr_col_hw = 2                           # Co-add 2 x pr_col_hw + 1 centred on pr_col.
+
+        return slice_map, profiles
+
 
     @staticmethod
     def flood_stats(mosaic):
@@ -206,7 +264,7 @@ class Opt01:
                 r1s = np.rint(np.polyval(row_min_fit, cs))
                 r2s = np.rint(np.polyval(row_max_fit, cs))
                 for c, r1, r2 in zip(cs, r1s, r2s):
-                    slice_map_hdu.data[int(r1):int(r2), int(c)] = slice_no
+                    slice_map_hdu.data[int(r1):int(r2), int(c)] = slice_no + 100 * spifu_no
             alpha_det[det_idx] /= n_profiles
             det_fov = alpha_det[det_idx] * Globals.beta_slice
             fmt = "{:>10d},{:>10.1f},{:>10.1f},{:>10.3f}"

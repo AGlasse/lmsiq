@@ -80,6 +80,7 @@ class Detector:
         image += shot
         read = rng.normal(loc=0., scale=Detector.rnoise, size=det_shape)
         image += read
+        # print('Det.detect')
         return image
 
     @staticmethod

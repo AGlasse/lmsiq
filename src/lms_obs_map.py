@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Map observations taken (simulated or taken during AIV) against data files.  Used to set up simulations (in 'lmssim')
-and also for analysis scripts (in 'lmsopt').
+and also for analysis scripts (in 'lmsaiv').
 """
 from lms_globals import Globals
 
@@ -43,7 +43,7 @@ class ObsMap:
                 sim_config[cfg_id] = obs_cfg
 
         if not in_csv_file:
-            print("!! Test {:s} not found in csv file".format(test_name))
+            print("!! Test {:s} not found in csv file {:s}".format(test_name, cfg_path))
             return None
         return sim_config
 

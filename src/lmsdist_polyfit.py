@@ -101,17 +101,19 @@ class PolyFit:
                                                               spifu_no=spifu_no)
                 term_values = Util.get_term_values(slice_transforms, slice_no, spifu_no)
                 term_fit = PolyFit.find_slice_fit(term_values)
-                if plot_terms:
+                baseline_debug_level = Globals.debug_level
+                if Globals.is_debug('medium'):
                     Plot.transform_fit(term_fit, term_values, surface_model, do_plots=True)
                     Plot.transform_fit(term_fit, term_values, surface_model, do_plots=True, plot_residuals=True)
-                    plot_terms = False
+                    Globals.set_debug_level(baseline_debug_level)
                 term_fits.append([slice_no, spifu_no, term_fit])
                 slice_fits[slice_no] = term_fit
                 if slice_no == 13:
                     wxo_fit = PolyFit.find_wxo_fit(term_values, Globals.surface_fit_order)
-                    if plot_wxo:
+                    if Globals.is_debug('medium'):
                         Plot.wxo_fit(wxo_fit, term_values, surface_model, plot_residuals=False)
                         Plot.wxo_fit(wxo_fit, term_values, surface_model, plot_residuals=True)
+                        Globals.set_debug_level(baseline_debug_level)
         wxo_header = PolyFit.make_surface_model_header(wxo_fit['order'])
         return wxo_fit, wxo_header, term_fits
 
@@ -226,12 +228,17 @@ class PolyFit:
                 matrix[i, j] = PolyFit.surface_model((pa, ea), *fit_terms)
         return matrix
 
-    @staticmethod
-    def make_slice_transforms(lms_config, term_fits):
-        slice_transforms = []
-
-
-        return slice_transforms
+    # @staticmethod
+    # def make_slice_transforms(lms_config, term_fits):
+    #     slice_transforms = []
+    #     for term_fit in term_fits:
+    #
+    #
+    #
+    #
+    #
+    #
+    #     return slice_transforms
 
     @staticmethod
     def make_fit_transform(cfg, term_fit):

@@ -48,12 +48,11 @@ class Filer:
         return hdu_list
 
     @staticmethod
-    def write_zemax_fits(path, header, hdu):
+    def write_zemax_fits(path, header, img_hdu):
         """ Write a Zemax image into the primary extension of a new fits file.
         """
-        primary_hdu = PrimaryHDU(header=header)
-        hdu_list = HDUList([primary_hdu])
-        hdu_list[0] = hdu
+        pri_hdu = PrimaryHDU(header=header, data=img_hdu)
+        hdu_list = HDUList([pri_hdu])
         hdu_list.writeto(path, overwrite=True, checksum=True)
         return
 
@@ -120,7 +119,7 @@ class Filer:
 
     @staticmethod
     def set_test_data_folder(simulator_name):
-        Filer.test_data_folder = "../data/test_{:s}".format(simulator_name)
+        Filer.test_data_folder = "../data/{:s}".format(simulator_name)
         return
 
     @staticmethod
@@ -141,6 +140,30 @@ class Filer:
             if not os.path.exists(out_path):
                 os.mkdir(out_path)
         return out_path
+
+    @staticmethod
+    def read_pinholes(file_name, xy_filter=(0.5, 1.0)):
+        path = './inst_pkgs/METIS/wcu/' + file_name + '.dat'
+        efp_xy_list = []
+        if Globals.is_debug('high'):
+            print('Reading pinhole mask from {:s}'.format(file_name))
+        with open(path, 'r') as text_file:
+            records = text_file.read().splitlines()
+            for record in records:
+                if Globals.is_debug('high'):
+                    print(record)
+                if '#' in record:  # Skip comment lines
+                    continue
+                if 'x' in record:  # Skip column label line
+                    continue
+                tokens = record.split()
+                if len(tokens) < 2: continue
+                efp_x = float(tokens[0])
+                efp_y = float(tokens[1])
+                if (abs(efp_x) < xy_filter[0] and abs(efp_y) < xy_filter[1]):
+                    efp_xy_list.append([efp_x, efp_y])
+        return efp_xy_list
+
 
     def write_fit_parameters(self, wpa_fit, wxo_fit, wxo_hdr, term_fits):
 

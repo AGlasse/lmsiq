@@ -20,25 +20,45 @@ from lms_transform import Transform
 class RayTrace:
 
     # Configuration dicts.  Note lms_config is instantiated from Globals.
-    series_names = {'ech_ord': 'int', 'slice_no': 'int', 'sp_slice': 'int',
-                    'slicer_x': 'float', 'slicer_y': 'float',
-                    'ifu_x': 'float', 'ifu_y': 'float'}
-    nominal_efp_map = {'efp_x': 'fp2_x', 'efp_y': 'fp2_y'}
-    nominal_series_names = {'slit_x': 'float', 'slit_y': 'float'}
-    spifu_efp_map = {'efp_x': 'fp1_x', 'efp_y': 'fp1_y'}
-    spifu_series_names = {'sp_slicer_x': 'float', 'sp_slicer_y': 'float',
-                          'chief_ray_vignetted?': 'float'}
+    series_fmt = {'ech_ord': 'int', 'slice_no': 'int', 'spifu_no': 'int',
+                  'wavelength': 'float',
+                  'efp_x': 'float', 'efp_y': 'float',
+                  'slicer_x': 'float', 'slicer_y': 'float',
+                  'sp_slicer_x': 'float', 'sp_slicer_y': 'float',
+                  'ifu_x': 'float', 'ifu_y': 'float',
+                  'slit_x': 'float', 'slit_y': 'float',
+                  'mfp_x': 'float', 'mfp_y': 'float',
+                  'cf_vig': 'float'}
 
+    nom_csv_map = {'sp_slice': 'spifu_no', 'order': 'ech_ord',
+                   'slice': 'slice_no', 'wavelength': 'wavelength',
+                   'fp2_x': 'efp_x',  'fp2_y': 'efp_y',
+                   'slicer_x': 'slicer_x', 'slicer_y': 'slicer_y',
+                   'ifu_x': 'ifu_x', 'ifu_y': 'ifu_y',
+                   'slit_x': 'slit_x', 'slit_y': 'slit_y',
+                   'det_x': 'mfp_x', 'det_y': 'mfp_y',
+                   'chief_ray_vignetted?': 'cf_vig'
+                  }
+
+    ext_csv_map = {'sp_slice': 'spifu_no', 'order': 'ech_ord',
+                   'slice': 'slice_no', 'wavelength': 'wavelength',
+                   'fp1_x': 'efp_x', 'fp1_y': 'efp_y',
+                   'slicer_x': 'slicer_x', 'slicer_y': 'slicer_y',
+                   'ifu_x': 'ifu_x', 'ifu_y': 'ifu_y',
+                   'sp_slicer_x': 'sp_slicer_x', 'sp_slicer_y': 'sp_slicer_y',
+                   'det_x': 'mfp_x', 'det_y': 'mfp_y',
+                   'chief_ray_vignetted?': 'cf_vig'
+                   }
     nominal_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
                             'Slicer': ('slicer_x', 'slicer_y'),
                             'IFU': ('ifu_x', 'ifu_y'),
                             'Slit': ('slit_x', 'slit_y'),
-                            'Detector': ('det_x', 'det_y')}
+                            'Det. mosaic': ('mfp_x', 'mfp_y')}
     spifu_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
                           'Slicer': ('slicer_x', 'slicer_y'),
                           'IFU': ('ifu_x', 'ifu_y'),
                           'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
-                          'Detector': ('det_x', 'det_y')}
+                          'Det. mosaic': ('mfp_x', 'mfp_y')}
     cfg_tags, cfg_id_counter = [], 0
 
     affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
@@ -77,26 +97,15 @@ class RayTrace:
         self.a_rms = 0.                          # RMS transform error for trace (microns)
         self.n_mat_terms = None
         silent = kwargs.get('silent', False)
-        if not silent:
-            print('Reading Zemax model data from ' + path)
         csv_name, lms_config, series = self._read_csv(path, model_config)
-        lms_config['opticon'] = opticon
         self.lms_config = lms_config
-
-        # For SPIFU data, spifu slices 1,2 -> echelle order 23, 3,4 _> 24, 5,6 -> 25
-        if self.is_extended:
-            spifus = series['sp_slice']
-            spifu_indices = spifus - 1
-            ech_ords = spifu_indices // 2 + 23
-            series['ech_ord'] = ech_ords
-        self.series = series
 
         # Count the number of slices and rays
         ech_ords = series['ech_ord']
         self.unique_ech_ords = np.unique(ech_ords)
         slice_nos = series['slice_no']
         self.unique_slices = np.unique(slice_nos)
-        spifus = series['sp_slice']
+        spifus = series['spifu_no']
         self.unique_spifu_slices = np.unique(spifus)
         waves = series['wavelength']
 
@@ -177,9 +186,10 @@ class RayTrace:
         where the boresight is defined as having a detector mosaic x coordinate = 0.
         """
         spifu_no = 0 if opticon == Globals.nominal else 3
+        # In extended mode there are 3 echelle orders in each trace, with spifu_no = 3 using the 'middle' order.
         ech_ord = self.unique_ech_ords[0] if opticon == Globals.nominal else self.unique_ech_ords[1]
         slice_filter = {'slice_no': 13, 'spifu_no': spifu_no, 'ech_ord': ech_ord}
-        mfp_x = self.get_series('det_x', slice_filter)
+        mfp_x = self.get_series('mfp_x', slice_filter)
         waves = self.get_series('wavelength', slice_filter)
         wave_bs = np.interp(0.0, mfp_x, waves)     # Find wavelength where 'det_x' (== mfp_x) == 0.
         boresight = wave_bs, self.lms_config['pri_ang'], self.lms_config['ech_ang'], ech_ord
@@ -199,7 +209,7 @@ class RayTrace:
             for slice_no in self.unique_slices:
                 for ech_ord in self.unique_ech_ords:
                     slice_config = {'slice_no': slice_no, 'spifu_no': spifu_no, 'ech_ord':ech_ord}
-                    transform = Transform(trace=self, slice_config=slice_config)
+                    transform = Transform(lms_config=self.lms_config, slice_config=slice_config)
                     waves = self.get_series('wavelength', slice_config)
                     if len(waves) < 1:      # This happens for mismatched spectral slice and echelle order.
                         continue
@@ -235,7 +245,6 @@ class RayTrace:
                         self.plot_scatter(transform, rays, plot_correction=True, tlin1=tlin1)
                         is_first = False
                     self.transforms.append(transform)
-
         a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
         self.a_rms = a_rms
         return
@@ -250,7 +259,7 @@ class RayTrace:
         a = self.series[tag]
         slice_nos = self.series['slice_no']
         slice_no_mask = slice_nos == slice_no
-        spifu_slices = self.series['sp_slice']
+        spifu_slices = self.series['spifu_no']
         spifu_no_mask = spifu_slices == spifu_no
         mask = np.logical_and(slice_no_mask, spifu_no_mask)
         if ech_ord is not None:
@@ -300,12 +309,12 @@ class RayTrace:
             efp_x = self.get_series('efp_x', slice_filter)
             efp_y = self.get_series('efp_y', slice_filter)
             efp_w = self.get_series('wavelength', slice_filter)
-            det_x = self.get_series('det_x', slice_filter)
-            det_y = self.get_series('det_y', slice_filter)
+            mfp_x = self.get_series('mfp_x', slice_filter)
+            mfp_y = self.get_series('mfp_y', slice_filter)
             efp_points = {'efp_x': np.array(efp_x), 'efp_y': np.array(efp_y), 'efp_w': np.array(efp_w)}
             mfp_fit_points, oob = Util.efp_to_mfp(transform, efp_points)
             det_x_fit, det_y_fit = mfp_fit_points['mfp_x'], mfp_fit_points['mfp_y']
-            u, v = det_x - det_x_fit, det_y - det_y_fit
+            u, v = mfp_x - det_x_fit, mfp_y - det_y_fit
             q = ax.quiver(det_x_fit, det_y_fit, u, v,
                           angles='xy', scale_units='xy', scale=.001,
                           width=0.001)
@@ -456,7 +465,7 @@ class RayTrace:
             return
 
         fp_plot_mask = {'LMS EFP': False, 'Slicer': False, 'IFU': False,
-                        'Slit': True, 'SP slicer': True, 'Detector': True}
+                        'Slit': True, 'SP slicer': True, 'Det. mosaic': True}
         focal_planes = RayTrace.spifu_focal_planes if self.is_extended else RayTrace.nominal_focal_planes
 
         n_focal_planes = len(focal_planes)
@@ -494,87 +503,68 @@ class RayTrace:
         """ Read trace data in from csv file pointed to by path
         :return:
         """
-        _, _, _, _, coord_in, coord_out = model_config
+        nom_echelle_order = None
+        nom_spifu_no = 0
+        _, opticon, _, _, coord_in, coord_out = model_config
+        csv_map = RayTrace.nom_csv_map if opticon == Globals.nominal else RayTrace.ext_csv_map
+        series = {}
+        for csv_name in csv_map:
+            series_name = csv_map[csv_name]
+            series[series_name] = []
+
         csv_name = path.split('/')[-1]
-        # name = csv_name.split('.')[0]
         with open(path, 'r') as text_file:
             read_data = text_file.read()
         line_list = read_data.split('\n')
         line_iter = iter(line_list)
 
-        # Read configuration parameters
-        efp_map = RayTrace.spifu_efp_map if self.is_extended else RayTrace.nominal_efp_map
-        efp_x_name = efp_map['efp_x']
-        efp_y_name = efp_map['efp_y']
         lms_config = Globals.lms_config_template.copy()
+        lms_config['opticon'] = opticon
+        # Read column names and create column indices
+        csv_col_list = {}
         while True:
             line = next(line_iter)
             tokens = line.split(':')
             if len(tokens) < 2:
                 break
+
             par_to_lms = {'Echelle angle': 'ech_ang',
-                          'Prism angle': 'pri_ang'}
+                          'Prism angle': 'pri_ang',
+                          'Spectral order': 'null'}
             parameter = tokens[0].strip()
             val = float(tokens[1].strip(', '))
             if parameter in par_to_lms.keys():
+                if parameter == 'Spectral order':       # Single value per csv file for nominal data (only)
+                    nom_ech_order = val                 # The spectral order is written as a series array
+                    continue
                 lms_name = par_to_lms[parameter]
                 lms_config[lms_name] = val
-            if parameter == 'Spectral order':
-                ech_order = val
-        if self.is_extended:            # For SPIFU data, the order is currently calculated from the spifu slice number.
-            ech_order = -1
 
         # Create dictionary of data series, include echelle order, slice, spifu_slice, wavelength, and input and output
         # focal planes.
         line = next(line_iter)
         tokens = line.split(',')
-        zem_column = {}         # Dictionary to map zemax column names to column index and series name
-
         for i, token in enumerate(tokens):
-            zem_tag = token.strip()
-            ser_tag = zem_tag
-            if ser_tag == efp_x_name:
-                ser_tag = 'efp_x'
-            if ser_tag == efp_y_name:
-                ser_tag = 'efp_y'
-            if ser_tag == 'slice':
-                ser_tag = 'slice_no'
-            zem_column[ser_tag] = i, zem_tag
+            csv_col_list[token.strip()] = i
 
-        series_names = RayTrace.series_names
-        if self.is_extended:
-            series_names.update(RayTrace.spifu_series_names)
-        else:
-            series_names.update(RayTrace.nominal_series_names)
-
-        fp_list = coord_in + coord_out
-        for key in fp_list:
-            series_names[key] = 'float'
-        series = {}
-        for name in series_names:
-            series[name] = []
-        series['ech_ord'] = []    # Add explicitly, since it changes within the csv file for extended data.
         while True:
             line = next(line_iter)
             tokens = line.split(',')
             if len(tokens) < 2:
                 break
-            for name in series_names:
-                if name == 'ech_ord':         # Assign spectral IFU orders later
-                    val = 0 if self.is_extended else ech_order
-                    series[name].append(val)
-                    continue
-                if name == 'sp_slice':
-                    val = 0
-                    if self.is_extended:
-                        zem_col, zem_tag = zem_column[name]
-                        val = int(tokens[zem_col])
-                    series[name].append(val)      # Default for nominal configuration
-                    continue
-                zem_col, zem_name = zem_column[name]
-                fmt = series_names[name]
+
+            if opticon == Globals.nominal:
+                series['spifu_no'].append(nom_spifu_no)      # Trap special cases
+                series['ech_ord'].append(nom_ech_order)
+                series['cf_vig'].append(0.00)
+
+            for csv_name in csv_col_list:
+                col_idx = csv_col_list[csv_name]
+                token = tokens[col_idx].strip()
+                series_name = csv_map[csv_name]
+
+                fmt = RayTrace.series_fmt[series_name]
                 val = None
-                token = tokens[zem_col]
                 match fmt:
                     case 'float':
                         val = float(token)
@@ -582,12 +572,14 @@ class RayTrace:
                         val = int(token)
                     case _:
                         print("Un-supported format {:s} for token {:s}".format(fmt, token))
-                series[name].append(val)
+                series[series_name].append(val)
+
         # Convert series lists to numpy arrays
-        int_arrays = ['ech_ord', 'slice', 'spifu_slice']
+        int_arrays = ['ech_ord', 'slice_no', 'spifu_no']
         for name in series:
             vals = series[name]
             series[name] = np.array(vals, dtype=int) if name in int_arrays else np.array(vals)
+        self.series = series
         return csv_name, lms_config, series
 
     def _create_mask(self, silent):
@@ -597,8 +589,8 @@ class RayTrace:
         xy_bounds = {'BL': [-xy_f, -xy_n, -xy_f, -xy_n], 'TL': [-xy_f, -xy_n,  xy_n,  xy_f],
                      'BR': [xy_n,  xy_f, -xy_f, -xy_n], 'TR': [xy_n,  xy_f,  xy_n,  xy_f]}
         self.xy_bounds = xy_bounds
-        x = self.series['det_x']
-        y = self.series['det_y']
+        x = self.series['mfp_x']
+        y = self.series['mfp_y']
 
         n_pts = len(x)
         mask = np.zeros(n_pts, dtype='int')	    # >0 = Ray hits a detector
@@ -613,14 +605,14 @@ class RayTrace:
             idx_in = np.where(np.logical_and(idx_in_x, idx_in_y))
             mask[idx_in] = det_no + 1
         n_hits = np.count_nonzero(mask)
-        if not silent:
+        if Globals.is_debug('medium'):
             fmt = 'Rays hitting any detector = {:10d} / {:10d}'
             print(fmt.format(n_hits, n_pts))
         self.series['mask'] = mask
         return
 
     def _apply_masks(self, rgb):
-        palette = {'chief_ray_vignetted?': ([1., 0., 1.], '!='),
+        palette = {'cf_vig': ([1., 0., 1.], '!='),
                    'mask': ([.3, .3, .3], '==')}
 
         for pal in palette:

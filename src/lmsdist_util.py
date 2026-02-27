@@ -444,49 +444,51 @@ class Util:
         bs_transform = None
         w_off_min = 1000.*u.nm
         for svd_transform in svd_transforms:
-            config = svd_transform.configuration
-            slice_no = config['slice_no']
+            slice_config = svd_transform.slice_configuration
+            slice_no = slice_config['slice_no']
             if slice_no != 13:
                 continue
-            spifu_no = config['spifu_no']
+            spifu_no = slice_config['spifu_no']
             if spifu_no > 1:        # Catches both nominal and spifu configurations
                 continue
-            w_min, w_max = config['w_min']*u.micron, config['w_max']*u.micron
+            w_min, w_max = slice_config['w_min']*u.micron, slice_config['w_max']*u.micron
             w_off = abs(0.5 * (w_max + w_min) - wave)
             if w_off <= w_off_min:
                 bs_transform = svd_transform
                 w_off_min = w_off
 
         # Step 2, select all transforms with same configuration as the boresight. For spifu, use optimum order
-        bs_cfg = bs_transform.configuration
-        opt_cfg_id = bs_cfg['cfg_id']
+        bs_lms_cfg = bs_transform.lms_configuration
         opt_transforms = {}
         ech_ords = []             # List of unique echelle orders in optimum transforms
         for svd_transform in svd_transforms:
-            cfg = svd_transform.configuration
-            if cfg['cfg_id'] != opt_cfg_id:
+            lms_cfg = svd_transform.lms_configuration
+            is_match = True
+            for key in bs_lms_cfg:
+                is_match = is_match and bs_lms_cfg[key] == lms_cfg[key]
+            if not is_match:
                 continue
-            ech_ord = cfg['ech_ord']
+            slice_cfg = svd_transform.slice_configuration
+            ech_ord = slice_cfg['ech_ord']
             # Option to only use specific orders for specific spifu_slices
             spec_order = False
             if spec_order:
                 if opticon == Globals.extended:
-                    spifu_no = cfg['spifu_no']
+                    spifu_no = slice_cfg['spifu_no']
                     spifu_slice = {23: (1, 4), 24: (2, 5), 25: (3, 6)}
                     valid_spifu_nos = spifu_slice[ech_ord]
                     if spifu_no not in valid_spifu_nos:
                         continue
             if ech_ord not in ech_ords:
                 ech_ords.append(ech_ord)
-            slice_no = cfg['slice_no']
-            spifu_no = cfg['spifu_no']
-            slice_id = Globals.slice_id_fmt.format(opticon, opt_cfg_id, ech_ord, slice_no, spifu_no)
-            # print('Adding slice_id= ', slice_id)
+            slice_no = slice_cfg['slice_no']
+            spifu_no = slice_cfg['spifu_no']
+            slice_id = Globals.slice_id_fmt.format(opticon, ech_ord, slice_no, spifu_no)
             opt_transforms[slice_id] = svd_transform
         return opt_transforms, ech_ords
 
     @staticmethod
-    def out_of_bounds(fp_id, x, y):       # Check if out of bounds
+    def out_of_bounds(fp_id, x, y):             # Check if out of bounds
         bounds = Globals.fp_bounds[fp_id]
         x1, x2, y1, y2 = bounds
         in_x = np.any(np.logical_and(np.less(x1, x), np.greater(x2, x)))
@@ -499,7 +501,7 @@ class Util:
         """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
         a fraction of the slice width.
         """
-        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_as_mm
+        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_arcsec_mm
         n_slices = Globals.n_lms_slices
         y_s = efp_y / efp_slice_width
         slice_coord = n_slices // 2 + y_s
@@ -511,7 +513,7 @@ class Util:
     def slice_to_efp_y(slice_no, phase):
         """ Return the EFP y coordinate of the slice centre (in mm).
         """
-        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_as_mm
+        efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_arcsec_mm
         n_slices = Globals.n_lms_slices
         slice = slice_no + phase
         efp_y = (slice - n_slices // 2) * efp_slice_width
@@ -735,8 +737,9 @@ class Util:
             if abs(w[k]) >= svd_cutoff:
                 wp[k, k] = 1.0 / w[k]
             else:
-                if w[k] > 1.0e-16:
-                    print("!! Clipping singular value = {:5.3e} !!".format(w[k]))
+                if Globals.is_debug('medium'):
+                    if w[k] > 1.0e-16:
+                        print("!! Clipping singular value = {:5.3e} !!".format(w[k]))
         a = xo @ u.T @ wp @ v.T     # (Was wp.T, but wp is square diagonal)
         amat = np.reshape(a, (dim, dim))
         b = yo @ u.T @ wp @ v.T
@@ -767,7 +770,7 @@ class Util:
         efp_ws = np.linspace(w_min, w_max, n_pts)
         efp_ys = np.zeros(n_pts)  # EFP across slice coordinate
         efp_fs = np.zeros(n_pts)  # Flux values
-        efp_as_mm = Globals.efp_as_mm
+        efp_as_mm = Globals.efp_arcsec_mm
         alpha_fov = Globals.alpha_fov
         efp_xmax = alpha_fov / efp_as_mm
         xh = efp_xmax / 2.

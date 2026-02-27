@@ -29,6 +29,7 @@ class Globals:
 
     # Simulators
     scopesim_id, toysim_id = 'scopesim', 'toysim'
+    sim_id = None
     # Convert from scope sim detector number (hdu.header['ID'] to mosaic data list index.)
     mos_idx = {2: 0, 1: 1, 3: 2, 4: 3}
 
@@ -36,7 +37,7 @@ class Globals:
     nominal = 'nominal'
     extended = 'extended'
     coord_in = 'efp_x', 'efp_y', 'wavelength'
-    coord_out = 'det_x', 'det_y'
+    coord_out = 'mfp_x', 'mfp_y'
 
     # Zemax data descriptors
     dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
@@ -74,11 +75,11 @@ class Globals:
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
 
-    slice_id_fmt = "{:s}_{:d}_{:d}_{:02d}_{:d}"        # Define transforms by opticon, ech_ord, slice_no, spifu_no
+    slice_id_fmt = "{:s}_{:d}_{:02d}_{:d}"        # Define transforms by opticon, ech_ord, slice_no, spifu_no
 
     # Plate scale at the entrance focal plane.  Defined in LB email 14/11/24 (in ../docs/lb_ps_131124.txt)
     # as efp_as_mm = 350.06 / 1937 = 0.180723
-    efp_as_mm = 0.180723 * u.arcsec / u.mm
+    efp_arcsec_mm = 0.180723 * u.arcsec / u.mm
 
     # Plate scale at detector
     alpha_pix = 8.7 * u.mas                                   #
@@ -89,8 +90,8 @@ class Globals:
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov = 0.897 * u.arcsec
     beta_fov = beta_slice.to(u.arcsec) * 28
-    efp_x_fov_mm = alpha_fov / efp_as_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
-    efp_y_fov_mm = beta_fov / efp_as_mm
+    efp_x_fov_mm = alpha_fov / efp_arcsec_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
+    efp_y_fov_mm = beta_fov / efp_arcsec_mm
 
     # Diffraction grating parameters
     blaze_angle = 51.23                                     # Echelle blaze angle (deg)

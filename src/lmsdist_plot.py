@@ -6,7 +6,6 @@
 import math
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from lms_globals import Globals
 
 
@@ -120,18 +119,13 @@ class Plot:
         return rgb
 
     @staticmethod
-    def wave_v_prism_angle(wpa_fit, wpa_model, wave_boresights, prism_angles, differential=False):
+    def wave_v_prism_angle(wpa_fit, wpa_model, ea_zero_waves, ea_zero_pas, all_boresights,
+                           differential=False, echelle_angles=False):
         """ Plot fit of prism angle to wavelength compared with the trace data it is derived from.
         """
-        x, y = np.array(wave_boresights), np.array(prism_angles)
-        if differential:
-            dp = y[1:] - y[:-1]
-            dw = x[1:] - x[:-1]
-            x = x[1:]
-            y = dp / dw
+        x, y = np.array(ea_zero_waves), np.array(ea_zero_pas)
 
-        fig, [ax1, ax2] = plt.subplots(figsize=(12, 8), ncols=1, nrows=2,
-                                       sharex=True)
+        fig, [ax1, ax2] = plt.subplots(figsize=(12, 8), ncols=1, nrows=2, sharex=True)
         ylabel = 'Prism rotation sensitivity micron / deg' if differential else 'Prism rotation angle / deg'
         xlabel = "Wavelength / " + r'$\mu$m'
 
@@ -145,22 +139,28 @@ class Plot:
             form_text += "{:+6.3f}{:s}".format(coeff, lam_text) # + plus_text
             lam_text = r'$\lambda$'
 
-        title1 = 'Prism dispersion data and best fit' + form_text
+        title1 = 'Prism wavelength best fit' + form_text
         ax1.set_title(title1, loc='left')
         ax1.set_ylabel(ylabel)
         ax1.plot(x, y, color='blue', clip_on=True,
-                 fillstyle='full', marker='+', ms=5., linestyle='None')
-        if not differential:
-            ax1.plot(x, y_fit, color='black', clip_on=True, lw=1., linestyle='solid')
+                 fillstyle='none', marker='o', mew=2., ms=10., linestyle='None')
+        ax1.plot(x, y_fit, color='blue', clip_on=True, lw=2., linestyle='solid')
+        if echelle_angles:
+            ech_orders = all_boresights[:, 3]
+            for ech_order in np.unique(all_boresights[:, 3]):
+                idx = ech_orders == ech_order
+                x_bs = all_boresights[idx, 0]
+                y_bs = all_boresights[idx, 1] + all_boresights[idx, 2]
+                ax1.plot(x_bs, y_bs, marker='o', fillstyle='full', color='green', ms=2., linestyle='solid')
+
         ax1.grid(True)
 
         ax2.set_title('Residual (data - fit)', loc='left')
         ax2.set_xlabel(xlabel)
         ax2.set_ylabel(ylabel)
-        y_residual = y - y_fit
-        ax2.plot(x, y_residual, color='blue', clip_on=True,
-                 fillstyle='full', marker='+', ms=5., linestyle='None')
-
+        dy = y - y_fit
+        ax2.plot(x, dy, color = 'blue', clip_on = True,
+                 fillstyle = 'none', marker = 'o', mew = 2., ms = 10., linestyle = 'None')
         ax2.grid(True)
         plt.show()
         return
@@ -415,8 +415,8 @@ class Plot:
                     cfg[key] = slice_config[key]
                 # cfg['opticon'] = opticon
                 waves = trace.get_series('wavelength', cfg)
-                det_x = trace.get_series('det_x', cfg)
-                det_y = trace.get_series('det_y', cfg)
+                mfp_x = trace.get_series('mfp_x', cfg)
+                mfp_y = trace.get_series('mfp_y', cfg)
                 if colour_by == 'slice_wave':
                     rgb = Plot.make_rgb_gradient(waves)
                 if colour_by == 'slice':
@@ -428,7 +428,7 @@ class Plot:
                 x, y = None, None
                 if plot_type == 'coverage':
                     x = waves
-                    y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * det_y
+                    y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * mfp_y
                 nm_micron = 1000.0
                 if plot_type == 'nm_det':
                     x = waves
@@ -437,7 +437,7 @@ class Plot:
                     y = np.full(waves.shape, dw)
                 if plot_type == 'dispersion':
                     mm_pix = Globals.nom_pix_pitch / 1000.
-                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (det_x[1:] - det_x[:-1])  # nm / pix
+                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (mfp_x[1:] - mfp_x[:-1])  # nm / pix
                     x = waves[1:]
                     y = dw_dlmspix
 
