@@ -15,15 +15,14 @@ class OptTools:
     @staticmethod
     def copy_mosaic(mosaic, clear_data=False, copy_name=''):
         file_name, hdr, hdus = mosaic
-        moscopy_hdus, moscopy_hdr = [], None
+        moscopy_hdus = []
         for hdu in hdus:
-            moscopy_hdr = copy.deepcopy(hdu.header)
             moscopy_hdu = hdu.copy()
             if clear_data is not None:
                 moscopy_hdu.data *= 0.
             moscopy_hdus.append(moscopy_hdu)
         moscopy_name = file_name if copy_name == '' else copy_name
-        moscopy = moscopy_name, moscopy_hdr, moscopy_hdus
+        moscopy = moscopy_name, hdr, moscopy_hdus
         return moscopy
 
     @staticmethod

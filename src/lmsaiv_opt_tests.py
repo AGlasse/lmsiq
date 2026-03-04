@@ -24,7 +24,6 @@ class OptTests:
     def __str__(self):
         text = 'Valid analysis methods, \n'
         for cap_name in OptTests.optical_test:
-
             test = OptTests.optical_test[cap_name]
             text += "{:<20s},{:<20s} \n".format(cap_name, test[1])
         return text

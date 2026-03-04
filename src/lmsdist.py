@@ -11,6 +11,7 @@ DFP_y, along row position
 """
 import numpy as np
 from os import listdir
+
 from lms_filer import Filer
 from lmsdist_util import Util
 from lmsdist_plot import Plot
@@ -28,6 +29,7 @@ analysis_type = 'distortion'            # Used for file handling (types = 'iq', 
 
 """ SET MODEL CONFIGURATION HERE """
 opticon = Globals.extended                     # 'nominal' or 'extended'
+use_nominal_wpa_fit = True                      # Use the nominal fit to prism angle v wavelength
 
 filer = Filer()
 filer.set_configuration(analysis_type, opticon)
@@ -54,7 +56,7 @@ n_terms, poly_order = run_config
 st_hdr = "Trace individual"
 rt_text_block = ''
 
-generate_transforms = True
+generate_transforms = False
 if generate_transforms:
     print()
     print("Generating distortion transforms (and prism angle fit parameters)")
@@ -98,7 +100,7 @@ if generate_transforms:
     print(filer.trace_file)
     Filer.write_pickle(filer.trace_file, traces)
 
-plot_dispersion = True
+plot_dispersion = False
 if plot_dispersion:
     print()
     print("Plotting wavelength dispersion and coverage for all configurations")
@@ -125,12 +127,13 @@ if fit_transforms:
     for trace in traces:
         boresight = trace.get_ifp_boresight(opticon)        # wave, pa, ea, eorder
         all_boresights.append(boresight)
-    all_boresights = np.array(all_boresights)        # Row content is wavelength, pri_ang, ech_ang, ech_ord
+    all_boresights = np.array(all_boresights)               # Row content is wavelength, pri_ang, ech_ang, ech_ord
     ech_orders = all_boresights[:, 3]
     unique_ech_orders = np.unique(ech_orders)
 
-    # We want to find pa = f(wave), which places the wave on the mosaic origin for ech_angle = 0.  We therefore
+    # We want to find pa = f(wave), which places the wavelength on the mosaic origin for ech_angle = 0.  We therefore
     # select all boresights for a specific order (wavelength) and interpolate pa v ech_angle to find pa(ea=0).
+    # Note that data are grouped by echelle order, with only 3 separate orders sampled in the extended mode.
     ea_zero_waves, ea_zero_pas = [], []      # Wavelength which passes through the prism exit focal plane origin.
     for ech_order in unique_ech_orders:
         idx = ech_orders == ech_order
@@ -151,17 +154,59 @@ if fit_transforms:
         plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, ea_zero_waves, ea_zero_pas,
                                 all_boresights)
     filer.set_configuration('distortion', Globals.nominal)
-    # wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
-    # print('Reading in ''nominal'' mode prism calibration for use in extended mode. ')
-    # plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, ea_zero_waves, ea_zero_pas,
-    #                         all_boresights)
+
+    # Compare nominal and extended PA(lambda) fits.  They should be the same shape but with a small offset due to
+    # the boresight location being defined differently (slice=13, spifu=3 for extended, slice=13 for nominal).
+    # We therefore add a constant offset 'nom_ext_pa_corr' in PA to the nominal fit to provide the extended fit.
+    if Globals.is_debug('low'):
+
+        nom_filer = Filer()
+        nom_filer.set_configuration('distortion', Globals.nominal)
+        nom_wpa_fit, _, _ = nom_filer.read_fit_parameters(Globals.nominal)
+
+        ext_filer = Filer()
+        # The values below are the 3 extended mode fit points for pa(lambda)
+        ext_ea0_waves = np.array([4.634456571438513, 3.7159598285716307, 3.0229040625])
+        ext_ea0_pas = np.array([6.937762201644343, 6.3330839098172635, 5.726065598943837])
+
+        ext_filer.set_configuration('distortion', Globals.extended)
+        ext_wpa_fit, _, _ = ext_filer.read_fit_parameters(Globals.extended)
+
+        plot_waves = 2.7 + np.linspace(0, 1, 101) * (5.5 - 2.7)
+        nom_coeffs = nom_wpa_fit['wpa_opt']
+        nom_plot_pas = polyfit.poly_model(plot_waves, *nom_coeffs)
+
+        nom_ea0_pas = polyfit.poly_model(ext_ea0_waves, *nom_coeffs)
+        nom_ext_pa_corr = np.mean(ext_ea0_pas - nom_ea0_pas)
+        print(nom_ext_pa_corr)
+
+        ext_coeffs = ext_wpa_fit['wpa_opt']
+        ext_plot_pas = polyfit.poly_model(plot_waves, *ext_coeffs)
+        ext_coeffs_corr = nom_coeffs
+        ext_coeffs_corr[0] += nom_ext_pa_corr
+        ext_plot_pas_corr = ext_coeffs[0]
+        ext_ea0_pas_corr = polyfit.poly_model(plot_waves, *ext_coeffs_corr)
+        fig, ax_list = Plot.set_plot_area(xlabel="wave / um.", ylabel="PA / deg.")  # , aspect='equal')
+        fig.suptitle('PA v wavelength.')
+        ax = ax_list[0, 0]
+        ax.plot(plot_waves, nom_plot_pas, color='blue', label='nominal fit')
+        plot.plot_points(ax, ext_ea0_waves, ext_ea0_pas,
+                         mk='D', color='green', ms=10., mew=2., label='extended mode data')
+        ax.plot(plot_waves, ext_plot_pas, color='green', label='extended fit')
+        ax.plot(plot_waves, ext_ea0_pas_corr, color='darkgreen', label='corrected extended fit',
+                linestyle='dashed')
+        ax.legend(loc='upper left')
+        plot.show()
+        if opticon == Globals.extended:
+            n_coeffs = len(ext_coeffs_corr)
+            wpa_fit = {'n_coeffs': n_coeffs, 'wpa_opt': ext_coeffs_corr}
 
     # Create transform term fits and write to file.
     filer.set_configuration(analysis_type, opticon)
     svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
-    # wpa_fit, _, _ = filer.read_fit_parameters(Globals.nominal)
     wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
     filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
+
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
 # coordinates.  using 1) the specific transform for the trace at the Zemax location, 2) the model fit transforms

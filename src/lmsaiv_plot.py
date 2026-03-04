@@ -142,25 +142,28 @@ class Plot:
         return
 
     @staticmethod
-    def profiles(profiles, nax_rows=1, nax_cols=1):
+    def profiles(profiles, nax_rows=2, nax_cols=2):
         """ Plot multiple profile tuples.
         """
         figsize = [8, 8]
         n_profiles = len(profiles)
-        nax_rows = Globals.n_lms_detectors
-        nax_cols = int(n_profiles / nax_rows)
+        # nax_rows = Globals.n_lms_detectors
+        # nax_cols = int(n_profiles / nax_rows)
 
         n_axes = nax_rows * nax_cols
         fig, axes = plt.subplots(nrows=nax_rows, ncols=nax_cols, figsize=figsize,
                                  sharex='all', sharey='all', squeeze=True)
         ax_list = [axes] if n_axes < 2 else axes
         ax_list = np.array(ax_list).flatten()
-        for i, profile in enumerate(profiles):
-            title, x_val, y_val, pts_list = profile
-            ax = ax_list[i]
-            ax.plot(x_val, y_val)
+        for profile in profiles:
+            label, det_no, profile_column, vals, pts = profile
+            iax = det_no - 1
+            x = np.arange(len(vals))
+            title = "Det {:d}".format(det_no)
+            ax = ax_list[iax]
+            ax.plot(x, vals)
             ax.set_title(title)
-            for pts in pts_list:
-                x_pts, y_pts, colour = pts
+            for pt in pts:
+                x_pts, y_pts, colour = pt
                 ax.plot(x_pts, y_pts, linestyle='none', marker='x', color=colour)
         plt.show()

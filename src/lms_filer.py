@@ -1,10 +1,9 @@
 import os
 from os import listdir
 import pickle
-import dill
 from astropy.table import Table
 from astropy.io import fits
-from astropy.io.fits import Card, HDUList, ImageHDU, PrimaryHDU
+from astropy.io.fits import Card, HDUList, PrimaryHDU
 from lms_globals import Globals
 from lms_transform import Transform
 import numpy as np

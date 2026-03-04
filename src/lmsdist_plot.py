@@ -63,9 +63,9 @@ class Plot:
         ylim = kwargs.get('ylim', ylim_default)
         xcoverage = xlim[1] - xlim[0]
         xtick_spacing = 0.05 if xcoverage < 1.0 else 0.2
-        ax_list = self.set_plot_area('Echelle eficiency',
-                                     xlim=xlim, xlabel='Wavelength [um]',
-                                     ylim=ylim, ylabel='Efficiency')
+        fig, ax_list = self.set_plot_area(xlim=xlim, xlabel='Wavelength [um]',
+                                          ylim=ylim, ylabel='Efficiency')
+        fig.suptitle('Echelle eficiency')
         ax = ax_list[0, 0]
         xtick_vals = np.arange(xlim[0], xlim[1], xtick_spacing)
         xtick_labels = []
@@ -493,15 +493,16 @@ class Plot:
         mk = kwargs.get('mk', 'o')
         mew = kwargs.get('mew', 1.0)
         ms = kwargs.get('ms', 3)
-        colour = kwargs.get('colour', 'black')
+        color = kwargs.get('color', 'black')
         rgb = kwargs.get('rgb', None)
+        label = kwargs.get('label', None)
         if rgb is None:
-            ax.plot(x, y, color=colour, clip_on=True,
-                    fillstyle=fs, marker=mk, mew=mew, ms=ms, linestyle='None')
+            ax.plot(x, y, color=color, clip_on=True,
+                    fillstyle=fs, marker=mk, mew=mew, ms=ms, linestyle='None', label=label)
         else:
             for i in range(0, n_pts):
                 ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
-                        fillstyle=fs, marker=mk, mew=mew, ms=ms)
+                        fillstyle=fs, marker=mk, mew=mew, ms=ms, label=label)
         return
 
     @staticmethod
