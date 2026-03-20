@@ -17,22 +17,27 @@ from synphot import SourceSpectrum, units as s_units
 
 class Model:
 
-    tau_blaze_kernel = None  # Kernel blaze profile tau(x) where x = (wave / blaze_wave(eo) - 1)
-    tau_cfo_mask = 1.0      # CFO pinhole mask to detector (excluding detector and echelle blaze profile)
-    tau_wcu_fp = .9         # WCU focal plane to METIS window
-    tau_wcu_hs = .05         # WCU hot source to METIS window
-    tau_sky = .5            # Sky to METIS window
-    tau_lms_toy = .2        # Factor to use in the toy simulator only (assume ScopeSim covered)
+    tau_blaze_kernel = None # Kernel blaze profile tau(x) where x = (wave / blaze_wave(eo) - 1)
+    tau_sky_cfo = 0.7       # Sky to CFO pinhole mask
+    tau_whs_wfp = 0.1
+    tau_wfp_cfo = 0.9
+    tau_wcu_cfo = 0.1       # WCU hot source and laser outputs to CFO pinhole mask
+    tau_cfo_lms = 0.2       # CFO pinhole mask to LMS detector (excluding detector qe and echelle blaze profile)
+    tau_lms_ext = 0.8       # Transmission through extended mode optics.
+
+    tau_sky = tau_sky_cfo * tau_wfp_cfo * tau_cfo_lms
+    tau_whs = tau_whs_wfp * tau_wfp_cfo * tau_cfo_lms
+    tau_wfp = tau_whs / tau_whs_wfp
 
     # Define a list of extended illumination sources.  These images will be convolved with the 'target slice' PSF.
     bgd_srcs = {'dark': {'sed': 'dark'},
-                'wcu_bb': {'sed': 'bb', 'temperature': 1000., 'tau': tau_wcu_hs},               # 1000 K black body
-                'cfo_mask': {'sed': 'bb', 'temperature': 70., 'tau': tau_cfo_mask},
-                'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wcu_fp},
-                'wcu_ls': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 3390, 'wrange':0, 'tau': tau_wcu_hs},
-                'wcu_ll': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 5240, 'wrange':0, 'tau': tau_wcu_hs},
-                'wcu_lt': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 4700, 'wrange':100, 'tau': tau_wcu_hs},
-                'sky': {'sed': 'sky', 'tau': tau_sky}    # Model sky emission spectrum
+                'wcu_bb': {'sed': 'bb', 'temperature': 1000., 'tau': tau_whs},  # 1000 K black body
+                'cfo_mask': {'sed': 'bb', 'temperature': 70., 'tau': tau_cfo_lms},
+                'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},
+                'wcu_ls': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 3390, 'wrange':0, 'tau': tau_whs},
+                'wcu_ll': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 5240, 'wrange':0, 'tau': tau_whs},
+                'wcu_lt': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 4700, 'wrange':100, 'tau': tau_whs},
+                'sky': {'sed': 'sky', 'tau': tau_sky}  # Model sky emission spectrum
                 }
 
     # Define one or more (point-like) pinhole masks which will spatially filter the extended source.  The model
@@ -68,43 +73,31 @@ class Model:
         return waves
 
     def get_flux(self, wbounds, src):
-        """ Load selected extended background spectrum (units ph/s/m2/as2/um) for wavelength range which overfills mosaic
-        f_units_ext = 'phot/s/m2/um/arcsec2'
+        """ Calculate selected extended background spectrum (units el/s/pixel) for a wavelength range which
+        overfills the instantaneous spectral coverage. Output units should be photons/pixel/second
         """
         w_ext = self._make_waves(wbounds)
         f_ext = None
         source = self.bgd_srcs[src]
+        srp = 100000
         sed = source['sed']
-        tau_qe = source['tau'] * Detector.qe
-        pixel_etendue = Globals.elt_area * Globals.alpha_pix * Globals.beta_slice
+        sample_etendue = Globals.elt_area.to(u.cm2) * Globals.alpha_pix * Globals.beta_slice  # AOmega cm^2 mas^2
+        pixel_delta_w = w_ext / srp / Globals.pix_spec_res_el
         if sed == 'bb':
-            f_bb = Model.black_body(w_ext, tbb=source['temperature'])  # Units are photlam = ph/sec/cm2/angstrom/sterad
-            # if simulator is Globals.scopesim:
-            #     return w_ext, f_bb
-            srp = 100000
+            f_bb = Model.black_body(w_ext, tbb=source['temperature'])  # Units are ph sec-1 micron-1 cm-2 mas-2
             pixel_delta_w = w_ext / srp / Globals.pix_spec_res_el
-            tau = Model.tau_wcu_hs * Model.tau_lms_toy
-            f_ext = pixel_etendue.to(u.cm2 * u.sr) * pixel_delta_w.to(u.angstrom) * tau * f_bb
+            f_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_whs * f_bb      # ph / sec / pix
         if sed == 'sky':
             f_sky = Model.load_sky_emission(w_ext)      # Units = ph/s/m2/um/arcsec2
-            # if simulator is Globals.scopesim:
-            #     f_sky_scope = f_sky.to(u.plam)
-            #     return w_ext, f_sky_scope
-
-            f_ext_in = Model.tau_sky * Model.tau_lms_toy * f_sky
-            atel = math.pi * (39. / 2)**2 *u.m *u.m               # ELT collecting area
-            alpha_pix = Globals.alpha_pix               # Along slice pixel scale
-            beta_slice = Globals.beta_slice             # Slice width
-            delta_w = wbounds[0] / 100000               # Spectral resolution
-            pix_delta_w = 2.5                           # Pixels per spectral resolution element
-            f_ext = f_ext_in * atel * alpha_pix * beta_slice * delta_w / pix_delta_w
+            sample_etendue = Globals.elt_area.to(u.m2) * Globals.alpha_pix.to(u.arcsec) * Globals.beta_slice.to(u.arcsec)
+            f_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_sky * f_sky
         if sed == 'laser':
-            f_laser1 = Model.build_laser_emission(w_ext, source)          # photons/second/cm2/ang/sr
+            f_laser1 = Model.build_laser_emission(w_ext, source)                # photons/second/cm2/ang/sr
             # u.cm2sr = u.cm * u.cm * u.rad * u.rad
             # f_laser2 = f_laser1 * pixel_etendue.to(u.cm2sr)                           # ph/sec/pixel
             # f_laser3 = f_laser2 * w_ext.to(u.angstrom) / 100000
             f_ext_in = Model.tau_wcu_hs * Model.tau_lms_toy * f_laser1
-            atel = math.pi * (39. / 2)**2 *u.m *u.m               # ELT collecting area
+            atel = math.pi * (39. / 2)**2 *u.m *u.m     # ELT collecting area
             alpha_pix = Globals.alpha_pix               # Along slice pixel scale
             beta_slice = Globals.beta_slice             # Slice width
             delta_w = wbounds[0] / 100000               # Spectral resolution
@@ -155,9 +148,6 @@ class Model:
         config_str = "_config{:03d}".format(config_no)
 
         psf_sum = 0.
-        # Find a slice number
-        nom_slice_no_rep_field = {1: (9, 17)}
-
         psf_dict = {}  # Create a new set of psfs
 
         # Use the boresight field position (field_no = 1) for now...
@@ -244,14 +234,14 @@ class Model:
 
     @staticmethod
     def black_body(waves, tbb=1000.):
-        """ Generate black body emission spectrum using the
-        :param waves:
-        :param tbb:
-        :return:
-         Blackbody docs say it returns units are PHOTLAM (ph/sec/Angstrom/cm2/steradian)
+        """ Generate black body emission spectrum using the SynPhot BlackBody1D model.  The output has been checked
+        against Mathcad to to have the documented units of (ph/sec/Angstrom/cm2/steradian).
         """
         bb = SourceSpectrum(BlackBody1D, temperature=tbb * u.K)
-        flux = bb(waves.to(u.angstrom))
+        angstrom_micron = 1.0E4
+        k = angstrom_micron / Globals.mas2_sterad
+        flux_photlam = bb(waves.to(u.micron))
+        flux = flux_photlam.value * k * u.ph / u.cm / u.cm / u.mas / u.mas / u.s / u.micron
         return flux
 
     @staticmethod

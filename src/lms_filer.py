@@ -65,12 +65,16 @@ class Filer:
             print("Reading {:s}".format(path))
         hdu_in_list = fits.open(path, mode='readonly')
         primary_hdr = hdu_in_list[0].header
+        origin = primary_hdr['ORIGIN']
         hdu_list = [None]*4       # Re-order hdus
         for hdu_in in hdu_in_list[1:]:
             det_no = int(hdu_in.header['ID'])
             x = hdu_in.header['CRVAL1D']
             y = hdu_in.header['CRVAL2D']
-            mos_idx = Globals.mos_idx[det_no]
+            if origin == 'SCOPESIM':
+                mos_idx = Globals.mos_idx[det_no]
+            else:
+                mos_idx = det_no - 1
             if Globals.is_debug('high'):
                 fmt = "- storing ScopeSim det_no= {:d} (x, y) = ({:6.3f}, {:6.3f}), at mosaic list index= {:d}"
                 print(fmt.format(det_no, x, y, mos_idx))

@@ -18,7 +18,7 @@ class OptTools:
         moscopy_hdus = []
         for hdu in hdus:
             moscopy_hdu = hdu.copy()
-            if clear_data is not None:
+            if clear_data:
                 moscopy_hdu.data *= 0.
             moscopy_hdus.append(moscopy_hdu)
         moscopy_name = file_name if copy_name == '' else copy_name
@@ -40,6 +40,20 @@ class OptTools:
         return moscopy
 
     @staticmethod
+    def add_mosaics(mos1, mos2):
+        name1, pri_hdr1, hdu_list1 = mos1
+        name2, pri_hdr2, hdu_list2 = mos2
+        mos_hdr, mos_hdus = None, []
+        for hdu1, hdu2 in zip(hdu_list1, hdu_list2):
+            hdr = copy.deepcopy(hdu1.header)
+            hdu = hdu1.copy()
+            hdu.data = hdu1.data + hdu2.data
+            mos_hdus.append(hdu)
+        moscopy_name = name1[:-5] + '_ca.fits'
+        moscopy = moscopy_name, pri_hdr1, mos_hdus
+        return moscopy
+
+    @staticmethod
     def dark_stats(mosaics):
         for mosaic in mosaics:
             file_name, hdr, hdus = mosaic
@@ -49,10 +63,11 @@ class OptTools:
 
             print()
             print("File = {:s}".format(file_name))
-            print("Signal distribution statistics, integration time = {:10.1f}".format(t_int))
+            fmt = "Signal distribution statistics, ndit= {:d} x dit= {:3.1f} sec, integration time = {:6.1f}"
+            print(fmt.format(ndit, dit, t_int))
             fmt = "{:>8s},{:>10s},{:>10s},{:>10s},{:>10s}"
             print(fmt.format('Detector', 'median', 'stdev', 'median', 'Rd_Noise'))
-            print(fmt.format('No.', 'ADU', 'ADU', 'el/sec.', 'el.'))
+            print(fmt.format('No.', 'DN', 'DN', 'el/sec.', 'el.'))
             fmt = "{:8d},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
 
             for i, hdu in enumerate(hdus):
@@ -63,6 +78,7 @@ class OptTools:
                 rd_noise = stdev * el_adu / math.sqrt(2. / ndit)
                 text = fmt.format(i + 1, median, stdev, median_current, rd_noise)
                 print(text)
+
         return
 
     # @staticmethod

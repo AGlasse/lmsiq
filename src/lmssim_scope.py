@@ -7,12 +7,10 @@ from lms_filer import Filer
 class Scope:
 
     def __init__(self):
-        install_notebooks = False
-        if install_notebooks:
+        reinstall_inst_pkgs = False
+        if reinstall_inst_pkgs:
             sim.download_packages(["METIS", "ELT", "Armazones"], release="latest")
         Filer.set_test_data_folder('scopesim')
-        # path = os.path.abspath("E:/scopesim_inst_pkgs/inst_pkgs/")
-        # sim.set_inst_pkgs_path(path)
         return
 
     def run(self, sim_configs):
@@ -31,7 +29,6 @@ class Scope:
             cmds["!OBS.pupil_transmission"] = pup_trans
 
             metis = sim.OpticalTrain(cmds)
-            splist = metis['lms_spectral_traces']
 
             wcu = metis['wcu_source']
             wcu_aper = float(sim_config['wcu_aper'])

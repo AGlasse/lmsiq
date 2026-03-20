@@ -75,6 +75,7 @@ class Toy:
             # Read header and data shape (only) in from the template.
             hdu_list = filer.read_zemax_fits('../config/sim_template.fits') # , data_exts=data_exts)
             primary_header = hdu_list[0].header
+            primary_header['ORIGIN'] = 'TOYSIM'
             det_shape = hdu_list[1].data.shape
             _, n_det_cols = det_shape
 
@@ -198,8 +199,8 @@ class Toy:
                         n_rows_written += 1
                     # Now convolve background flux map with bright slice psf. (ideally use filled slice psf)
                     image = image_mosaic[det_idx]
-                    image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_sig, psf_ext, mode='same', boundary='symm')
-
+                    image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_sig, psf_ext,
+                                                                                 mode='same', boundary='symm')
                     if fp_mask['id'] in ['open', 'closed'] or lms_pp1 == 'closed':
                         continue
 
@@ -274,6 +275,7 @@ class Toy:
                     hdu.header['Y_CEN'] = "{:8.3f}".format(crval2d[det_no])
                     el_adu = 2.0
                     hdu.header['HIERARCH ESO DET3 CHIP GAIN'] = "{:8.2f}".format(el_adu)
+                    hdu.header['HIERARCH AIT PIXEL_PITCH'] = Globals.nom_pix_pitch
                     hdu_list.append(hdu)
 
                 print()
@@ -294,8 +296,8 @@ class Toy:
                 print("Writing fits file - {:s}".format(fits_waves_out_path))
                 mosaic = file_name + '_waves', primary_header, hdu_list
                 filer.write_mosaic(out_folder, mosaic)
-
-                fits_tau_ech_out_path = out_folder + '_tau_ech.fits'
-                mosaic = file_name + '_tau_ech', primary_header, hdu_list
-                filer.write_mosaic(out_folder, mosaic)
+                #
+                # fits_tau_ech_out_path = out_folder + '_tau_ech.fits'
+                # mosaic = file_name + '_tau_ech', primary_header, hdu_list
+                # filer.write_mosaic(out_folder, mosaic)
         return

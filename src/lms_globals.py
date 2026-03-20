@@ -11,21 +11,34 @@ import numpy as np
 
 
 class Globals:
-    # program control
-    debug_levels = {'off': 0, 'low': 1, 'medium': 2, 'high': 3}
-    debug_level = 'high'
-
     # Constants
     mas_as = 1000.
     deg_rad = 180. / math.pi
-    rad_per_mas = 4.85E-9
-    sterad_per_mas2 = rad_per_mas * rad_per_mas
+    mas_rad = 2.06265E+8
+    mas2_sterad = mas_rad * mas_rad
     u.plam = u.photon / u.s / u.cm / u.cm / u.angstrom / u.steradian
     u.cm2 = u.cm * u.cm
 
     # Optical parameters
     elt_area = 1350. * u.m * u.m
     pix_spec_res_el = 2.5       # Pixels per spectral resolution element
+    # Plate scale at the entrance focal plane.  Defined in LB email 14/11/24 (in ../docs/lb_ps_131124.txt)
+    # as efp_as_mm = 350.06 / 1937 = 0.180723
+    efp_arcsec_mm = 0.180723 * u.arcsec / u.mm
+
+    # Plate scale at detector
+    alpha_pix = 8.7 * u.mas                                   #
+    beta_slice = 20.7 * u.mas
+
+    intra_slice_gap = 20           # Nominal gap between slices in pixels.
+
+    # Optical throughput of sub-systems (excluding grating)
+    tau_wcu_isphere = 0.1
+    tau_cfo_lms = {'nominal': 0.20, 'extended': 0.15}
+
+    # program control
+    debug_levels = {'off': 0, 'low': 1, 'medium': 2, 'high': 3}
+    debug_level = 'high'
 
     # Simulators
     scopesim_id, toysim_id = 'scopesim', 'toysim'
@@ -70,22 +83,12 @@ class Globals:
     n_lms_detectors = 4
     det_pix_size, im_pix_size = None, None
     optical_configurations = [nominal, extended]
-    slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
+    slice_no_ranges = {nominal: range(1, 29), extended: range(11, 14)}
     spifu_no_ranges = {nominal: range(0, 1), extended: range(1, 7)}
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
 
     slice_id_fmt = "{:s}_{:d}_{:02d}_{:d}"        # Define transforms by opticon, ech_ord, slice_no, spifu_no
-
-    # Plate scale at the entrance focal plane.  Defined in LB email 14/11/24 (in ../docs/lb_ps_131124.txt)
-    # as efp_as_mm = 350.06 / 1937 = 0.180723
-    efp_arcsec_mm = 0.180723 * u.arcsec / u.mm
-
-    # Plate scale at detector
-    alpha_pix = 8.7 * u.mas                                   #
-    beta_slice = 20.7 * u.mas
-
-    intra_slice_gap = 20           # Nominal gap between slices in pixels.
 
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov = 0.897 * u.arcsec

@@ -164,6 +164,6 @@ class Plot:
             ax.plot(x, vals)
             ax.set_title(title)
             for pt in pts:
-                x_pts, y_pts, colour = pt
-                ax.plot(x_pts, y_pts, linestyle='none', marker='x', color=colour)
+                x_pts, y_pts = pt
+                ax.plot(x_pts, y_pts, linestyle='none', marker='x')
         plt.show()

@@ -6,11 +6,8 @@ Decorators for use in all LMS projects.  Currently just includes @debug
 
 Update:
 """
-import math
-
 import astropy.units as u
 import numpy as np
-from scipy.optimize import curve_fit
 from lmssim_model import Model
 from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
@@ -29,38 +26,49 @@ class Opt01:
         """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
         map in the AsBuilt object
         """
-        for opticon in [Globals.extended]:      # , Globals.nominal]:
-            opticon_tag = opticon[0:3]
-            if Globals.is_debug('high'):
-                inc_tags = ['lms_opt_01', '_dark', opticon_tag]
-                darks = Filer.read_mosaic_list(inc_tags)
-                if Globals.is_debug('low'):
-                    Plot.mosaic(darks[0], title=title)
-                    Plot.histograms(darks[0])
-                OptTools.dark_stats(darks)
-
-            # Create slice map, encoded by slice number as N = slice_no + 100 x spifu_no
-            floods = Filer.read_mosaic_list(['lms_opt_01', 'flood', opticon_tag])
-            for flood in floods:
-                if Globals.is_debug('low'):
-                    Plot.mosaic(flood, title='Flood illuminated')
-                profiles = Opt01._find_slices(flood)
-                slice_map = Opt01._make_slice_map(profiles, flood)
-                Opt01._calculate_fov(slice_map)
-                Opt01._find_rrf(flood, slice_map)
-                if Globals.is_debug('low'):
-                    # Plot.mosaic(flood, title=title, cmap='hot')        # Use cmap='hot', 'gray' etc.
-                    Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
-                as_built['slice_map'] = slice_map
-
+        Opt01._analyse_darks()
+        for opticon in [Globals.nominal, Globals.extended]:
+            Opt01._find_fov(opticon, as_built)
         print('Done')
+        return as_built
+
+    @staticmethod
+    def _analyse_darks():
+        inc_tags = ['lms_opt_01', '_dark']
+        darks = Filer.read_mosaic_list(inc_tags)
+        OptTools.dark_stats(darks)
+        if Globals.is_debug('low'):
+            title = 'Dark'
+            Plot.mosaic(darks[0], title=title)
+            Plot.histograms(darks[0])
+        return
+
+    @staticmethod
+    def _find_fov(opticon, as_built):
+        flood = None
+        opticon_tag = opticon[0:3]
+        mosaics = Filer.read_mosaic_list(['lms_opt_01', 'flood', opticon_tag])
+
+        # For now, just analyse first mosaic.  Later it may make sense to use the average (for full coverage)
+        first_mosaic = True
+        for mosaic in mosaics:
+            if first_mosaic:
+                flood = OptTools.copy_mosaic(mosaic)
+                first_mosaic = False
+                continue
+        if Globals.is_debug('low'):
+            Plot.mosaic(flood, title='Flood illumination')
+        profiles = Opt01._find_slices(flood)
+        slice_map = Opt01._make_slice_map(profiles, flood)
+        Opt01._calculate_fov(slice_map)
+        Opt01._find_rrf(flood, slice_map)
+        as_built['slice_map_' + opticon] = slice_map
         return as_built
 
     @staticmethod
     def _find_rrf(flood, slice_map):
         # Generate relative response tuple.
         cols = np.arange(0, 4096, 1)
-        # slice_map = as_built['slice_map']
         rrf = OptTools.copy_mosaic(slice_map, copy_name='rel_res_function')
         rrf_name, rrf_primary_header, rrf_hdus = rrf
         Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
@@ -74,14 +82,13 @@ class Opt01:
             hdr = hdus[i].header
             flood_image = hdus[i].data
             x_det_cen = float(hdr['X_CEN']) * u.mm
-            n_det_cols = float(hdr['X_SIZE'])
-            pix_size = hdr['HIERARCH pixel_size'] * u.mm
+            n_det_rows, n_det_cols = flood_image.shape
+            pix_size = float(hdr['HIERARCH AIT PIXEL_PITCH']) * u.mm
             c_det_cen = x_det_cen / pix_size
             c_det_org = c_det_cen - n_det_cols / 2
             disp = .08 * u.micron / (2. * n_det_cols)
             waves = wave_mosaic_cen + disp * (c_det_org + cols)
             flux = Model.black_body(waves, tbb=1000.)
-            n_det_rows = int(hdr['Y_SIZE'])
             rrf_image = rrf_hdus[i].data
             for row in range(0, n_det_rows):
                 idx = np.argwhere(slice_mask[row] > 0.)
@@ -102,16 +109,18 @@ class Opt01:
         slice_order = {Globals.nominal: {'12': (0, 0, 28, 15), '34': (0, 0, 14, 1)},
                        Globals.extended: {'12': (3, 1, 13, 11), '34': (6, 4, 13, 11)}
                        }
-
+        cut = 0.5       # Fraction of bright signal defining cut level
         print()
         print("File = {:s}".format(file_name))
         print("Identifying slices from along column profiles of flood illuminated images ")
         fmt = "Design fov, alpha pixel x slice width = {} x {}"
         print(fmt.format(Globals.alpha_pix, Globals.beta_slice))
 
-        # Approximate slice image row sizes
+        # Approximate slice image dimensions
         slice_width = 140
-        slice_gap = 15
+        slice_hw = int(0.5 * slice_width)
+        gap = 15
+        gap_hw = int(0.5 * gap)
         spifu_gap = 200
 
         slice_coords = {'det_nos': [], 'slice_nos': [], 'spifu_nos': [],
@@ -132,48 +141,54 @@ class Opt01:
                 spifu_no = spifu_start
                 slice_no = slice_start
                 pc1, pc2 = profile_column - 2, profile_column + 2
-                y_signal = np.mean(img[:, pc1:pc2], axis=1)
-                y_original = np.array(y_signal)
-                y_noise = np.std(img[:, profile_column - 2: profile_column + 2], axis=1)
-                nr, nc = hdu.data.shape
-                cs = np.arange(0, nc, 1)
-
-                y_snr = y_signal / y_noise
-                row_lo = np.argwhere(y_snr > 250)[0][0]      # Initialise row_lo close to first slice
+                if Globals.is_debug('high'):
+                    print('Opt01._find_slices, det_no= ', det_no, 'spifu_no= ', spifu_no, 'slice_no= ', slice_no, 'col= ', profile_column)
+                signal = np.mean(img[:, pc1:pc2], axis=1)
+                original_signal = np.array(signal)
+                bgd_noise_level = np.std(signal[0:70])
+                row_lo = 0
                 pts = []
                 more_rows = True
                 while more_rows:
-                    row_slice = row_lo + np.argmax(y_signal[row_lo:row_lo + int(0.5 * slice_width)])
-                    y_slice = y_signal[row_slice]        # Typical peak signal in slice
-                    dr_lo = np.argwhere(y_signal[row_lo:] > 0.5 * y_slice)[0][0]
-                    row_lo += dr_lo     # Revise row_lo to 50 % peak
-                    row_hi = row_slice + np.argwhere(y_signal[row_slice:row_slice + 100] < 0.5 * y_slice)[0][0]
-                    # print(det_no, spifu_no, slice_no, pc1, pc2, row_lo, row_hi)
+                    row_lo += np.argwhere(signal[row_lo:] > 20 * bgd_noise_level)[0][0]
+                    row_bright = row_lo + np.argmax(signal[row_lo:row_lo + slice_hw])
+                    y_bright = signal[row_bright]                 # Typical peak signal in slice
+                    y_cut = cut * y_bright
+
+                    row_lo += np.argwhere(signal[row_lo:] > cut * y_bright)[0][0]      # Row after 50 % point
+                    ya, yb = signal[row_lo-1], signal[row_lo]
+                    dr = (yb - ya) / y_cut
+                    rlo = row_lo + dr - 1                           # Add pixel fraction for cut level.
+
+                    row_hi = row_bright + np.argwhere(signal[row_bright:] < y_cut)[0][0]
+                    ya, yb = signal[row_hi - 1], signal[row_hi]
+                    dr = (yb - ya) / y_cut
+                    rhi = row_hi - dr - 1
+                    if Globals.is_debug('high'):
+                        print("- {:5.2f}, {:5d}, {:5.2f}, {:5.3f}".format(rlo, row_bright, rhi, y_cut))
                     slice_coords['det_nos'].append(det_no)
                     slice_coords['slice_nos'].append(slice_no)
                     slice_coords['spifu_nos'].append(spifu_no)
                     slice_coords['col_mins'].append(pc1)
                     slice_coords['col_maxs'].append(pc2)
-                    slice_coords['row_mins'].append(row_lo)
-                    slice_coords['row_maxs'].append(row_hi)
+                    slice_coords['row_mins'].append(rlo)
+                    slice_coords['row_maxs'].append(rhi)
 
-                    pts.append((row_lo, y_signal[row_lo], 'green'))
-                    pts.append((row_hi, y_signal[row_hi], 'blue'))
+                    pts.append((rlo, y_cut))
+                    pts.append((rhi, y_cut))
 
-                    y_snr[row_lo - 5: row_hi + 5] = 0.      # Remove slice from profile data
-                    y_signal[row_lo - 5: row_hi + 5] = 0.
-                    row_lo = row_hi
-                    if spifu_no > 0 and slice_no == 11:
-                        row_lo += spifu_gap - 10
+                    # Remove slice from profile data
+                    signal[row_lo - gap_hw: row_hi + gap_hw] = 0.
 
                     slice_no -= 1
-                    if slice_no < slice_end:
+                    if slice_no < slice_end:        # this should only be true in extended mode.
+                        signal[row_lo - gap_hw: row_hi + spifu_gap] = 0.
                         slice_no = slice_start
                         spifu_no -= 1
                         if spifu_no < spifu_end:
                             more_rows = False
                 label = "col={}".format(profile_column)
-                profiles.append((label, det_no, profile_column, y_original, pts))
+                profiles.append((label, det_no, profile_column, original_signal, pts))
 
 
         # Convert lists to numpy arrays
@@ -185,9 +200,10 @@ class Opt01:
 
     @staticmethod
     def _make_slice_map(slice_coords, mosaic):
-        # Set up slice map object to hold slice images
+        """ Create slice map, which is a fits HDU detector mosaic image where each pixel takes the value of
+        its slice number N, such that N = slice_no + 100 x spifu_no
+        """
         slice_map = OptTools.copy_mosaic(mosaic, clear_data=True, copy_name='slice_map')
-
         slice_map_name, slice_map_hdr, slice_map_hdus = slice_map
         opticon = slice_map_hdr['HIERARCH AIT OPTICON']
 
@@ -200,8 +216,9 @@ class Opt01:
                 uni_slice_nos = np.unique(slice_coords['slice_nos'])
                 for slice_no in uni_slice_nos:
                     idxs = np.logical_and(slice_coords['slice_nos'] == slice_no, spifu_no_idxs)
-
                     row_mins = np.array(slice_coords['row_mins'])[idxs]
+                    if len(row_mins) < 1:       # Catch cases where the slice is not on the detector
+                        continue
                     row_maxs = np.array(slice_coords['row_maxs'])[idxs]
                     col_mins = np.array(slice_coords['col_mins'])[idxs]
                     col_maxs = np.array(slice_coords['col_maxs'])[idxs]
@@ -215,7 +232,6 @@ class Opt01:
                     r2s = np.rint(np.polyval(row_max_fit, cs))
                     for c, r1, r2 in zip(cs, r1s, r2s):
                         hdu.data[int(r1):int(r2), int(c)] = slice_no + 100 * spifu_no
-
         return slice_map
 
     @staticmethod
@@ -233,15 +249,7 @@ class Opt01:
         n_alphas = n_illum / n_slices / n_cols / n_spifus / 2
         alpha_fov = n_alphas * Globals.alpha_pix
         print("Field of view = {:9.2f} x {:9.2f}".format(alpha_fov, beta_fov))
-
         return
-
-
-
-
-
-
-
 
     @staticmethod
     def flood_stats(mosaic):

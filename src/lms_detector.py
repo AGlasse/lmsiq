@@ -20,7 +20,7 @@ class Detector:
     detector_edge_mm = 0.001 * det_size * det_pix_size
     mosaic_edge_mm = detector_edge_mm * mosaic_format[0] + mosaic_gap
     qe = 0.7                                    # QE (el/photon)
-    idark = 0.05        # Dark current approx, from Roy. (Finger quotes 0.01)
+    idark = 0.05        # Dark current approx, from Roy (el / second). (Finger quotes 0.01)
     rnoise = 70.        # Very approx read noise (Roy model) (Finger/Rauscher use 10 el.)
     q_well = 1.E+5      # Well depth (el.)
 
@@ -70,10 +70,10 @@ class Detector:
         """
         t_int = dit * ndit
         det_shape = Detector.det_size, Detector.det_size
-        frame = np.array(frame_in)      # Copy frame
-        dark = np.full(det_shape, Detector.idark)
+        frame = np.array(frame_in)                          # Copy frame
+        dark = np.full(det_shape, Detector.idark)           # Dark photocurrent (el / sec)
         frame += dark
-        image = frame * t_int             # Convert from photocurrent to quantised charge
+        image = frame * dit                                 # Convert from photocurrent to electrons per CDS frame
 
         rng = np.random.default_rng()
         shot = rng.poisson(np.sqrt(image), det_shape)
