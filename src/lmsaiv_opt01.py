@@ -8,6 +8,9 @@ Update:
 """
 import astropy.units as u
 import numpy as np
+from astropy.convolution import convolve, Box1DKernel
+
+from lms_mosaic import Mosaic
 from lmssim_model import Model
 from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
@@ -45,21 +48,21 @@ class Opt01:
 
     @staticmethod
     def _find_fov(opticon, as_built):
-        flood = None
         opticon_tag = opticon[0:3]
         mosaics = Filer.read_mosaic_list(['lms_opt_01', 'flood', opticon_tag])
-
-        # For now, just analyse first mosaic.  Later it may make sense to use the average (for full coverage)
-        first_mosaic = True
+        # Coadd all flood images to allow full coverage (using multiple LMS configurations)
+        flood = None
         for mosaic in mosaics:
-            if first_mosaic:
-                flood = OptTools.copy_mosaic(mosaic)
-                first_mosaic = False
+            if flood is None:
+                flood = Mosaic.copy_mosaic(mosaic, clear_data=False, copy_name='')
                 continue
+            flood = Mosaic.sum_mosaics(flood, mosaic)
+
         if Globals.is_debug('low'):
             Plot.mosaic(flood, title='Flood illumination')
-        profiles = Opt01._find_slices(flood)
+        profiles = Opt01._find_slices(flood, smooth=3, snr_cut=5)
         slice_map = Opt01._make_slice_map(profiles, flood)
+        Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
         Opt01._calculate_fov(slice_map)
         Opt01._find_rrf(flood, slice_map)
         as_built['slice_map_' + opticon] = slice_map
@@ -71,7 +74,7 @@ class Opt01:
         cols = np.arange(0, 4096, 1)
         rrf = OptTools.copy_mosaic(slice_map, copy_name='rel_res_function')
         rrf_name, rrf_primary_header, rrf_hdus = rrf
-        Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+
         name, primary_hdr, hdus = flood
         wave_mosaic_cen = primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
         _, _, slice_map_hdus = slice_map
@@ -98,7 +101,7 @@ class Opt01:
         return
 
     @staticmethod
-    def _find_slices(mosaic):
+    def _find_slices(mosaic, smooth=None, snr_cut=5):
         """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
         """
         file_name, hdr, hdus = mosaic
@@ -126,8 +129,8 @@ class Opt01:
         slice_coords = {'det_nos': [], 'slice_nos': [], 'spifu_nos': [],
                         'col_mins': [], 'col_maxs': [], 'row_mins': [], 'row_maxs': []}
 
-        profile_column_list = {1: [600, 800, 1000, 1200], 2: [1000, 1800, 1900, 2000],
-                               3: [600, 700, 800, 1200], 4: [100, 400, 1900, 2000]}
+        profile_column_list = {1: [600, 800, 1000, 1200], 2: [300, 1400, 1700, 2000],
+                               3: [600, 700, 800, 1200], 4: [300, 1600, 1800, 2000]}
         profiles = []
         for hdu in hdus:
             det_no = int(hdu.header['ID'])
@@ -140,17 +143,26 @@ class Opt01:
             for profile_column in profile_columns:
                 spifu_no = spifu_start
                 slice_no = slice_start
-                pc1, pc2 = profile_column - 2, profile_column + 2
+                pc1, pc2 = profile_column - 4, profile_column + 5
                 if Globals.is_debug('high'):
-                    print('Opt01._find_slices, det_no= ', det_no, 'spifu_no= ', spifu_no, 'slice_no= ', slice_no, 'col= ', profile_column)
+                    print('Opt01._find_slices, '
+                          'det_no= ', det_no, 'spifu_no= ', spifu_no, 'slice_no= ',
+                          slice_no, 'col= ', profile_column)
                 signal = np.mean(img[:, pc1:pc2], axis=1)
+                if smooth is not None:
+                    boxcar = Box1DKernel(smooth)
+                    signal = np.convolve(signal, boxcar, mode='same')
                 original_signal = np.array(signal)
                 bgd_noise_level = np.std(signal[0:70])
                 row_lo = 0
                 pts = []
                 more_rows = True
                 while more_rows:
-                    row_lo += np.argwhere(signal[row_lo:] > 20 * bgd_noise_level)[0][0]
+                    try:
+                        row_lo += np.argwhere(signal[row_lo:] > snr_cut * bgd_noise_level)[0][0]
+                    except IndexError:
+                        fmt = 'Profile detection failed at det_no= {:d}, col= {:d}, row= {:d}'
+                        print(fmt.format(det_no, profile_column, row_lo))
                     row_bright = row_lo + np.argmax(signal[row_lo:row_lo + slice_hw])
                     y_bright = signal[row_bright]                 # Typical peak signal in slice
                     y_cut = cut * y_bright
@@ -178,7 +190,8 @@ class Opt01:
                     pts.append((rhi, y_cut))
 
                     # Remove slice from profile data
-                    signal[row_lo - gap_hw: row_hi + gap_hw] = 0.
+                    # signal[row_lo - gap_hw: row_hi + gap_hw] = 0.
+                    signal[0: row_hi + gap_hw] = 0.
 
                     slice_no -= 1
                     if slice_no < slice_end:        # this should only be true in extended mode.

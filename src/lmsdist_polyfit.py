@@ -41,7 +41,7 @@ class PolyFit:
             pa, wxo, fcoeff, debug = fargs
             xy = pa, ea[0]
             f = PolyFit.surface_model(xy, *fcoeff)
-            if debug:
+            if Globals.is_debug('medium'):
                 print("{:>52.3f},{:>20.3f} -> dw = {:10.3f}".format(pa, ea[0], f - wxo))
             return f - wxo
 
@@ -209,7 +209,7 @@ class PolyFit:
         return wxo_fit
 
     @staticmethod
-    def make_fit_matrix(poly_matrix, pa, ea, eo):
+    def make_fit_matrix(poly_matrix, pa, ea):
         """ Create a transform matrix at any prism and echelle angle with terms provided using the
         2nd order 2D polynomial fit function.
 
@@ -228,27 +228,19 @@ class PolyFit:
                 matrix[i, j] = PolyFit.surface_model((pa, ea), *fit_terms)
         return matrix
 
-    # @staticmethod
-    # def make_slice_transforms(lms_config, term_fits):
-    #     slice_transforms = []
-    #     for term_fit in term_fits:
-    #
-    #
-    #
-    #
-    #
-    #
-    #     return slice_transforms
-
     @staticmethod
-    def make_fit_transform(cfg, term_fit):
-        pa, ea, eo = cfg['pri_ang'], cfg['ech_ang'], cfg['ech_order']
+    def make_fit_transform(configs, fit_data):
+        wpa_fit, wxo_fit, term_fits = fit_data
+        lms_config, slice_config = configs
+        pa, ea = lms_config['pri_ang'], lms_config['ech_ang']
+        slice_no, spifu_no = slice_config['slice_no'], slice_config['spifu_no']
+
         matrices = {}
         for mat_name in Globals.matrix_names:
-            poly_matrix = term_fit[mat_name]
-            matrix = PolyFit.make_fit_matrix(poly_matrix, pa, ea, eo)
+            poly_matrix = term_fits[slice_no][spifu_no][mat_name]
+            matrix = PolyFit.make_fit_matrix(poly_matrix, pa, ea)
             matrices[mat_name] = matrix
-        transform = Transform(cfg=cfg, matrices=matrices)
+        transform = Transform(lms_config=lms_config, slice_config=slice_config, matrices=matrices)
         return transform
 
     @staticmethod

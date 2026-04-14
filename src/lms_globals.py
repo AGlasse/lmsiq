@@ -83,7 +83,7 @@ class Globals:
     n_lms_detectors = 4
     det_pix_size, im_pix_size = None, None
     optical_configurations = [nominal, extended]
-    slice_no_ranges = {nominal: range(1, 29), extended: range(11, 14)}
+    slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
     spifu_no_ranges = {nominal: range(0, 1), extended: range(1, 7)}
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags

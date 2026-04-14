@@ -60,7 +60,6 @@ class Util:
         """
         n_pts = len(x)
         unity = np.full(n_pts, 1.)
-
         xy = np.array([x, y, unity])
         uv = aff @ xy
         return uv[0], uv[1]
@@ -459,7 +458,7 @@ class Util:
 
         # Step 2, select all transforms with same configuration as the boresight. For spifu, use optimum order
         bs_lms_cfg = bs_transform.lms_configuration
-        opt_transforms = {}
+        opt_transforms = []
         ech_ords = []             # List of unique echelle orders in optimum transforms
         for svd_transform in svd_transforms:
             lms_cfg = svd_transform.lms_configuration
@@ -484,7 +483,7 @@ class Util:
             slice_no = slice_cfg['slice_no']
             spifu_no = slice_cfg['spifu_no']
             slice_id = Globals.slice_id_fmt.format(opticon, ech_ord, slice_no, spifu_no)
-            opt_transforms[slice_id] = svd_transform
+            opt_transforms.append(svd_transform)
         return opt_transforms, ech_ords
 
     @staticmethod

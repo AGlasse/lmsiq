@@ -29,19 +29,19 @@ def run():
     test_name = 'lms_opt_01'        # Name of test to simulate, e.g 'lms_opt_01'
     use_scope_sim = False
 
-    base_debug_level = 'low'
+    base_debug_level = 'medium'
     Globals.set_debug_level(base_debug_level)
 
     Globals.sim_id = Globals.scopesim_id if use_scope_sim else Globals.toysim_id
     print('Simulating measurements for test {:s} using {:s}'.format(test_name, Globals.sim_id))
 
-    sim_config = obs_map.get_configuration(test_name)
-    if sim_config is None:
+    sim_configs = obs_map.get_configuration(test_name)
+    if sim_configs is None:
         return
     if use_scope_sim:
-        scope.run(sim_config)
+        scope.run(sim_configs)
     else:
-        toy.run(sim_config)
+        toy.run(sim_configs)
     return
 
 run()

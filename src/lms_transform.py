@@ -50,6 +50,26 @@ class Transform:
         is_match = slice_no_match and spifu_no_match and ech_ord_match
         return is_match
 
+    def minus(self, tr_in):
+        """ Find the term by term difference of this transform's EDP->MFP matrices and return as a new transform
+        """
+        tr_diff = Transform()
+        for name in Globals.matrix_names:
+            tr_diff.matrices[name] = self.matrices[name] - tr_in.matrices[name]
+        tr_diff.lms_configuration = self.lms_configuration
+        tr_diff.slice_configuration = self.slice_configuration
+        return tr_diff
+
+    def plus(self, tr_in):
+        """ Find the term by term sum of this transform's EDP->MFP matrices and return as a new transform
+        """
+        tr_diff = Transform()
+        for name in Globals.matrix_names:
+            tr_diff.matrices[name] = self.matrices[name] + tr_in.matrices[name]
+        tr_diff.lms_configuration = self.lms_configuration
+        tr_diff.slice_configuration = self.slice_configuration
+        return tr_diff
+
     def make_hdu_primary(self):
         lms_config = self.lms_configuration            # Get basic configuration parameters
         lms_config['n_mats'] = 4                       # and add useful header information.

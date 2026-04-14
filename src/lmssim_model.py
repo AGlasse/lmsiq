@@ -10,7 +10,6 @@ from astropy import units as u, constants as const
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
-from lms_detector import Detector
 from synphot.models import BlackBody1D
 from synphot import SourceSpectrum, units as s_units
 
@@ -19,24 +18,23 @@ class Model:
 
     tau_blaze_kernel = None # Kernel blaze profile tau(x) where x = (wave / blaze_wave(eo) - 1)
     tau_sky_cfo = 0.7       # Sky to CFO pinhole mask
-    tau_whs_wfp = 0.1
-    tau_wfp_cfo = 0.9
     tau_wcu_cfo = 0.1       # WCU hot source and laser outputs to CFO pinhole mask
+    tau_wfp_cfo = 0.9       # WCU output focal plane to CFO pinhole mask
     tau_cfo_lms = 0.2       # CFO pinhole mask to LMS detector (excluding detector qe and echelle blaze profile)
     tau_lms_ext = 0.8       # Transmission through extended mode optics.
 
-    tau_sky = tau_sky_cfo * tau_wfp_cfo * tau_cfo_lms
-    tau_whs = tau_whs_wfp * tau_wfp_cfo * tau_cfo_lms
-    tau_wfp = tau_whs / tau_whs_wfp
+    tau_sky = tau_sky_cfo * tau_wfp_cfo * tau_cfo_lms       # Leiden sky to detectors
+    tau_whs = tau_wcu_cfo * tau_wfp_cfo * tau_cfo_lms       # WCU integrating sphere input to detectors
+    tau_wfp = tau_whs / tau_wcu_cfo                         # WCU exit focal plane mask to detectors
 
     # Define a list of extended illumination sources.  These images will be convolved with the 'target slice' PSF.
     bgd_srcs = {'dark': {'sed': 'dark'},
                 'wcu_bb': {'sed': 'bb', 'temperature': 1000., 'tau': tau_whs},  # 1000 K black body
                 'cfo_mask': {'sed': 'bb', 'temperature': 70., 'tau': tau_cfo_lms},
                 'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},
-                'wcu_ls': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 3390, 'wrange':0, 'tau': tau_whs},
-                'wcu_ll': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 5240, 'wrange':0, 'tau': tau_whs},
-                'wcu_lt': {'sed': 'laser', 'flux': 1.E+09, 'wavelength': 4700, 'wrange':100, 'tau': tau_whs},
+                'wcu_ls': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 3.390, 'wrange':0, 'tau': tau_whs},
+                'wcu_ll': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 5.240, 'wrange':0, 'tau': tau_whs},
+                'wcu_lt': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 4.700, 'wrange':100, 'tau': tau_whs},
                 'sky': {'sed': 'sky', 'tau': tau_sky}  # Model sky emission spectrum
                 }
 
@@ -69,10 +67,12 @@ class Model:
     def _make_waves(wbounds):
         wmin, wmax = wbounds[0], wbounds[1]
         delta_w = wmin / 200000
-        waves = np.arange(wmin.value, wmax.value, delta_w.value) * u.nm
+        if wmin.unit != wmax.unit:
+            wmax = wmax.to(wmin.unit)
+        waves = np.arange(wmin.value, wmax.value, delta_w.value)*wmin.unit
         return waves
 
-    def get_flux(self, wbounds, src):
+    def get_flux(self, wbounds, src, lt_w_offset):
         """ Calculate selected extended background spectrum (units el/s/pixel) for a wavelength range which
         overfills the instantaneous spectral coverage. Output units should be photons/pixel/second
         """
@@ -92,11 +92,8 @@ class Model:
             sample_etendue = Globals.elt_area.to(u.m2) * Globals.alpha_pix.to(u.arcsec) * Globals.beta_slice.to(u.arcsec)
             f_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_sky * f_sky
         if sed == 'laser':
-            f_laser1 = Model.build_laser_emission(w_ext, source)                # photons/second/cm2/ang/sr
-            # u.cm2sr = u.cm * u.cm * u.rad * u.rad
-            # f_laser2 = f_laser1 * pixel_etendue.to(u.cm2sr)                           # ph/sec/pixel
-            # f_laser3 = f_laser2 * w_ext.to(u.angstrom) / 100000
-            f_ext_in = Model.tau_wcu_hs * Model.tau_lms_toy * f_laser1
+            f_laser = Model.build_laser_emission(source, w_ext, lt_w_offset)
+            f_ext_in = Model.tau_whs * f_laser
             atel = math.pi * (39. / 2)**2 *u.m *u.m     # ELT collecting area
             alpha_pix = Globals.alpha_pix               # Along slice pixel scale
             beta_slice = Globals.beta_slice             # Slice width
@@ -194,8 +191,7 @@ class Model:
     @staticmethod
     def make_blaze_dictionary(transforms):
         blaze = {}
-        for key in transforms:
-            transform = transforms[key]
+        for transform in transforms:
             lms_cfg = transform.lms_configuration
             slice_cfg = transform.slice_configuration
             if slice_cfg['slice_no'] != 13:
@@ -211,7 +207,7 @@ class Model:
         return blaze
 
     @staticmethod
-    def build_laser_emission(waves, laser, wave_offset=0.*u.nm):
+    def build_laser_emission(laser, waves, wave_offset):
         """ Calculate laser signal as a spectrum with units photlam = photon/sec/cm2/angstrom/sterad
         Assume 10 mW total laser output over-filling the METIS
         field of view by a factor of 2, taken as A = pi x a x a where a = 6 arcsec x sqrt(2), giving A = 72 x 3.14 = 230 arcsec^2
@@ -221,15 +217,21 @@ class Model:
         :param wave_offset:
         :return: flux quantity in units ph/s
         """
-        laser_power = 1.e5
-        idx_cen = np.argwhere(waves - 4700 * u.nm < 0)[:, 0][-1]
+        laser_wave = (laser['wavelength'] + wave_offset)*u.micron
+        laser_power = laser['power']
+        idx_cen = np.argwhere(waves - laser_wave < 0)[:, 0][-1]
         line_width = waves[idx_cen] / 100000
         pix_fwhm = line_width / (waves[idx_cen] - waves[idx_cen-1])
         pix_sigma = pix_fwhm / 2.355
-        indices = np.arange(11.)        # 101 pixel scale, line centred at pixel 50.
+        pix_hw = 5
+        n_pix_hw = 2 * pix_hw + 1
+        indices = np.arange(n_pix_hw)        # 101 pixel scale, line centred at pixel 50.
         lsf = Globals.gauss(indices, laser_power, 5., pix_sigma)
         laser_flux = np.zeros(waves.shape)
-        laser_flux[idx_cen - 5: idx_cen + 6] = lsf
+        laser_flux[idx_cen - pix_hw: idx_cen + pix_hw + 1] = lsf
+################################################ TEMPORARY KLUDGE
+##        laser_flux = 1.E8 * np.sin(waves * u.rad * 10000. / u.micron) ** 2
+################################################
         return laser_flux
 
     @staticmethod
