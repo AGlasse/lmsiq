@@ -1,7 +1,6 @@
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import matplotlib.axes
 from mpl_toolkits.axes_grid1 import ImageGrid
 
 from lms_globals import Globals
@@ -45,7 +44,7 @@ class Plot:
 
     @staticmethod
     def mosaic(mosaic, **kwargs):
-        file_name, hdr, hdus = mosaic
+        file_name, primary_hdr, hdus = mosaic
 
         cmap_name = kwargs.get('cmap', 'hot')
         cmap = mpl.colormaps[cmap_name]
@@ -80,10 +79,11 @@ class Plot:
         if 'vmax' in kwargs:
             vmax = kwargs.get('vmax', np.nanmax(hdus))
         ax, im = None, None
+        data_origin = primary_hdr['ORIGIN']
+        is_toysim = 'TOYSIM' in data_origin
         for hdu in hdus:
             det_no = int(hdu.header['ID'])
-            det_idx = Globals.mos_idx[det_no]
-            # det_idx = det_no - 1
+            det_idx = det_no - 1 if is_toysim else Globals.mos_idx[det_no]
             ax = grid[det_idx]
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)

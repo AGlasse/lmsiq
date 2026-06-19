@@ -41,7 +41,7 @@ print("- input coords  = {:s}, {:s}".format(Globals.coord_in[0], Globals.coord_i
 print("- output coords = {:s}, {:s}".format(Globals.coord_out[0], Globals.coord_out[1]))
 
 # File locations and names
-zem_folder = filer.data_folder
+zem_folder = filer.ray_trace_folder
 detector = Detector()
 focal_planes = {''}
 
@@ -107,7 +107,7 @@ if generate_transforms:
         traces.append(ray_trace)
         a_rms_list.append(ray_trace.a_rms)
 
-    fmt = "../output/distortion/{:s}/svd_fits_index_{:s}"
+    fmt = "./output/distortion/{:s}/svd_fits_index_{:s}"
     svd_dict_path = fmt.format(opticon, opticon[0:3])
     filer.write_pickle(svd_dict_path, svd_transform_dict)
 
@@ -115,7 +115,7 @@ if generate_transforms:
     filer.write_affine_transform(RayTrace)
     a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
     print("a_rms = {:10.3f} microns".format(a_rms * 1000.))
-    print(filer.trace_file)
+    print('Writing ray trace and transform data to ' + filer.trace_file + '.pkl')
     Filer.write_pickle(filer.trace_file, traces)
 
 plot_dispersion = True
@@ -129,7 +129,7 @@ if plot_dispersion:
         plot.series('coverage', traces[0:1], model_config)
         plot.series('coverage', traces, model_config)
 
-fit_transforms = True
+fit_transforms = False
 if fit_transforms:
     # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism
     # angle is calculated (first) as a function of wavelength, for echelle angle = 0, (the blaze angle).
@@ -169,7 +169,12 @@ if fit_transforms:
     if Globals.is_debug('low'):
         plot.wave_v_prism_angle(wpa_fit, polyfit.poly_model, ea_zero_waves, ea_zero_pas,
                                 all_boresights)
-    # filer.set_configuration('distortion', Globals.nominal)
+    # Create transform term fits and write to file.
+    filer.set_configuration(analysis_type, opticon)
+    svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
+    wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
+    filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
+
 
     # Compare nominal and extended PA(lambda) fits.  They should be the same shape but with a small offset due to
     # the boresight location being defined differently (slice=13, spifu=3 for extended, slice=13 for nominal).
@@ -180,11 +185,11 @@ if fit_transforms:
         nom_filer.set_configuration('distortion', Globals.nominal)
         nom_wpa_fit, _, _ = nom_filer.read_fit_parameters(Globals.nominal)
 
-        ext_filer = Filer()
         # The values below are the 3 extended mode fit points for pa(lambda)
         ext_ea0_waves = np.array([4.634456571438513, 3.7159598285716307, 3.0229040625])
         ext_ea0_pas = np.array([6.937762201644343, 6.3330839098172635, 5.726065598943837])
 
+        ext_filer = Filer()
         ext_filer.set_configuration('distortion', Globals.extended)
         ext_wpa_fit, _, _ = ext_filer.read_fit_parameters(Globals.extended)
 
@@ -217,16 +222,11 @@ if fit_transforms:
             n_coeffs = len(ext_coeffs_corr)
             wpa_fit = {'n_coeffs': n_coeffs, 'wpa_opt': ext_coeffs_corr}
 
-    # Create transform term fits and write to file.
-    filer.set_configuration(analysis_type, opticon)
-    svd_transforms = filer.read_svd_transforms(inc_tags=[opt_tag], exc_tags=['fit_parameters'])
-    wxo_fit, wxo_header, svd_fit = polyfit.create_polynomial_surface_fits(opticon, svd_transforms, plot_wxo=False)
-    filer.write_fit_parameters(wpa_fit, wxo_fit, wxo_header, svd_fit)
 
 # Evaluate the transform performance by comparing the coordinates of the Zemax ray trace with the projected
 # coordinates.  using 1) the specific transform for the trace at the Zemax location, 2) the model fit transforms
 # (generated for the prism and echelle angles).
-evaluate_transforms = True
+evaluate_transforms = False
 if evaluate_transforms:
     traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
     _, opticon, date_stamp, _, _, _ = filer.model_configuration

@@ -5,16 +5,16 @@ from lms_filer import Filer
 
 _ = Globals()
 _ = Filer()
+cap_name = 'lms_opt_02_dist'             # Name of analysis project
 
 test_data_folder = 'test_toysim'
+debug_level = 'low'
+
+Globals.set_debug_level(debug_level)
 opt_tests = OptTests(test_data_folder)
 print(opt_tests)
 
-cap_name = 'lms_opt_01_fov'             # Name of analysis project
-debug_level = 'low'
-
 print("Analysing data in folder data/{:s} for {:s}.".format(test_data_folder, cap_name))
-Globals.set_debug_level(debug_level)
 opt_tests.run(cap_name, do_plot=False)
 print()
 print("Finished analysis of {:s}".format(cap_name))

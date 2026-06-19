@@ -31,7 +31,8 @@ class OptTests:
     @staticmethod
     def run(cap_name, **kwargs):
         if cap_name not in OptTests.optical_test.keys():
-            print("Analysis project {:s} not found !!!".format(cap_name))
+            print()
+            print("!!! Analysis project {:s} not found !!!".format(cap_name))
             quit()
 
         test_name = cap_name[0:10]

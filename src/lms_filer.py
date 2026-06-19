@@ -16,7 +16,7 @@ class Filer:
 
     def __init__(self):
         self.model_configuration = None
-        self.data_folder, self.sim_folder, self.output_folder = None, None, None
+        self.psf_folder, self.sim_folder, self.output_folder = None, None, None
         self.tf_dir, self.trace_file, self.poly_file = None, None, None
         self.wcal_file, self.stats_file, self.tf_fit_file, self.cube_folder = None, None, None, None
         return
@@ -25,13 +25,15 @@ class Filer:
         model_configuration = Globals.model_configurations[analysis_type][opticon]
         analysis_type, opticon, date_stamp, _, _, _ = model_configuration
         self.model_configuration = model_configuration
-        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, opticon, date_stamp)
-        self.data_folder = Filer.get_folder('../data/model/' + sub_folder)
-        self.sim_folder = Filer.get_folder('../data/sim/' + sub_folder)
+        sub_folder = "{:s}/{:s}".format(opticon, date_stamp)
+
+        # self.data_folder = Filer.get_folder('./data/model/' + sub_folder)
+        self.psf_folder = Filer.get_folder('../data/psf/' + sub_folder)
+        self.ray_trace_folder = Filer.get_folder('../data/ray_trace/' + sub_folder)
         self.output_folder = Filer.get_folder('../output/' + sub_folder)
-        file_leader = self.output_folder + sub_folder.replace('/', '_')
         self.tf_dir = Filer.get_folder(self.output_folder + 'fits')
-        self.trace_file = file_leader + '_trace'  # All ray coordinates
+        file_leader = self.output_folder + sub_folder.replace('/', '_')
+        self.trace_file = file_leader + '_trace'                # All ray coordinates
         self.poly_file = file_leader + '_dist_poly.txt'
         self.wcal_file = file_leader + '_dist_wcal.txt'        # Echelle angle as function of wavelength
         self.stats_file = file_leader + '_dist_stats.txt'
@@ -69,8 +71,8 @@ class Filer:
         hdu_list = [None]*4       # Re-order hdus
         for hdu_in in hdu_in_list[1:]:
             det_no = int(hdu_in.header['ID'])
-            x = hdu_in.header['CRVAL1D']
-            y = hdu_in.header['CRVAL2D']
+            x = float(hdu_in.header['CRVAL1D'])
+            y = float(hdu_in.header['CRVAL2D'])
             if origin == 'SCOPESIM':
                 mos_idx = Globals.mos_idx[det_no]
             else:
@@ -109,7 +111,7 @@ class Filer:
 
     @staticmethod
     def write_mosaic(folder, mosaic):
-        """ Write a Zemax image into the primary extension of a new fits file.
+        """ Write a mosaic object (name, primary header, 4 hdus to a new fits file.
         """
         file_name, primary_header, hdu_list_in = mosaic
         path = folder + '/' + file_name
@@ -166,7 +168,6 @@ class Filer:
                 if (abs(efp_x) < xy_filter[0] and abs(efp_y) < xy_filter[1]):
                     efp_xy_list.append([efp_x, efp_y])
         return efp_xy_list
-
 
     def write_fit_parameters(self, wpa_fit, wxo_fit, wxo_hdr, term_fits):
 
@@ -399,22 +400,6 @@ class Filer:
                 transform_list.append(transform)
             hdu_list.close()
         return transform_list
-
-    # @staticmethod
-    # def read_dill(dill_path):
-    #     if dill_path[-4:] != '.dil':
-    #         dill_path += '.dil'
-    #     dill_file = open(dill_path, 'rb')
-    #     python_object = dill.load(dill_file)
-    #     dill_file.close()
-    #     return python_object
-    #
-    # @staticmethod
-    # def write_dill(dill_path, python_object):
-    #     dill_file = open(dill_path + '.dil', 'wb')
-    #     dill.dump(python_object, dill_file)
-    #     dill_file.close()
-    #     return
 
     @staticmethod
     def read_pickle(pickle_path):

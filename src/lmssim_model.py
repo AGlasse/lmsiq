@@ -6,7 +6,8 @@ import math
 import numpy as np
 import synphot.units
 from astropy.io import fits
-from astropy import units as u, constants as const
+from astropy import units as u
+
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
@@ -30,24 +31,29 @@ class Model:
     # Define a list of extended illumination sources.  These images will be convolved with the 'target slice' PSF.
     bgd_srcs = {'dark': {'sed': 'dark'},
                 'wcu_bb': {'sed': 'bb', 'temperature': 1000., 'tau': tau_whs},  # 1000 K black body
+                # 'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},  # 1000 K black body
                 'cfo_mask': {'sed': 'bb', 'temperature': 70., 'tau': tau_cfo_lms},
-                'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},
-                'wcu_ls': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 3.390, 'wrange':0, 'tau': tau_whs},
-                'wcu_ll': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 5.240, 'wrange':0, 'tau': tau_whs},
-                'wcu_lt': {'sed': 'laser', 'power': 5.E+09, 'wavelength': 4.700, 'wrange':100, 'tau': tau_whs},
+                'wcu_amb': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},
+                'wcu_ls': {'sed': 'laser', 'power': 5.E+03, 'wavelength': 3.390, 'wrange':0, 'tau': tau_whs},
+                'wcu_ll': {'sed': 'laser', 'power': 5.E+03, 'wavelength': 5.240, 'wrange':0, 'tau': tau_whs},
+                'wcu_lt': {'sed': 'laser', 'power': 5.E+03, 'wavelength': 4.700, 'wrange':100, 'tau': tau_whs},
                 'sky': {'sed': 'sky', 'tau': tau_sky}  # Model sky emission spectrum
                 }
 
     # Define one or more (point-like) pinhole masks which will spatially filter the extended source.  The model
     # specified PSFs at +-4 slices from the target slice will be convolved with the 'pinhole' images.
     fp_masks = {'cfopnh': {'id': 'cfo', 'efp_xy': [[0., 0.]],           # On-axis pinhole in boresight
-                        'mask_ext': 'cfo_mask'},
-                'pinhole_lm': {'id': 'wcu', 'efp_xy': [[0., 0.]],       # Steerable pinhole in WCU.
-                        'mask_ext': 'wcu_mask'},
-                'grid_lm': {'id': 'wcu', 'efp_xy': [],           # Steerable pinhole in WCU.
-                        'mask_ext': 'wcu_mask'},
-                'open': {'id': 'open', 'efp_xy_cfo': None,     # FP-1 open position
-                         'mask_ext': 'none'}
+                    'mask_ext': 'cfo_mask'},
+                'lm_pinhole': {'id': 'wcu', 'efp_xy': [[0., 0.]],       # Steerable pinhole in WCU.
+                    'mask_ext': 'wcu_mask'},
+                'grid_lm': {'id': 'wcu', 'efp_xy': [],                  # Steerable pinhole in WCU.
+                    'mask_ext': 'wcu_mask'},
+                'align+dark': {'id': 'closed', 'efp_xy': None,             # Blank position in CFO FP wheel
+                    'mask_ext': 'cfo_mask'},
+                'flatfield': {'id': 'open', 'efp_xy': None,                  # FP-1 open position
+                    'mask_ext': 'none'},
+                'wcu_closed': {'id': 'closed', 'efp_xy': None,
+                    'mask_ext': 'wcu_mask'}
                 }
 
     def __init__(self):
@@ -64,58 +70,58 @@ class Model:
         return txt
 
     @staticmethod
-    def _make_waves(wbounds):
-        wmin, wmax = wbounds[0], wbounds[1]
-        delta_w = wmin / 200000
-        if wmin.unit != wmax.unit:
-            wmax = wmax.to(wmin.unit)
-        waves = np.arange(wmin.value, wmax.value, delta_w.value)*wmin.unit
-        return waves
-
-    def get_flux(self, wbounds, src, lt_w_offset):
+    def get_flux(waves, flux, src_list, lt_w_offset):
         """ Calculate selected extended background spectrum (units el/s/pixel) for a wavelength range which
         overfills the instantaneous spectral coverage. Output units should be photons/pixel/second
         """
-        w_ext = self._make_waves(wbounds)
-        f_ext = None
-        source = self.bgd_srcs[src]
-        srp = 100000
-        sed = source['sed']
-        sample_etendue = Globals.elt_area.to(u.cm2) * Globals.alpha_pix * Globals.beta_slice  # AOmega cm^2 mas^2
-        pixel_delta_w = w_ext / srp / Globals.pix_spec_res_el
-        if sed == 'bb':
-            f_bb = Model.black_body(w_ext, tbb=source['temperature'])  # Units are ph sec-1 micron-1 cm-2 mas-2
-            pixel_delta_w = w_ext / srp / Globals.pix_spec_res_el
-            f_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_whs * f_bb      # ph / sec / pix
-        if sed == 'sky':
-            f_sky = Model.load_sky_emission(w_ext)      # Units = ph/s/m2/um/arcsec2
-            sample_etendue = Globals.elt_area.to(u.m2) * Globals.alpha_pix.to(u.arcsec) * Globals.beta_slice.to(u.arcsec)
-            f_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_sky * f_sky
-        if sed == 'laser':
-            f_laser = Model.build_laser_emission(source, w_ext, lt_w_offset)
-            f_ext_in = Model.tau_whs * f_laser
-            atel = math.pi * (39. / 2)**2 *u.m *u.m     # ELT collecting area
-            alpha_pix = Globals.alpha_pix               # Along slice pixel scale
-            beta_slice = Globals.beta_slice             # Slice width
-            delta_w = wbounds[0] / 100000               # Spectral resolution
-            pix_delta_w = 2.5                           # Pixels per spectral resolution element
-            f_ext = f_ext_in * atel * alpha_pix * beta_slice * delta_w / pix_delta_w
+        u_m2 = Globals.u_m2
+        u_cm2 = Globals.u_cm2
+        for (src, k_scale) in src_list:
+            if src == 'dark':
+                continue
+            source = Model.bgd_srcs[src]
+            srp = 100000
+            sed = source['sed']
+            pixel_delta_w = waves / srp / Globals.pix_spec_res_el
+            atel = math.pi * (39. / 2) ** 2 * u_m2          # ELT collecting area
+            alpha_pix = Globals.alpha_pix                   # Along slice pixel scale
+            beta_slice = Globals.beta_slice                 # Slice width
+            omega_pix = alpha_pix * beta_slice
+            pix_delta_w = 2.5  # Pixels per spectral resolution element
+            delta_w = waves[0] / 100000  # Spectral resolution
+            if sed in ['bb']:
+                f_bb = Model.black_body(waves, tbb=source['temperature'])   # Units are (ph/sec/Angstrom/cm2/steradian)
+                df_ext = f_bb * delta_w.to(u.angstrom) * atel.to(u_cm2) * omega_pix.to(u.sr) * Model.tau_whs     # ph / sec / pix
+            if sed == 'sky':
+                f_sky = Model.load_sky_emission(waves)      # Units = ph/s/m2/um/arcsec2
+                sample_etendue = Globals.elt_area.to(u_m2) * Globals.alpha_pix.to(u.arcsec) * Globals.beta_slice.to(u.arcsec)
+                df_ext = sample_etendue * pixel_delta_w.to(u.micron) * Model.tau_sky * f_sky
+            if sed == 'laser':
+                f_laser = Model.build_laser_emission(source, waves, lt_w_offset)
+                f_ext_in = Model.tau_whs * f_laser
+                df_ext = f_ext_in * atel.to(u_cm2) * alpha_pix * beta_slice * delta_w / pix_delta_w
+            flux += df_ext * k_scale
 
-        f_ext_min, f_ext_max = np.amin(f_ext), np.amax(f_ext)
-        fmt = "Adding extended {:s} flux with min/max signal = {:10.1f}/{:10.1f} el/pix/sec"
-        fmt.format(sed, f_ext_min, f_ext_max)
-        return w_ext, f_ext
+            f_ext_min, f_ext_max = np.amin(flux), np.amax(flux)
+            if Globals.is_debug('medium'):
+                fmt = "Adding {:s} flux with min/max signal = {:10.1f} /{:10.1f} el/pix/sec"
+                print(fmt.format(sed, f_ext_min.value, f_ext_max.value))
+        return waves, flux
 
     def get_fp_mask(self, wcu_mask, cfo_mask):
-        if cfo_mask == 'pnh':
-            fp_mask = Model.fp_masks['cfopnh']
+        fp_mask = None
+        if cfo_mask in ['pnh-1', 'align+dark']:
+            fp_mask = Model.fp_masks[cfo_mask]
             return fp_mask
-        if wcu_mask == 'open':
-            fp_mask = Model.fp_masks['open']
+        if wcu_mask in ['flatfield', 'spare']:
+            fp_mask = Model.fp_masks[wcu_mask]
             return fp_mask
-        fp_mask = Model.fp_masks[wcu_mask]
-        file_name = 'fp_mask_' + wcu_mask
-        fp_mask['efp_xy'] = Filer.read_pinholes(file_name, xy_filter=(0.5, 1.0))
+        if wcu_mask in ['lm_pinhole']:
+            fp_mask = Model.fp_masks[wcu_mask]
+            file_name = 'fp_mask_pinhole_lm'
+            fp_mask['efp_xy'] = Filer.read_pinholes(file_name, xy_filter=(0.5, 1.0))
+        if fp_mask is None:
+            print('!! Focal plane mask ' + wcu_mask, ' not found !!')
         return fp_mask
 
     @staticmethod
@@ -158,7 +164,6 @@ class Model:
             sn_min, sn_max = slice_no_tgt - sn_radius, slice_no_tgt + sn_radius + 1
 
             if opticon == spifu:
-                # field_idx = field_no - 1
                 spec_no = 1
                 sn_min = slice_no_tgt - 1 + field_idx % 3
                 sn_max = sn_min + 1
@@ -187,6 +192,74 @@ class Model:
                 norm_factor = oversampling * oversampling / psf_sum
                 psf *= norm_factor
         return psf_dict
+
+    @staticmethod
+    def load_source_lists(sim_config):
+        """ Parse the configuration dictionary to set up the list of sources which contribute
+        to the spectral image.  There are two lists, one for the background field and the other
+        for any PSF transmitted by a pinhole mask.
+        """
+        lt_w_offset = 0.
+        bgd_src_list, pnh_src_list = [], []
+        if sim_config['wcu_per_arm'] == 'out':  # IN = Looking at Leiden sky
+            bgd_src_list.append(('sky', 1.))
+        else:  # Looking at WCU
+            if sim_config['wcu_laser_sw'] != 'false':
+                bgd_src_list.append(('wcu_ls', 1.))
+            if sim_config['wcu_laser_lw'] != 'false':
+                bgd_src_list.append(('wcu_ll', 1.))
+            if sim_config['wcu_laser_tune'] != 'false':
+                bgd_src_list.append(('wcu_lt', 1.))
+                lt_w_offset = float(sim_config['wcu_laser_tune_woff'])
+            if sim_config['wcu_bb_temp'] != 'off':
+                bb_aper = sim_config['wcu_bb_ap_mask']
+                k_bb = 1. if bb_aper == 'open' else 0.
+                if 'mask' in bb_aper:
+                    k_bb = float(bb_aper[4:]) / 15.
+                bgd_src_list.append(('wcu_bb', k_bb))
+                bgd_src_list.append(('wcu_amb', 1. - k_bb))
+            if sim_config['wcu_fp2_1'] == 'lm_pinhole':  # Ambient mask in beam
+                pnh_src_list = bgd_src_list.copy()
+                bgd_src_list = [('wcu_amb', 1.)]
+        if 'field' not in sim_config['cfo_fp2']:  # CFO focal plane mask is in beam
+            pnh_src_list = bgd_src_list.copy()  # This will be what is seen through the CFO pinhole
+            bgd_src_list = [('cfo_mask', 1.)]
+        if Globals.is_debug('low'):
+            src_list_names = ['Background', 'Pinhole']
+            for src_list_name, src_list in zip(src_list_names, [bgd_src_list, pnh_src_list]):
+                print(src_list_name)
+                print("{:10s},{:14s}".format('source', 'scale_factor'))
+                fmt = "{:10s},{:14.2f}"
+                for src in src_list:
+                    print(fmt.format(src[0], src[1]))
+        return bgd_src_list, pnh_src_list, lt_w_offset
+
+    @staticmethod
+    def make_spectra(transforms, bgd_src_list, pnh_src_list, lt_w_offset):
+        spectra, w_lims = {}, {}
+        k_toy_ss = 0.00177  # Scale factor to transform from toysim to scopesim flux values
+
+        for transform in transforms:
+            slice_cfg = transform.slice_configuration
+            w_slice_min, w_slice_max = slice_cfg['w_min'] * u.micron, slice_cfg['w_max'] * u.micron
+            ech_ord = slice_cfg['ech_ord']
+            if ech_ord not in w_lims.keys():
+                w_lims[ech_ord] = [10.0, 0.0] * u.micron
+            w_lims[ech_ord][0] = w_slice_min if w_slice_min < w_lims[ech_ord][0] else w_lims[ech_ord][0]
+            w_lims[ech_ord][1] = w_slice_max if w_slice_max > w_lims[ech_ord][1] else w_lims[ech_ord][1]
+        for ech_ord in w_lims:
+            w_min, w_max = w_lims[ech_ord][0], w_lims[ech_ord][1]
+            w_range = w_max - w_min
+            w_bounds = [w_min - 0.1 * w_range, w_max + 0.1 * w_range]
+            delta_w = w_min / 200000
+            waves = np.arange(w_bounds[0].value, w_bounds[1].value, delta_w.value) * w_min.unit
+            f_bgd = np.zeros(waves.shape) * Globals.u_flux
+            f_pnh = np.zeros(waves.shape) * Globals.u_flux
+
+            waves, f_bgd = Model.get_flux(waves, f_bgd, bgd_src_list, lt_w_offset)
+            waves, f_pnh = Model.get_flux(waves, f_pnh, pnh_src_list, lt_w_offset)
+            spectra[ech_ord] = waves, f_bgd * k_toy_ss, f_pnh * k_toy_ss
+        return spectra
 
     @staticmethod
     def make_blaze_dictionary(transforms):
@@ -226,13 +299,10 @@ class Model:
         pix_hw = 5
         n_pix_hw = 2 * pix_hw + 1
         indices = np.arange(n_pix_hw)        # 101 pixel scale, line centred at pixel 50.
-        lsf = Globals.gauss(indices, laser_power, 5., pix_sigma)
+        lsf = Globals.gauss(indices, laser_power, 5., pix_sigma.value)
         laser_flux = np.zeros(waves.shape)
         laser_flux[idx_cen - pix_hw: idx_cen + pix_hw + 1] = lsf
-################################################ TEMPORARY KLUDGE
-##        laser_flux = 1.E8 * np.sin(waves * u.rad * 10000. / u.micron) ** 2
-################################################
-        return laser_flux
+        return laser_flux * u.ph / u.cm / u.cm / u.mas / u.mas / u.s / u.micron
 
     @staticmethod
     def black_body(waves, tbb=1000.):
@@ -242,9 +312,10 @@ class Model:
         bb = SourceSpectrum(BlackBody1D, temperature=tbb * u.K)
         angstrom_micron = 1.0E4
         k = angstrom_micron / Globals.mas2_sterad
-        flux_photlam = bb(waves.to(u.micron))
-        flux = flux_photlam.value * k * u.ph / u.cm / u.cm / u.mas / u.mas / u.s / u.micron
-        return flux
+        flux = bb(waves.to(u.micron)).value
+        photlam = 1 / u.s / u.angstrom / Globals.u_cm2 / u.sr
+        flux_photlam = flux * photlam
+        return flux_photlam
 
     @staticmethod
     def make_tau_blaze(blaze, ech_ord, ech_ang):
@@ -280,11 +351,12 @@ class Model:
         model_configurations = {nominal: nom_config, spifu: spifu_config}
         model_config = model_configurations[opticon]
         filer = Filer()
-        filer.set_configuration('distortion', opticon)
+        filer.set_configuration('iq', opticon)
         defoc_str = '_defoc000um'
 
         _, _, date_stamp, _, _, _ = model_config
         dataset_folder = '../data/model/iq/' + opticon + '/' + date_stamp + '/'
+        psf_folder = filer.psf_folder
         config_no = 41 - ech_ord if opticon == nominal else 0
         config_str = "_config{:03d}".format(config_no)
 
@@ -314,7 +386,8 @@ class Model:
                 iq_slice_str = "_spat{:02d}".format(slice_no) + "_spec{:d}_detdesi".format(spec_no)
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
-                file_path = dataset_folder + iq_path
+                # file_path = dataset_folder + iq_path
+                file_path = psf_folder + iq_path
                 hdu_list = filer.read_zemax_fits(file_path)
                 hdr, psf = hdu_list[0].header, hdu_list[0].data
 

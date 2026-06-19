@@ -21,10 +21,8 @@ class ImageManager:
         Method 'load_dataset' then returns the images plus a dictionary (obs_dict) containing the single
         values corresponding to the selected data.
         """
-        model_dict = {'optical_path': None,
-                      'im_pix_size': None,
-                      'fits_trailer': None,
-                      'mc_bounds': None,
+        model_dict = {'optical_path': None, 'im_pix_size': None,
+                      'fits_trailer': None, 'mc_bounds': None,
                       }
         config_dict = {'folders': [],
                        'config_nos': [],
@@ -38,8 +36,8 @@ class ImageManager:
         mc_code, mc_width = 'det', 4
         mc_codelen = len(mc_code)
 
-        dataset_folder = iq_filer.data_folder
-        folder_list = iq_filer.get_file_list(dataset_folder, exc_tags=['.csv'])
+        psf_folder = iq_filer.psf_folder
+        folder_list = iq_filer.get_file_list(psf_folder, exc_tags=['.csv'])
         folder_codes = {'config': 'config_nos',
                         'field': 'field_nos',
                         'defoc': 'focus_shifts'}
@@ -62,7 +60,7 @@ class ImageManager:
             model_dict['im_pix_size'] = 4.5                 # Default image pixel size in microns
             config_dict['slice_tgts'].append(slice_tgt)
 
-            fits_folder = dataset_folder + folder + '/'
+            fits_folder = psf_folder + folder + '/'
             par_files = iq_filer.get_file_list(fits_folder, inc_tags=['.txt'])
             if len(par_files) == 0:
                 print("Text file not found in {:s}".format(fits_folder))
@@ -344,27 +342,6 @@ class ImageManager:
                     params[key] = value.strip()
         return params
 
-    # def read_psf_set(self, iq_filer, ech_ord):
-    #     iq_date_stamp = '2024073000'
-    #     iq_dataset_folder = '../data/iq/nominal/' + iq_date_stamp + '/'
-    #     config_no = 41 - ech_ord
-    #     iq_config_str = "_config{:03d}".format(config_no)
-    #     iq_field_str = "_field{:03d}".format(1)
-    #     iq_defoc_str = '_defoc000um'
-    #     iq_config_str = 'lms_' + iq_date_stamp + iq_config_str + iq_field_str + iq_defoc_str
-    #     # iq_folder = '../data/iq/nominal/' + iq_dataset + '/lms_2024073000_config020_field001_defoc000um/'
-    #     iq_folder = iq_dataset_folder + iq_config_str + '/'
-    #     amin, vmin, scale, hw_det_psf = None, None, None, None
-    #     psf_dict = {}
-    #     for slice_no in range(9, 18):
-    #         iq_slice_str = "_spat{:02d}".format(slice_no) + '_spec0_detdesi'
-    #         iq_filename = iq_config_str + iq_slice_str + '.fits'
-    #         iq_path = iq_folder + iq_filename
-    #         hdr, psf = iq_filer.read_fits(iq_path)
-    #         # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
-    #         psf_dict[slice_no] = hdr, psf
-    #     return psf_dict
-    #
     @staticmethod
     def read_zemax_image(path):
         """ Read in a model zemax image """
@@ -374,15 +351,6 @@ class ImageManager:
         image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
         return image
 
-    # @staticmethod
-    # def read_mosaic(path):
-    #     """ Read in a model zemax image """
-    #     hdu_list = fits.open(path, mode='readonly')
-    #     hdu = hdu_list[0]
-    #     image_in = hdu.data
-    #     image = np.array(image_in)  # Make a copy of the raw image (maybe shift it).
-    #     return image
-    #
     @staticmethod
     def load_dataset(iq_filer, selection, **kwargs):
         """ Load a data (sub-)set (perfect, design plus MC images).
@@ -458,7 +426,7 @@ class ImageManager:
             ds_dict[kw_key] = kwargs[kw_key]
 
         folder = ds_dict['folder']
-        fits_folder = iq_filer.data_folder + folder + '/'
+        fits_folder = iq_filer.psf_folder + folder + '/'
 
         slice_no = ds_dict['slice_no']
         spifu_no = ds_dict['spifu_no']
