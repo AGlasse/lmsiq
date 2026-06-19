@@ -16,8 +16,12 @@ class Globals:
     deg_rad = 180. / math.pi
     mas_rad = 2.06265E+8
     mas2_sterad = mas_rad * mas_rad
-    u.plam = u.photon / u.s / u.cm / u.cm / u.angstrom / u.steradian
-    u.cm2 = u.cm * u.cm
+    u.ph = u.dimensionless_unscaled
+    u.pixel = u.dimensionless_unscaled
+    u_flux = u.ph / u.pixel / u.s
+    u_plam = u.photon / u.s / u.cm / u.cm / u.angstrom / u.steradian
+    u_m2 = u.m * u.m
+    u_cm2 = u.cm * u.cm
 
     # Optical parameters
     elt_area = 1350. * u.m * u.m
@@ -27,7 +31,7 @@ class Globals:
     efp_arcsec_mm = 0.180723 * u.arcsec / u.mm
 
     # Plate scale at detector
-    alpha_pix = 8.7 * u.mas                                   #
+    alpha_pix = 8.7 * u.mas
     beta_slice = 20.7 * u.mas
 
     intra_slice_gap = 20           # Nominal gap between slices in pixels.
@@ -56,10 +60,10 @@ class Globals:
     dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                        coord_in, coord_out)
     dist_ext_config = ('distortion', extended, '20260112', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                       coord_in, coord_out)     # 20250110, 20260112
+                       coord_in, coord_out)
     iq_nom_config = ('iq', nominal, '2024073000', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                      coord_in, coord_out)
-    iq_ext_config = ('iq', extended, '2024061403', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+    iq_ext_config = ('iq', extended, '2024061802', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
                      coord_in, coord_out)
     model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}

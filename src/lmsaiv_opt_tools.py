@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import copy
 import scipy
 from scipy.optimize import curve_fit, OptimizeWarning
 from lms_globals import Globals
@@ -25,34 +24,34 @@ class OptTools:
         moscopy = moscopy_name, hdr, moscopy_hdus
         return moscopy
 
-    @staticmethod
-    def subtract_mosaics(mos1, mos2):
-        name1, pri_hdr1, hdu_list1 = mos1
-        name2, pri_hdr2, hdu_list2 = mos2
-        mos_hdr, mos_hdus = None, []
-        for hdu1, hdu2 in zip(hdu_list1, hdu_list2):
-            hdr = copy.deepcopy(hdu1.header)
-            hdu = hdu1.copy()
-            hdu.data = hdu1.data - hdu2.data
-            mos_hdus.append(hdu)
-        moscopy_name = name1[:-5] + '_bs.fits'
-        moscopy = moscopy_name, pri_hdr1, mos_hdus
-        return moscopy
+    # @staticmethod
+    # def subtract_mosaics(mos1, mos2):
+    #     name1, pri_hdr1, hdu_list1 = mos1
+    #     name2, pri_hdr2, hdu_list2 = mos2
+    #     mos_hdr, mos_hdus = None, []
+    #     for hdu1, hdu2 in zip(hdu_list1, hdu_list2):
+    #         hdr = copy.deepcopy(hdu1.header)
+    #         hdu = hdu1.copy()
+    #         hdu.data = hdu1.data - hdu2.data
+    #         mos_hdus.append(hdu)
+    #     moscopy_name = name1[:-5] + '_bs.fits'
+    #     moscopy = moscopy_name, pri_hdr1, mos_hdus
+    #     return moscopy
 
-    @staticmethod
-    def add_mosaics(mos1, mos2):
-        name1, pri_hdr1, hdu_list1 = mos1
-        name2, pri_hdr2, hdu_list2 = mos2
-        mos_hdr, mos_hdus = None, []
-        for hdu1, hdu2 in zip(hdu_list1, hdu_list2):
-            hdr = copy.deepcopy(hdu1.header)
-            hdu = hdu1.copy()
-            hdu.data = hdu1.data + hdu2.data
-            mos_hdus.append(hdu)
-        moscopy_name = name1[:-5] + '_ca.fits'
-        moscopy = moscopy_name, pri_hdr1, mos_hdus
-        return moscopy
-
+    # @staticmethod
+    # def add_mosaics(mos1, mos2):
+    #     name1, pri_hdr1, hdu_list1 = mos1
+    #     name2, pri_hdr2, hdu_list2 = mos2
+    #     mos_hdr, mos_hdus = None, []
+    #     for hdu1, hdu2 in zip(hdu_list1, hdu_list2):
+    #         hdr = copy.deepcopy(hdu1.header)
+    #         hdu = hdu1.copy()
+    #         hdu.data = hdu1.data + hdu2.data
+    #         mos_hdus.append(hdu)
+    #     moscopy_name = name1[:-5] + '_ca.fits'
+    #     moscopy = moscopy_name, pri_hdr1, mos_hdus
+    #     return moscopy
+    #
     @staticmethod
     def dark_stats(mosaics):
         for mosaic in mosaics:
@@ -78,149 +77,7 @@ class OptTools:
                 rd_noise = stdev * el_adu / math.sqrt(2. / ndit)
                 text = fmt.format(i + 1, median, stdev, median_current, rd_noise)
                 print(text)
-
         return
-
-    # @staticmethod
-    # def flood_stats(mosaic):
-    #     """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
-    #     """
-    #     file_name, hdr, hdus = mosaic
-    #     opticon = hdr['HIERARCH ESO INS MODE']
-    #
-    #     # Set up slice map object to hold slice images
-    #     slice_map = OptTools.copy_mosaic(mosaic, clear_data=True, copy_name='slice_map')
-    #
-    #     u.arcsec2 = u.arcsec * u.arcsec
-    #
-    #     dark_pctile = 10.
-    #     bright_pctile = 90.         # Choose the bright pixel limit to avoid hot pixels.
-    #     alpha_cut = 0.5
-    #     print()
-    #     print("File = {:s}".format(file_name))
-    #     fmt = "Dark pixels defined as those < {:.0f}th percentile signal level"
-    #     print(fmt.format(dark_pctile))
-    #     fmt = "Illuminated pixels defined as those brighter than the {:.0f}th percentile signal level"
-    #     print(fmt.format(bright_pctile))
-    #     fmt = "alpha extent of each slice defined as distance between {:3.2f} of bright level"
-    #     print(fmt.format(alpha_cut))
-    #     fmt = "Illuminated pixel x slice fov = {} x {} mas"
-    #     print(fmt.format(Globals.alpha_pix, Globals.beta_slice))
-    #     profile_cols = {1: [600, 800, 1000, 1200], 3: [600, 700, 800, 1200],
-    #                     2: [1000, 1800, 1900, 2000], 4: [1000, 1800, 1900, 2000]}
-    #
-    #     print()
-    #     fmt = "{:>10s},{:>10s},{:>10s},{:>10s}"
-    #     print(fmt.format('Detector', 'dark',  'bright',    'illum.'))
-    #     print(fmt.format('        ', 'level', 'level',        'fov'))
-    #     print(fmt.format('        ', 'DN',       'DN',  '[sq_asec]'))
-    #     fmt = "{:>10d},{:>10.2e},{:>10.2e},{:>10.3f}"
-    #
-    #     # Separate slices by finding cuts in d_signal / d_row
-    #     n_slices = 28 if '_nom_' in file_name else 3
-    #     n_spifus = 0 if '_nom_' in file_name else 6
-    #
-    #     profiles = []
-    #     alpha_det = [0.]*4
-    #     for hdu in hdus:
-    #         det_no = int(hdu.header['ID'])
-    #         det_idx = det_no - 1
-    #         slice_coords = {'det_no': det_no, 'slice_nos': [], 'cols': [], 'row_mins': [], 'row_maxs': []}
-    #
-    #         n_profiles = len(profile_cols[det_no])
-    #         dark_level, bright_level = 0., 0.           # Average signal cut levels for this detector
-    #         for pr_col in profile_cols[det_no]:
-    #             pr_col_hw = 2                           # Co-add 2 x pr_col_hw + 1 centred on pr_col.
-    #             col1, col2 = pr_col - pr_col_hw, pr_col + pr_col_hw
-    #
-    #             slice_no = 1 if det_no in [3, 4] else 15  # Starting slice number (bottom row)
-    #             spifu_no = 0
-    #             if n_spifus > 0:
-    #                 slice_no = 12
-    #                 spifu_no = 1 if det_no in [3, 4] else 4
-    #             y_vals = np.nanmean(hdu.data[:, col1:col2+1], axis=1)
-    #             dark_level = np.nanpercentile(y_vals, dark_pctile)
-    #             bright_level = np.nanpercentile(y_vals, bright_pctile)
-    #             on_rows, off_rows = [], []
-    #             row_off = 0
-    #             cut_level = bright_level * alpha_cut
-    #             slice_count = 0
-    #             while True:
-    #                 # Find next bright pixel
-    #                 on_indices = np.argwhere(y_vals[row_off:] > cut_level)
-    #                 if len(on_indices) < 1:       # No more bright pixels found.
-    #                     break
-    #                 row_on = row_off + on_indices[0][0]
-    #                 r_on = np.interp(cut_level, [y_vals[row_on-1], y_vals[row_on]], [row_on-1, row_on])
-    #                 off_indices = np.argwhere(y_vals[row_on:] < cut_level)
-    #                 row_off = row_on + off_indices[0][0]
-    #                 slice_coords['cols'].append(pr_col)
-    #                 slice_coords['row_mins'].append(row_on)
-    #                 slice_coords['row_maxs'].append(row_off)
-    #                 slice_coords['slice_nos'].append(slice_no)
-    #                 r_off = np.interp(cut_level, [y_vals[row_off], y_vals[row_off-1]], [row_off, row_off-1])
-    #
-    #                 alpha_slice = (row_off - r_on) * Globals.alpha_pix
-    #                 alpha_det[det_idx] += alpha_slice
-    #                 on_rows.append(r_on)
-    #                 off_rows.append(r_off)
-    #
-    #                 if n_spifus == 0:
-    #                     slice_no += 1
-    #                 else:                       # MSA set to 'extended'
-    #                     slice_count += 1
-    #                     slice_no += 1
-    #                     if slice_count % n_slices == 0:
-    #                         slice_no -= n_slices
-    #                         if spifu_no != 0:
-    #                             spifu_no += 1
-    #             x_indices = np.arange(0, len(y_vals))
-    #             title = "det {:d}, cols {:d}-{:d}".format(det_no, col1, col2)
-    #             on_points = on_rows, [cut_level] * len(on_rows), 'green'
-    #             off_points = off_rows, [cut_level] * len(off_rows), 'blue'
-    #             profile = title, x_indices, y_vals, [on_points, off_points]
-    #             profiles.append(profile)
-    #             # Calculate total length of illuminated slices.
-    #             illum_rows_sum = 0.
-    #             for row_on, row_off in zip(on_rows, off_rows):
-    #                 illum_rows = row_off - row_on
-    #                 illum_rows_sum += illum_rows
-    #
-    #         # Create the slice map from the table of slice bounds.
-    #         poly_degree = 2 if n_profiles > 3 else n_profiles - 1
-    #
-    #         slice_nos = np.array(slice_coords['slice_nos'], dtype='int64')
-    #         unique_slice_nos = np.unique(slice_nos)
-    #         slice_map_name, slice_map_hdr, slice_map_hdus = slice_map
-    #         slice_map_hdu = slice_map_hdus[det_idx]
-    #         for slice_no in unique_slice_nos:
-    #             idx = np.where(slice_no == slice_nos)[0]
-    #             cols = np.array(slice_coords['cols'])[idx]
-    #             row_mins = np.array(slice_coords['row_mins'])[idx]
-    #             row_maxs = np.array(slice_coords['row_maxs'])[idx]
-    #             row_min_fit = np.polyfit(cols, row_mins, poly_degree)
-    #             row_max_fit = np.polyfit(cols, row_maxs, poly_degree)
-    #             nr, nc = slice_map_hdus[det_idx].data.shape
-    #             cs = np.arange(0, nc, 1)
-    #             r1s = np.rint(np.polyval(row_min_fit, cs))
-    #             r2s = np.rint(np.polyval(row_max_fit, cs))
-    #             for c, r1, r2 in zip(cs, r1s, r2s):
-    #                 slice_map_hdu.data[int(r1):int(r2), int(c)] = slice_no
-    #         alpha_det[det_idx] /= n_profiles
-    #         det_fov = alpha_det[det_idx] * Globals.beta_slice
-    #         fmt = "{:>10d},{:>10.1f},{:>10.1f},{:>10.3f}"
-    #         print(fmt.format(det_no, dark_level, bright_level, det_fov.to(u.arcsec2)))
-    #
-    #     alpha_02 = alpha_det[0] + alpha_det[2]
-    #     alpha_13 = alpha_det[1] + alpha_det[3]
-    #     alpha_ave = 0.5 * (alpha_02 + alpha_13)
-    #     fov = alpha_ave * Globals.beta_slice
-    #     print()
-    #     print("Total field of view = {:5.3f} (cf METIS-3667, shall be > 0.500 arcsec2)".format(fov.to(u.arcsec2)))
-    #     alpha_ext, beta_ext = alpha_ave / n_slices, Globals.beta_slice * n_slices
-    #     aspect_ratio = alpha_ext / beta_ext
-    #     print("Aspect ratio (alpha/beta) = {:5.3f}:1 (cf METIS-3667, shall be 1:1 < ar < 2:1)".format(aspect_ratio))
-    #     return slice_map, profiles
 
     @staticmethod
     def transform_detector_image(mosaic, det_no, xy_pix=(0, 0), angle=0.0):
@@ -236,25 +93,36 @@ class OptTools:
         return mosaic
 
     @staticmethod
-    def extract_det_traces(mosaic, type, slice_map, **kwargs):
+    def extract_det_traces(mosaic, type, slice_map,
+                           snr_cut=100, lt_waves=None):
         """ Extract iso-alpha or iso-lambda traces from a spectral image.
-        :param mosaic: Data tuple (name, , image list
+        :param mosaic: Data tuple (name, , image list)  Background subtracted trace mosaic
         :param type: 'alpha' or 'lambda'
         :param slice_map:
         :param kwargs:
         :return:
         """
         popt, pcov = None, None
+        mos_name, mos_primary_header, mos_hdus = mosaic
+        pri_ang = mos_primary_header['HIERARCH AIT PRI_ANG']
+        ech_ang = mos_primary_header['HIERARCH AIT ECH_ANG']
+        ref_ech_ord = mos_primary_header['HIERARCH ACHG REF_ECH_ORD']
 
         is_alpha = type == 'alpha'
-        mos_name, mos_primary_header, mos_hdus = mosaic
+        if is_alpha:
+            efp_x = mosaic[1]['HIERARCH ACHG WCU X']
+            efp_y = mosaic[1]['HIERARCH ACHG WCU Y']
+
         trace_idx = 0
-        det_traces = {'name': mos_name, 'type': type, 'det_no': [], 'mos_idx': [],
+
+        det_traces = {'name': mos_name, 'type': type,
+                      'pri_ang': pri_ang, 'ech_ang': ech_ang, 'ech_ord': ref_ech_ord,
+                      'det_no': [], 'mos_idx': [],
                       'trace_idx': [], 'slice_no': [],
-                      'pt_u_coords': [], 'pt_v_coords':[], 'u_mean':[], 'v_max':[],
+                      'pt_u_coords': [], 'pt_v_coords': [], 'u_mean': [], 'v_max': [],
                       'popt': [], 'pcov': [],
-                      'theta': [], 'theta_err': [], 'theta_ufiducial': []
-                      }
+                      'theta': [], 'theta_err': [], 'theta_ufiducial': [],
+                      'efp_x': [], 'efp_y': [], 'efp_w': []}
         _, _, slice_map_hdus = slice_map
         fmt = ''
         if Globals.is_debug('low'):
@@ -275,6 +143,7 @@ class OptTools:
             snu = np.unique(slice_map_data)
             slice_nos = [int(s) for s in snu if s > 0.]
             # Start by extracting the data for each slice.
+            notrace_slices = []
             for slice_no in slice_nos:
                 ism = int(0.5 * Globals.intra_slice_gap)        # Intra-slice margin
                 idx = np.argwhere(slice_no == slice_map_data)
@@ -295,8 +164,6 @@ class OptTools:
 
                 repeat = True
                 s_aves = np.mean(slice_image, axis=axis)
-                if slice_no == 22:
-                    nob = 1
                 while repeat:
                     v_max = np.argmax(s_aves)                           # Brightest row (alpha) / column (lambda)
                     v1_sig, v2_sig = v_max - 5, v_max + 5               # Rows/cols to use for trace analysis
@@ -305,7 +172,7 @@ class OptTools:
                     v1_clr, v2_clr = max(0, v1_clr), min(v_count, v2_clr)
                     signal = np.mean(s_aves[v1_sig:v2_sig])
                     snr = (signal - bgd) / noise
-                    repeat = snr > 8
+                    repeat = snr > snr_cut
                     if repeat:
                         if Globals.is_debug('low'):
                             text = fmt.format(det_no, slice_no, v_max + rs_min, signal, bgd, noise, snr)
@@ -313,57 +180,78 @@ class OptTools:
                         v_max_list.append(v_max)
                         s_aves[v1_clr:v2_clr] = bgd
                 if len(v_max_list) < 1:
-                    if Globals.is_debug('high'):
-                        print('No traces found for det_no ', det_no, ', slice_no ', slice_no)
+                    if Globals.is_debug('low'):
+                        # print('No traces found for det_no ', det_no, ', slice_no ', slice_no)
+                        notrace_slice = "{:d}_{:d}".format(det_no, slice_no)
+                        notrace_slices.append(notrace_slice)
                     continue
-                n_samples = 10 if is_alpha else 5
-                u_interval = u_count // (n_samples + 1)
-                u_start, u_end = u_interval, u_count - u_interval
-                u_list = list(range(u_start, u_end, u_interval))
-                u_hw, v_hw = 5, 10       # Sample half width in along and across trace dimensions to fit gaussian.
-                for v_max in v_max_list:
-                    v1, v2 = v_max - v_hw, v_max + v_hw  # Across trace rows/cols to use for trace analysis
-                    v1, v2 = max(v1, 0), min(v2, v_count)
-                    pt_u_coords, pt_v_coords = [], []
-                    for u in u_list:
-                        # Find the trace coordinates by fitting gaussians
-                        u1, u2 = u - u_hw, u + u_hw
-                        u1, u2 = max(u1, 0), min(u2, u_count)
-                        sample_image = slice_image[v1:v2, u1:u2] if is_alpha else slice_image[u1:u2, v1:v2]
-                        z_vals = np.mean(sample_image, axis=axis)
-                        v_vals = np.array(list(range(v1, v2)))
-                        idx_max = np.argmax(z_vals)
-                        z_max = z_vals[idx_max]
-                        v_sigma = 1.0
-                        p0_guess = [z_max, v1 + v_hw, v_sigma]
-                        try:
-                            gopt, gcov = curve_fit(Globals.gauss, v_vals, z_vals, p0=p0_guess)
-                            v_off = rs_min if is_alpha else 0
-                            v_gauss_peak = gopt[1] + v_off     # Get the row/col coordinate in the image frame.
-                            pt_u_coords.append(u + u_off)
-                            pt_v_coords.append(v_gauss_peak)
-                        except:
-                            print('Gaussian fit failed')
+                else:
+                    n_samples = 10 if is_alpha else 5
+                    u_interval = u_count // (n_samples + 1)
+                    u_start, u_end = u_interval, u_count - u_interval
+                    u_list = list(range(u_start, u_end, u_interval))
+                    u_hw, v_hw = 5, 10       # Sample half width in along and across trace dimensions to fit gaussian.
+                    for v_max in v_max_list:
+                        v1, v2 = v_max - v_hw, v_max + v_hw  # Across trace rows/cols to use for trace analysis
+                        v1, v2 = max(v1, 0), min(v2, v_count)
+                        pt_u_coords, pt_v_coords = [], []
+                        for u in u_list:
+                            # Find the trace coordinates by fitting gaussians
+                            u1, u2 = u - u_hw, u + u_hw
+                            u1, u2 = max(u1, 0), min(u2, u_count)
+                            sample_image = slice_image[v1:v2, u1:u2] if is_alpha else slice_image[u1:u2, v1:v2]
+                            z_vals = np.mean(sample_image, axis=axis)
+                            v_vals = np.array(list(range(v1, v2)))
+                            idx_max = np.argmax(z_vals)
+                            z_max = z_vals[idx_max]
+                            v_sigma = 1.0
+                            p0_guess = [z_max, v1 + v_hw, v_sigma]
+                            try:
+                                gopt, gcov = curve_fit(Globals.gauss, v_vals, z_vals, p0=p0_guess)
+                                v_off = rs_min if is_alpha else 0
+                                v_gauss_peak = gopt[1] + v_off     # Get the row/col coordinate in the image frame.
+                                pt_u_coords.append(float(u + u_off))
+                                pt_v_coords.append(v_gauss_peak)
+                            except:
+                                text = fmt.format(det_no, slice_no, v_max + rs_min, signal, bgd, noise, snr)
+                                print(text + ' Gaussian fit failed')
 
-                    u_mean = np.mean(pt_u_coords)
-                    p0_guess = [u_mean, 0., 0., 0.]
-                    try:
-                        popt, pcov = curve_fit(Globals.polynomial, pt_u_coords, pt_v_coords, p0=p0_guess)
-                    except (RuntimeError, OptimizeWarning, ValueError):
-                        print('!! Error finding polynomial trace fit !!')
-                    det_traces['trace_idx'].append(trace_idx)
-                    det_traces['det_no'].append(det_no)
-                    det_traces['mos_idx'].append(mos_idx)
-                    det_traces['slice_no'].append(slice_no)
-                    det_traces['popt'].append(popt)
-                    det_traces['pcov'].append(pcov)
-                    det_traces['pt_u_coords'].append(pt_u_coords)
-                    det_traces['pt_v_coords'].append(pt_v_coords)
-                    det_traces['u_mean'].append(u_mean)
-                    det_traces['v_max'].append(v_max)
-                    # Calculate rotation angle as differential of polynomial fit
-                    trace_idx += 1
-                next_slice = 1
+                        u_mean = np.mean(pt_u_coords)
+                        p0_guess = [u_mean, 0., 0., 0.]
+                        n_func_pars = len(p0_guess)
+                        n_data_points = len(pt_u_coords)
+                        if n_data_points < n_func_pars:
+                            continue
+                        try:
+                            popt, pcov = curve_fit(Globals.polynomial, pt_u_coords, pt_v_coords, p0=p0_guess)
+                        except (RuntimeError, OptimizeWarning, ValueError):
+                            print('!! Error finding polynomial trace fit !!')
+                        det_traces['trace_idx'].append(trace_idx)
+                        det_traces['det_no'].append(det_no)
+                        det_traces['mos_idx'].append(mos_idx)
+                        det_traces['slice_no'].append(slice_no)
+                        det_traces['popt'].append(popt)
+                        det_traces['pcov'].append(pcov)
+                        det_traces['pt_u_coords'].append(pt_u_coords)
+                        det_traces['pt_v_coords'].append(pt_v_coords)
+                        det_traces['u_mean'].append(u_mean)
+                        det_traces['v_max'].append(v_max)
+                        if is_alpha:
+                            det_traces['efp_x'].append(efp_x)
+                            det_traces['efp_y'].append(efp_y)
+                        else:
+                            nob = 1
+
+                        # Calculate rotation angle as differential of polynomial fit
+                        trace_idx += 1
+                det_traces['efp_w'] = [None]*trace_idx if is_alpha else lt_waves
+
+            if Globals.is_debug('low'):
+                text = "No traces found for det_slice no. = "
+                for notrace_slice in notrace_slices:
+                    text += notrace_slice + ", "
+                print(text)
+
         det_traces = OptTools._find_thetas(det_traces)
         print("{:d} traces found.".format(len(det_traces['det_no'])))
         if Globals.is_debug('low'):

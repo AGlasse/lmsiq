@@ -49,17 +49,18 @@ class Opt01:
     @staticmethod
     def _find_fov(opticon, as_built):
         opticon_tag = opticon[0:3]
-        mosaics = Filer.read_mosaic_list(['lms_opt_01', 'flood', opticon_tag])
+        mosaics = Filer.read_mosaic_list(['lms_opt_01', 'flat_lamp', opticon_tag])
         # Coadd all flood images to allow full coverage (using multiple LMS configurations)
         flood = None
         for mosaic in mosaics:
+            Plot.mosaic(mosaic, title=mosaic[0])
             if flood is None:
                 flood = Mosaic.copy_mosaic(mosaic, clear_data=False, copy_name='')
                 continue
             flood = Mosaic.sum_mosaics(flood, mosaic)
 
         if Globals.is_debug('low'):
-            Plot.mosaic(flood, title='Flood illumination')
+            Plot.mosaic(flood, title='Coadded flood illumination')
         profiles = Opt01._find_slices(flood, smooth=3, snr_cut=5)
         slice_map = Opt01._make_slice_map(profiles, flood)
         Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
@@ -109,8 +110,8 @@ class Opt01:
         # Slice order from low to high detector number and low to high row number
         # opticon: {det_nos_12: (spifu_start, spifu_end, slice_start, slice_end),
         #           det_nos_34: (spifu_start, spifu_end, slice_start, slice_end)
-        slice_order = {Globals.nominal: {'12': (0, 0, 28, 15), '34': (0, 0, 14, 1)},
-                       Globals.extended: {'12': (3, 1, 13, 11), '34': (6, 4, 13, 11)}
+        slice_order = {Globals.nominal: {'12': (0, 0, 15, 28), '34': (0, 0, 1, 14)},
+                       Globals.extended: {'12': (1, 3, 11, 13), '34': (4, 6, 11, 13)}
                        }
         cut = 0.5       # Fraction of bright signal defining cut level
         print()
@@ -193,12 +194,12 @@ class Opt01:
                     # signal[row_lo - gap_hw: row_hi + gap_hw] = 0.
                     signal[0: row_hi + gap_hw] = 0.
 
-                    slice_no -= 1
-                    if slice_no < slice_end:        # this should only be true in extended mode.
+                    slice_no += 1
+                    if slice_no > slice_end:        # this should only be true in extended mode.
                         signal[row_lo - gap_hw: row_hi + spifu_gap] = 0.
                         slice_no = slice_start
-                        spifu_no -= 1
-                        if spifu_no < spifu_end:
+                        spifu_no += 1
+                        if spifu_no > spifu_end:
                             more_rows = False
                 label = "col={}".format(profile_column)
                 profiles.append((label, det_no, profile_column, original_signal, pts))
@@ -244,7 +245,7 @@ class Opt01:
                     r1s = np.rint(np.polyval(row_min_fit, cs))
                     r2s = np.rint(np.polyval(row_max_fit, cs))
                     for c, r1, r2 in zip(cs, r1s, r2s):
-                        hdu.data[int(r1):int(r2), int(c)] = slice_no + 100 * spifu_no
+                        hdu.data[int(r1):int(r2), int(c)] = int(slice_no + 100 * spifu_no)
         return slice_map
 
     @staticmethod

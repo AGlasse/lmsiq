@@ -50,5 +50,3 @@ class Mosaic:
         for hdu1, hdu2, hdu in zip(hdus1, hdus2, hdus_diff):
             hdu.data = hdu1.data + hdu2.data
         return mos_sum
-
-
