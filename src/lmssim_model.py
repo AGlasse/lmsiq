@@ -42,17 +42,17 @@ class Model:
 
     # Define one or more (point-like) pinhole masks which will spatially filter the extended source.  The model
     # specified PSFs at +-4 slices from the target slice will be convolved with the 'pinhole' images.
-    fp_masks = {'cfopnh': {'id': 'cfo', 'efp_xy': [[0., 0.]],           # On-axis pinhole in boresight
+    fp_masks = {'cfopnh': {'id': 'cfo', 'efp_xy_bs': [[0., 0.]],           # On-axis pinhole on boresight
                     'mask_ext': 'cfo_mask'},
-                'lm_pinhole': {'id': 'wcu', 'efp_xy': [[0., 0.]],       # Steerable pinhole in WCU.
+                'lm_pinhole': {'id': 'wcu', 'efp_xy_bs': [[0., 0.]],       # Steerable pinhole in WCU.
                     'mask_ext': 'wcu_mask'},
-                'grid_lm': {'id': 'wcu', 'efp_xy': [],                  # Steerable pinhole in WCU.
+                'grid_lm': {'id': 'wcu', 'efp_xy_bs': [],                  # Steerable grid of pinholes in WCU.
                     'mask_ext': 'wcu_mask'},
-                'align+dark': {'id': 'closed', 'efp_xy': None,             # Blank position in CFO FP wheel
+                'align+dark': {'id': 'closed', 'efp_xy_bs': None,             # Blank position in CFO FP wheel
                     'mask_ext': 'cfo_mask'},
-                'flatfield': {'id': 'open', 'efp_xy': None,                  # FP-1 open position
+                'flatfield': {'id': 'open', 'efp_xy_bs': None,                  # FP-1 open position
                     'mask_ext': 'none'},
-                'wcu_closed': {'id': 'closed', 'efp_xy': None,
+                'wcu_closed': {'id': 'closed', 'efp_xy_bs': None,
                     'mask_ext': 'wcu_mask'}
                 }
 
@@ -119,7 +119,7 @@ class Model:
         if wcu_mask in ['lm_pinhole']:
             fp_mask = Model.fp_masks[wcu_mask]
             file_name = 'fp_mask_pinhole_lm'
-            fp_mask['efp_xy'] = Filer.read_pinholes(file_name, xy_filter=(0.5, 1.0))
+            fp_mask['efp_xy_bs'] = Filer.read_pinholes(file_name, xy_filter=(0.5, 1.0))
         if fp_mask is None:
             print('!! Focal plane mask ' + wcu_mask, ' not found !!')
         return fp_mask
@@ -290,8 +290,13 @@ class Model:
         :param wave_offset:
         :return: flux quantity in units ph/s
         """
-        laser_wave = (laser['wavelength'] + wave_offset)*u.micron
+        u_phot = u.ph / u.cm / u.cm / u.mas / u.mas / u.s / u.micron
+        laser_wave = (laser['wavelength'] + wave_offset) * u.micron
         laser_power = laser['power']
+        laser_flux = np.zeros(waves.shape)
+        if laser_wave > np.amax(waves) or laser_wave < np.amin(waves):
+            print("Laser at {:10.3f} is out of bounds".format(laser_wave))
+            return laser_flux * u_phot
         idx_cen = np.argwhere(waves - laser_wave < 0)[:, 0][-1]
         line_width = waves[idx_cen] / 100000
         pix_fwhm = line_width / (waves[idx_cen] - waves[idx_cen-1])
@@ -300,9 +305,8 @@ class Model:
         n_pix_hw = 2 * pix_hw + 1
         indices = np.arange(n_pix_hw)        # 101 pixel scale, line centred at pixel 50.
         lsf = Globals.gauss(indices, laser_power, 5., pix_sigma.value)
-        laser_flux = np.zeros(waves.shape)
         laser_flux[idx_cen - pix_hw: idx_cen + pix_hw + 1] = lsf
-        return laser_flux * u.ph / u.cm / u.cm / u.mas / u.mas / u.s / u.micron
+        return laser_flux * u_phot
 
     @staticmethod
     def black_body(waves, tbb=1000.):

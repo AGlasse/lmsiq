@@ -79,7 +79,7 @@ class Opt02:
                 tra_mosaic = Mosaic.diff_mosaics(sig_mosaic, bgd_mosaic)
                 Plot.mosaic(tra_mosaic, title='Bgd subtracted traces')
                 alpha_traces = OptTools.extract_det_traces(tra_mosaic, 'alpha', slice_map,
-                                                           snr_cut=2000)
+                                                           snr_cut=20)
                 alpha_traces_list.append(alpha_traces)
                 if Globals.is_debug('low'):
                     Plot.mosaic(sig_mosaic, title='signal', cmap='hot')
