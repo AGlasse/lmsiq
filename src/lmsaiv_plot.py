@@ -44,6 +44,11 @@ class Plot:
 
     @staticmethod
     def mosaic(mosaic, **kwargs):
+        """ Plot the mosaic data structure (2 x 2 LMS images)
+        :param mosaic:
+        :param kwargs:
+        :return:
+        """
         file_name, primary_hdr, hdus = mosaic
 
         cmap_name = kwargs.get('cmap', 'hot')
@@ -55,13 +60,8 @@ class Plot:
         fig = plt.figure(figsize=(8, 7))
         fig.suptitle(suptitle)
         grid = ImageGrid(fig, 111,
-                         nrows_ncols=(2, 2),
-                         axes_pad=(0.15, 0.15),
-                         share_all=True,
-                         cbar_location="right",
-                         cbar_mode="single",
-                         cbar_size="7%",
-                         cbar_pad=0.15,
+                         nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), share_all=True, cbar_location="right",
+                         cbar_mode="single", cbar_size="7%", cbar_pad=0.15,
                          )
         # Set plot limits
         xmin, xmax = 0, hdus[0].shape[0]
@@ -108,20 +108,16 @@ class Plot:
                 ax.plot(x, yrmax, marker='o', ms=2.0, color='green', linestyle='none')
             overlay = kwargs.get('overlay', None)
             if overlay is not None:
-                is_alpha = overlay['type'] == 'alpha'
-                det_nos = np.array(overlay['det_no'])
-                indices = np.argwhere(det_no == det_nos)
-                if len(indices) < 1:
-                    continue
-
-                for idx in indices[:, 0]:
-                    pt_u_coords = overlay['pt_u_coords'][idx]
-                    pt_v_coords = overlay['pt_v_coords'][idx]
-                    xs = pt_u_coords if is_alpha else pt_v_coords
-                    ys = pt_v_coords if is_alpha else pt_u_coords
-
-                    # ys_fit = Globals.cubic(xs, *popts[idx]) if is_alpha else Globals.cubic(ys, *popts)
-                    ax.plot(xs, ys, marker='o', ms=2.0, color='red', linestyle='none')
+                if overlay['type'] == 'det_traces':
+                    trace_data = overlay['data']
+                    for det_trace in trace_data:
+                        if det_trace['det_no'] == det_no:
+                            is_alpha = det_trace['type'] == 'iso-alpha'
+                            pt_u_coords = det_trace['pt_u_coords']
+                            pt_v_coords = det_trace['pt_v_coords']
+                            xs = pt_u_coords if is_alpha else pt_v_coords
+                            ys = pt_v_coords if is_alpha else pt_u_coords
+                            ax.plot(xs, ys, marker='o', ms=2.0, color='cyan', linestyle='none')
         ax.cax.colorbar(im)
 
         plt.show()

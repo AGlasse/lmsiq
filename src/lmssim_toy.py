@@ -145,6 +145,7 @@ class Toy:
                     fp_mask['efp_xy_pnh_cens'].append([efp_x_pnh, efp_y_pnh])
                     primary_header['HIERARCH ACHG WCU X'] = efp_x_pnh
                     primary_header['HIERARCH ACHG WCU Y'] = efp_y_pnh
+            primary_header['HIERARCH ACHG LASER WAVE'] = Model.get_laser_wavelength(sim_config)
 
             dit = float(sim_config['lms_dit'])         # 1.3  # Integration time in seconds.
             ndit = int(sim_config['lms_ndit'])         # No. of integrations

@@ -103,7 +103,6 @@ class Filer:
                 text += "{:s}, ".format(tag)
             text += 'not found'
             return mosaic_list
-
         for file_name in file_list:
             mosaic = Filer.read_mosaic(folder, file_name)
             mosaic_list.append(mosaic)

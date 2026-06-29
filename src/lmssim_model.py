@@ -70,6 +70,18 @@ class Model:
         return txt
 
     @staticmethod
+    def get_laser_wavelength(sim_config):
+        laser_wave = 0.
+        if sim_config['wcu_laser_sw'] == 'true':
+            laser_wave = Model.bgd_srcs['wcu_ls']['wavelength']
+        if sim_config['wcu_laser_lw'] == 'true':
+            laser_wave = Model.bgd_srcs['wcu_ll']['wavelength']
+        if sim_config['wcu_laser_tune'] == 'true':
+            laser_wave = Model.bgd_srcs['wcu_lt']['wavelength']
+            laser_wave += float(sim_config['wcu_laser_tune_woff'])
+        return laser_wave
+
+    @staticmethod
     def get_flux(waves, flux, src_list, lt_w_offset):
         """ Calculate selected extended background spectrum (units el/s/pixel) for a wavelength range which
         overfills the instantaneous spectral coverage. Output units should be photons/pixel/second
