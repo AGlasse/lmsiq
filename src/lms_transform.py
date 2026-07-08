@@ -1,9 +1,10 @@
+import math
 import pickle
-
 from astropy.io import fits
 from astropy.io.fits import Card
 import numpy as np
 from lms_globals import Globals
+# from lmsdist import affines
 
 
 class Transform:
@@ -19,6 +20,7 @@ class Transform:
                    'n_mats': 'No of matrices (A, B, AI, BI)',
                    'mat_ord': 'Order of transform (4)'
                    }
+    affines = None               # Affine transforms common to all transforms
 
     def __init__(self, **kwargs):
         self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
@@ -30,7 +32,39 @@ class Transform:
             self.ingest_from_hdu_list(hdu_list, ext_no)
         if 'matrices' in kwargs:
             self.matrices = kwargs.get('matrices')
+        if Transform.affines is None:
+            Transform.create_affines()
         return
+
+    @staticmethod
+    def create_affines(theta_offsets=[0.]*4,
+                       x_mfp_org_offsets=[0.]*4, y_mfp_org_offsets=[0.]*4,
+                       x_scale_offsets=[0.]*4, y_scale_offsets=[0.]*4):
+        """ Create the M and MI matrices which map points in the mosaic focal plane (in units of mm)
+        to pixel row and column positions.
+        """
+        n_dets = 4
+        aff_shape = n_dets, 3, 3
+        thetas = [0.]*4
+        xy_fc = Globals.det_size + Globals.det_gap / 2.
+        xy_nc = Globals.det_gap / 2.
+        x_mfp_origins = [-xy_fc, +xy_nc, -xy_fc, +xy_nc]
+        y_mfp_origins = [-xy_nc, -xy_nc, +xy_fc, +xy_fc]
+        pix_mm = 1000. / Globals.nom_pix_pitch
+        y_scales = [pix_mm] * 4
+        x_scales = [-pix_mm] * 4
+        m, mi = np.zeros(aff_shape), np.zeros(aff_shape)
+        for i in range(0, n_dets):
+            theta = thetas[i] + theta_offsets[i]
+            sx, sy = x_scales[i] + x_scale_offsets[i], y_scales[i] + y_scale_offsets[i]
+            x_mfp_org, y_mfp_org = x_mfp_origins[i] + x_mfp_org_offsets[i], y_mfp_origins[i] + y_mfp_org_offsets[i]
+            cos_theta, sin_theta = math.cos(theta), math.sin(theta)
+            m[i, 0, :] = [sx * cos_theta, -sy * sin_theta, sx * x_mfp_org]
+            m[i, 1, :] = [sx * sin_theta, +sy * cos_theta, sy * y_mfp_org]
+            m[i, 2, :] = [0., 0., 1.]
+            mi[i] = np.linalg.inv(m[i])
+        Transform.affines = {'m': m, 'mi': mi}
+        return Transform.affines
 
     def ingest_from_hdu_list(self, hdu_list, ext_no):
         primary_hdr = hdu_list[0].header

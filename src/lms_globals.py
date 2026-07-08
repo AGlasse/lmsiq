@@ -54,18 +54,20 @@ class Globals:
     nominal = 'nominal'
     extended = 'extended'
     coord_in = 'efp_x', 'efp_y', 'wavelength'
+    coord_in_ait = 'efp_x', 'efp_y', 'efp_w'
     coord_out = 'mfp_x', 'mfp_y'
-
-    # Zemax data descriptors
-    dist_nom_config = ('distortion', nominal, '20240109', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
-                       coord_in, coord_out)
-    dist_ext_config = ('distortion', extended, '20260112', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                       coord_in, coord_out)
-    iq_nom_config = ('iq', nominal, '2024073000', 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
-                     coord_in, coord_out)
-    iq_ext_config = ('iq', extended, '2024061802', 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                     coord_in, coord_out)
+    nom_fov_text = 'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
+    ext_fov_text = 'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+    # Zemax and AIT model configurations with file locations
+    dist_nom_config = ('distortion', nominal, '20240109', nom_fov_text, coord_in, coord_out)
+    dist_nom_config_ait = ('distortion', nominal, 'ait', nom_fov_text, coord_in_ait, coord_out)
+    dist_ext_config = ('distortion', extended, '20260112', ext_fov_text, coord_in, coord_out)
+    dist_ext_config_ait = ('distortion', extended, 'ait', ext_fov_text, coord_in, coord_out)
+    iq_nom_config = ('iq', nominal, '2024073000', nom_fov_text, coord_in, coord_out)
+    iq_ext_config = ('iq', extended, '2024061802', ext_fov_text, coord_in, coord_out)
     model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
+                            'distortion_ait': {nominal: dist_nom_config_ait,
+                                               extended: dist_ext_config_ait},
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}
                             }
     lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_ang': None}
@@ -142,7 +144,7 @@ class Globals:
     # The as_built file holds the parameters which define the instrument's performance (eg slice locations, PSF
     # dimensions etc.).  They can be initialised to the as designed values, and then updated with as built values
     # from performance testing.
-    as_built_file = '../output/asbuilt/asbuilt'
+    as_built_file = '../output/asbuilt/asbuilt_toysim'
 
     @staticmethod
     def set_debug_level(new_debug_level):
@@ -162,6 +164,17 @@ class Globals:
         db_val_query = Globals.debug_levels[db_level_query]
         is_debug = db_val_query <= db_val_set
         return is_debug
+
+    @staticmethod
+    def make_lms_config_id(lms_config):                # Create fits file with primary HDU only
+        otag = '_nom' if lms_config['opticon'] == 'nominal' else '_ext'
+        ptag = "_pa{:05d}".format(abs(int(10000. * lms_config['pri_ang'])))
+        ea = lms_config['ech_ang']
+        esign = 'p' if ea > 0. else 'n'
+        etag = "_ea{:s}{:05d}".format(esign, abs(int(10000. * ea)))
+        fmt = "{:s}{:s}{:s}"
+        lms_config_id = fmt.format(otag, ptag, etag)
+        return lms_config_id
 
     # Geometry functions
     @staticmethod

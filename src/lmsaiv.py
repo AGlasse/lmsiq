@@ -8,10 +8,11 @@ _ = Filer()
 cap_name = 'lms_opt_02_dist'             # Name of analysis project
 
 test_data_folder = 'test_toysim'
-debug_level = 'low'
+Filer.set_test_data_folder(test_data_folder)
 
+debug_level = 'low'
 Globals.set_debug_level(debug_level)
-opt_tests = OptTests(test_data_folder)
+opt_tests = OptTests()
 print(opt_tests)
 
 print("Analysing data in folder data/{:s} for {:s}.".format(test_data_folder, cap_name))

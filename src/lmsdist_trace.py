@@ -22,7 +22,7 @@ class RayTrace:
     # Configuration dicts.  Note lms_config is instantiated from Globals.
     series_fmt = {'ech_ord': 'int', 'slice_no': 'int', 'spifu_no': 'int',
                   'wavelength': 'float',
-                  'efp_x': 'float', 'efp_y': 'float',
+                  'efp_x': 'float', 'efp_y': 'float', 'efp_w': 'float',
                   'slicer_x': 'float', 'slicer_y': 'float',
                   'sp_slicer_x': 'float', 'sp_slicer_y': 'float',
                   'ifu_x': 'float', 'ifu_y': 'float',
@@ -61,7 +61,7 @@ class RayTrace:
                           'Det. mosaic': ('mfp_x', 'mfp_y')}
     cfg_tags, cfg_id_counter = [], 0
 
-    affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
+    # affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
     model_config = None
 
     def __init__(self, **kwargs):
@@ -115,7 +115,6 @@ class RayTrace:
         self._create_mask(silent)
         do_plot = kwargs.get('do_plot', True)
         self.create_svd_transforms(do_plot=do_plot)
-        RayTrace.create_affine_transforms()
         return
 
     def _get_wave_reference(self):
@@ -129,7 +128,7 @@ class RayTrace:
     def find_wavelength_bounds(self):
         """ Find the wavelength bounds for each slice by back projecting from the detectors.
         """
-        affines = RayTrace.affines
+        affines = Transform.affines
         for transform in self.transforms:
             # Start by finding the detector and row for the slice centre.
             slice_no = transform.slice_configuration['slice_no']
@@ -155,32 +154,6 @@ class RayTrace:
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
         return string
 
-    @staticmethod
-    def create_affine_transforms():
-        """ Create the four (global) matrices which map points in the mosaic focal plane (in units of mm)
-        to pixel row and column positions.
-        """
-        n_dets = 4
-        aff_shape = 2*n_dets, 3, 3
-        affines = np.zeros(aff_shape) * n_dets
-        thetas = [0.]*4
-        xy_fc = Globals.det_size + Globals.det_gap / 2.
-        xy_nc = Globals.det_gap / 2.
-        x_mfp_origins = [-xy_fc, +xy_nc, -xy_fc, +xy_nc]
-        y_mfp_origins = [-xy_nc, -xy_nc, +xy_fc, +xy_fc]
-        pix_mm = 1000. / Globals.nom_pix_pitch
-        y_scales = [pix_mm] * 4
-        x_scales = [-pix_mm] * 4
-        for i in range(0, n_dets):
-            sx, sy, theta, x_mfp_org, y_mfp_org = x_scales[i], y_scales[i], thetas[i], x_mfp_origins[i], y_mfp_origins[i]
-            cos_theta, sin_theta = math.cos(theta), math.sin(theta)
-            affines[i, 0, :] = [sx * cos_theta, -sy * sin_theta, sx * x_mfp_org]
-            affines[i, 1, :] = [sx * sin_theta, +sy * cos_theta, sy * y_mfp_org]
-            affines[i, 2, :] = [0., 0., 1.]
-            affines[i+n_dets] = np.linalg.inv(affines[i])
-        RayTrace.affines = affines
-        return
-
     def get_ifp_boresight(self, opticon):
         """ Find the boresight wavelength for a specific slice in the configuration defined by this trace,
         where the boresight is defined as having a detector mosaic x coordinate = 0.
@@ -191,7 +164,7 @@ class RayTrace:
         slice_filter = {'slice_no': 13, 'spifu_no': spifu_no, 'ech_ord': ech_ord}
         mfp_x = self.get_series('mfp_x', slice_filter)
         waves = self.get_series('wavelength', slice_filter)
-        wave_bs = np.interp(0.0, mfp_x, waves)     # Find wavelength where 'det_x' (== mfp_x) == 0.
+        wave_bs = np.interp(0.0, mfp_x, waves)              # Find wavelength where 'det_x' (== mfp_x) == 0.
         boresight = wave_bs, self.lms_config['pri_ang'], self.lms_config['ech_ang'], ech_ord
         return boresight
 
@@ -252,6 +225,7 @@ class RayTrace:
     def get_series(self, tag, series_filter):
         """ Extract a specific coordinate (identified by 'tag') from the trace for rays which pass through
         a specified spatial and (if the spectral IFU is selected) spectral slice.
+        :rtype: ndarray[tuple[Any, ...], dtype[_ScalarT]] | ndarray[tuple[Any, ...], dtype[Any]]
         """
         slice_no = series_filter.get('slice_no', 13)
         spifu_no = series_filter.get('spifu_no', 0)
@@ -315,9 +289,9 @@ class RayTrace:
             mfp_fit_points, oob = Util.efp_to_mfp(transform, efp_points)
             det_x_fit, det_y_fit = mfp_fit_points['mfp_x'], mfp_fit_points['mfp_y']
             u, v = mfp_x - det_x_fit, mfp_y - det_y_fit
-            q = ax.quiver(det_x_fit, det_y_fit, u, v,
-                          angles='xy', scale_units='xy', scale=.001,
-                          width=0.001)
+            # q = ax.quiver(det_x_fit, det_y_fit, u, v,
+            #               angles='xy', scale_units='xy', scale=.001,
+            #               width=0.001)
         plot.show()
         return
 
@@ -489,6 +463,8 @@ class RayTrace:
 
             ax = ax_list[0, pane]
             fp_x, fp_y = focal_planes[title]
+            if fp_x not in self.series.keys() or fp_y not in self.series.keys():
+                continue
             x = self.series[fp_x]
             y = self.series[fp_y]
             ax.set_title(title, loc='left')
@@ -503,10 +479,15 @@ class RayTrace:
         """ Read trace data in from csv file pointed to by path
         :return:
         """
-        nom_echelle_order = None
         nom_spifu_no = 0
-        _, opticon, _, _, coord_in, coord_out = model_config
+        _, opticon, data_id, _, coord_in, coord_out = model_config
         csv_map = RayTrace.nom_csv_map if opticon == Globals.nominal else RayTrace.ext_csv_map
+        if data_id == 'ait':
+            csv_map = {'slice_no': 'slice_no', 'spifu_no': 'spifu_no', 'ech_ord': 'ech_ord',
+                       'efp_w': 'wavelength', 'efp_x': 'efp_x', 'efp_y': 'efp_y',
+                       'mfp_x': 'mfp_x', 'mfp_y': 'mfp_y',
+                       'cf_vig': 'cf_vig'
+                       }
         series = {}
         for csv_name in csv_map:
             series_name = csv_map[csv_name]
@@ -540,11 +521,13 @@ class RayTrace:
                 lms_name = par_to_lms[parameter]
                 lms_config[lms_name] = val
 
-        # Create dictionary of data series, include echelle order, slice, spifu_slice, wavelength, and input and output
-        # focal planes.
+        # Create dictionary of data series, include echelle order, slice, spifu_slice, wavelength, and input and
+        # output focal planes.
         line = next(line_iter)
         tokens = line.split(',')
         for i, token in enumerate(tokens):
+            if len(token) < 2:  # Empty token (at end of line probably)
+                continue
             csv_col_list[token.strip()] = i
 
         while True:
@@ -556,13 +539,12 @@ class RayTrace:
             if opticon == Globals.nominal:
                 series['spifu_no'].append(nom_spifu_no)      # Trap special cases
                 series['ech_ord'].append(nom_ech_order)
-                series['cf_vig'].append(0.00)
+                series['cf_vig'].append(0.)
 
             for csv_name in csv_col_list:
                 col_idx = csv_col_list[csv_name]
                 token = tokens[col_idx].strip()
                 series_name = csv_map[csv_name]
-
                 fmt = RayTrace.series_fmt[series_name]
                 val = None
                 match fmt:

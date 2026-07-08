@@ -19,17 +19,20 @@ class Filer:
         self.psf_folder, self.sim_folder, self.output_folder = None, None, None
         self.tf_dir, self.trace_file, self.poly_file = None, None, None
         self.wcal_file, self.stats_file, self.tf_fit_file, self.cube_folder = None, None, None, None
+        self.ray_trace_folder, self.ait_dist_folder = None, None
         return
 
-    def set_configuration(self, analysis_type, opticon):
+    def set_configuration(self, analysis_type, opticon, is_ait_data):
+        if is_ait_data:
+            analysis_type += '_ait'
         model_configuration = Globals.model_configurations[analysis_type][opticon]
-        analysis_type, opticon, date_stamp, _, _, _ = model_configuration
+        analysis_type, opticon, data_set, _, _, _ = model_configuration
         self.model_configuration = model_configuration
-        sub_folder = "{:s}/{:s}".format(opticon, date_stamp)
+        sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, opticon, data_set)
 
         # self.data_folder = Filer.get_folder('./data/model/' + sub_folder)
-        self.psf_folder = Filer.get_folder('../data/psf/' + sub_folder)
-        self.ray_trace_folder = Filer.get_folder('../data/ray_trace/' + sub_folder)
+        self.psf_folder = Filer.get_folder('../data/' + sub_folder)
+        self.ray_trace_folder = Filer.get_folder('../data/' + sub_folder)
         self.output_folder = Filer.get_folder('../output/' + sub_folder)
         self.tf_dir = Filer.get_folder(self.output_folder + 'fits')
         file_leader = self.output_folder + sub_folder.replace('/', '_')
@@ -37,7 +40,7 @@ class Filer:
         self.poly_file = file_leader + '_dist_poly.txt'
         self.wcal_file = file_leader + '_dist_wcal.txt'        # Echelle angle as function of wavelength
         self.stats_file = file_leader + '_dist_stats.txt'
-        self.tf_fit_file = file_leader + '_dist_tf_fit'        # Use pkl files to write objects directly
+        self.tf_fit_file = file_leader + '_dist_tf_fit'
         self.cube_folder = Filer.get_folder(self.output_folder + '/cube')
         return
 
@@ -60,10 +63,10 @@ class Filer:
     @staticmethod
     def read_mosaic(folder, file_name):
         """ Read in fits file containing LMS detector images.
-        :return mosaic tuple (file name, primary extension header, hdu list)
+        return mosaic tuple (file name, primary extension header, hdu list)
         """
         path = folder + '/' + file_name
-        if Globals.is_debug('low'):
+        if Globals.is_debug('high'):
             print("Reading {:s}".format(path))
         hdu_in_list = fits.open(path, mode='readonly')
         primary_hdr = hdu_in_list[0].header
@@ -87,8 +90,9 @@ class Filer:
     @staticmethod
     def read_mosaic_list(*args):
         """ Read an LMS data file into a mosaic tuple.  For ScopeSim data, the HDU.header['ID'] holds the detector
-        number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.   Here, T=Top (slices 15 to 28,
-        B = Bottom (slices 1 to 14), L = Left (short wavelength), R = Right (long wavelength).
+        number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.
+        Here, T=Top (slices 15 to 28), B = Bottom (slices 1 to 14),
+        L = Left (short wavelength), R = Right (long wavelength).
         We write these into the mosaic tuple as a list, with indices = 0 (TL), 1 (TR), 2 (BL), 3 (BR).
         """
         n_args = len(args)
@@ -110,7 +114,7 @@ class Filer:
 
     @staticmethod
     def write_mosaic(folder, mosaic):
-        """ Write a mosaic object (name, primary header, 4 hdus to a new fits file.
+        """ Write a mosaic object (name, primary header, 4 hdus) to a new fits file.
         """
         file_name, primary_header, hdu_list_in = mosaic
         path = folder + '/' + file_name
@@ -127,7 +131,11 @@ class Filer:
         return
 
     @staticmethod
-    def get_file_list(folder, inc_tags=[], exc_tags=[]):
+    def get_file_list(folder, inc_tags=None, exc_tags=None):
+        if exc_tags is None:
+            exc_tags = []
+        if inc_tags is None:
+            inc_tags = []
         file_list = listdir(folder)
         for tag in inc_tags:
             file_list = [f for f in file_list if tag in f]
@@ -164,7 +172,7 @@ class Filer:
                 if len(tokens) < 2: continue
                 efp_x = float(tokens[0])
                 efp_y = float(tokens[1])
-                if (abs(efp_x) < xy_filter[0] and abs(efp_y) < xy_filter[1]):
+                if abs(efp_x) < xy_filter[0] and abs(efp_y) < xy_filter[1]:
                     efp_xy_list.append([efp_x, efp_y])
         return efp_xy_list
 
@@ -197,7 +205,7 @@ class Filer:
 
         wxo_column_names = ['SLICE_NO', 'SPIFU_NO'] + wxo_hdr
         n_columns = len(wxo_column_names)
-        wxo_data = np.zeros((n_columns))
+        wxo_data = np.zeros(n_columns)
         # Write wavelength x echelle order fit parameters to second HDU
         wxo_data[0] = wxo_fit['slice_no']
         wxo_data[1] = wxo_fit['spifu_no']
@@ -262,7 +270,8 @@ class Filer:
         fits_name = fmt.format(opticon[0:3], date_stamp)
         fits_path = self.tf_dir + fits_name + '.fits'
         hdu_list = fits.open(fits_path, mode='readonly')
-        print("Reading global fit parameters from file {:s}".format(fits_name))
+        if Globals.is_debug('high'):
+            print("Reading global fit parameters from file {:s}".format(fits_name))
 
         wpa_hdr = hdu_list[1].header
         n_wpa_coeffs = wpa_hdr['N_COEFFS']
@@ -304,10 +313,9 @@ class Filer:
                 data_col += n_term_coeffs
         return wpa_fit, wxo_fit, term_fits
 
-    def write_affine_transform(self, trace):
-        _, _, date_stamp, _, _, _ = trace.model_config
-        affines = trace.affines
-        n_mats, mat_order, _ = affines.shape
+    def write_affine_transform(self, version_tag):
+        affines = Transform.affines
+        n_mats, mat_order, _ = affines['m'].shape
 
         primary_cards = [Card('N_MATS', n_mats, 'MFP <-> DFP transform matrices'),
                          Card('MAT_ORD', mat_order, 'Transform matrix dimensions')
@@ -316,16 +324,19 @@ class Filer:
         primary_hdu = fits.PrimaryHDU(header=hdr)
         hdu_list = HDUList([primary_hdu])
 
-        fmt = "lms_dist_mfp_dfp_v{:s}"
-        fits_name = fmt.format(date_stamp)
+        fmt = "lms_dist_mfp_dfp_{:s}"
+        fits_name = fmt.format(version_tag)
         fits_path = self.tf_dir + fits_name + '.fits'
         cards = []
 
         col_list = []
-        for m in range(0, n_mats):
-            col_name = "MFP>D{:d}".format(m+1) if m < 4 else "D{:d}>MFP".format(m-3)
-            col = fits.Column(name=col_name, array=affines[m].flatten(), format='E')
-            col_list.append(col)
+        for key in affines.keys():
+            col_fmt = "MFP>DET{:d}" if key == 'm' else "DET{:d}>MFP"
+            for m in range(0, n_mats):
+                col_name = col_fmt.format(m+1)
+                array = affines[key][m]
+                col = fits.Column(name=col_name, array=array.flatten(), format='E')
+                col_list.append(col)
 
         hdr = fits.Header(cards)
         bintable_hdu = fits.BinTableHDU.from_columns(col_list, header=hdr)
@@ -340,22 +351,25 @@ class Filer:
         fits_name = fmt.format(date_stamp)
         fits_path = self.tf_dir + fits_name + '.fits'
         hdu_list = fits.open(fits_path, mode='readonly')
+
         primary_hdr = hdu_list[0].header
         n_mats = primary_hdr['N_MATS']
         mat_order = primary_hdr['MAT_ORD']
         aff_shape = n_mats, mat_order, mat_order
-        affines = np.zeros(aff_shape)
-        hdu = hdu_list[1]
+        m, mi = np.zeros(aff_shape), np.zeros(aff_shape)
 
+        hdu = hdu_list[1]
         table, hdr = hdu.data, hdu.header
         n_cols = len(hdu.columns)
         for i in range(0, n_cols):
             col_vals = table.field(i)
-            matrix = np.reshape(col_vals, (mat_order, mat_order))
-            affines[i] = matrix
-        return affines
+            if i < 4:
+                m[i] = np.reshape(col_vals, (mat_order, mat_order))
+            else:
+                mi[i-4] = np.reshape(col_vals, (mat_order, mat_order))
+        return {'m': m, 'mi': mi}
 
-    def write_svd_transforms(self, trace, **kwargs):
+    def write_svd_transforms(self, trace):
         """ Create HDU binary data tables holding transforms for all slices in a configuration and write them
         to a fits file.  This is the data product we provide to ScopeSim and the pipeline.
         """
@@ -367,17 +381,11 @@ class Filer:
             if write_primary:
                 primary_hdu = transform.make_hdu_primary()
                 hdu_list = HDUList([primary_hdu])
-
+                lms_config_id = Globals.make_lms_config_id(lms_config)
                 # Create fits file with primary HDU only
-                otag = '_nom' if lms_config['opticon'] == 'nominal' else '_ext'
-                ptag = "_pa{:05d}".format(abs(int(10000. * lms_config['pri_ang'])))
-                ea = lms_config['ech_ang']
-                esign = 'p' if ea > 0. else 'n'
-                etag = "_ea{:s}{:05d}".format(esign, abs(int(10000. * ea)))
                 _, _, date_stamp, _, _, _ = trace.model_config
-                vtag = "_v{:s}".format(date_stamp)
-                fmt = "lms_efp_mfp{:s}{:s}{:s}{:s}"
-                fits_name = fmt.format(otag, ptag, etag, vtag)
+                version = "_v{:s}".format(date_stamp)
+                fits_name = 'lms_efp_mfp' + lms_config_id + version
                 fits_path = self.tf_dir + fits_name + '.fits'
                 write_primary = False
             bintable_hdu = transform.make_hdu_ext()
@@ -385,9 +393,13 @@ class Filer:
         hdu_list.writeto(fits_path, overwrite=True)
         return fits_name
 
-    def read_svd_transforms(self, inc_tags=[], exc_tags=[]):
+    def read_svd_transforms(self, inc_tags=None, exc_tags=None):
         """ Read A,B, AI,BI transforms from a fits file.
         """
+        if exc_tags is None:
+            exc_tags = []
+        if inc_tags is None:
+            inc_tags = []
         fits_file_list = Filer.get_file_list(self.tf_dir, inc_tags=inc_tags, exc_tags=exc_tags)
         transform_list = []
         for fits_name in fits_file_list:

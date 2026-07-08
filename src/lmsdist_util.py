@@ -547,7 +547,7 @@ class Util:
             if n_idx == 0:
                 continue
             d_nos = [i+1]*n_idx
-            affine_fwd = affines[i]
+            affine_fwd = affines['m'][i]
             u, v = Util.apply_affine_transform(x[idx], y[idx], affine_fwd)
             det_nos += d_nos
             dfp_x += list(u)
@@ -572,7 +572,7 @@ class Util:
             n_idx, = idx.shape
             if n_idx == 0:
                 continue
-            affine_rev = affines[det_idx + 4]
+            affine_rev = affines['mi'][det_idx]
             u, v = Util.apply_affine_transform(dfp_x[idx], dfp_y[idx], affine_rev)
             mfp_x += list(u)
             mfp_y += list(v)
@@ -689,7 +689,7 @@ class Util:
 
     @staticmethod
     def solve_svd_distortion(x_in, y_in, x_out, y_out, order, inverse=False):
-        # @author Alistair GlasseTea Temim
+        # @author Alistair Glasse + Tea Temim
         # Converted to python from Ronayette's original IDL code by Temim, 21/2/17
         #   1. Changed input parameters to allow use with any data set (Glasse)
         # make a polynomial fit of the imaged grid point
@@ -702,17 +702,16 @@ class Util:
         #          inverse       True = Calculate inverse transform (out -> in)
         #
         # OUTPUTS: amat, bmat, the distortion coefficients
-        xi = x_in.copy()
-        yi = y_in.copy()
-        xo = x_out.copy()
-        yo = y_out.copy()
         if inverse:
-            temp = xo
-            xo = xi
-            xi = temp.copy()
-            temp = yo
-            yo = yi.copy()
-            yi = temp.copy()
+            xi = x_out.copy()
+            yi = y_out.copy()
+            xo = x_in.copy()
+            yo = y_in.copy()
+        else:
+            xi = x_in.copy()
+            yi = y_in.copy()
+            xo = x_out.copy()
+            yo = y_out.copy()
 
         dim = order + 1
 
@@ -739,7 +738,7 @@ class Util:
                 if Globals.is_debug('medium'):
                     if w[k] > 1.0e-16:
                         print("!! Clipping singular value = {:5.3e} !!".format(w[k]))
-        a = xo @ u.T @ wp @ v.T     # (Was wp.T, but wp is square diagonal)
+        a = xo @ u.T @ wp @ v.T
         amat = np.reshape(a, (dim, dim))
         b = yo @ u.T @ wp @ v.T
         bmat = np.reshape(b, (dim, dim))
@@ -755,7 +754,8 @@ class Util:
         tgt_slice_no = tgt_slice_nos[0]
 
         # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.
-        affines = filer.read_fits_affine_transform(date_stamp)
+        version_tag = "_v{:s}".format(date_stamp)
+        affines = filer.read_fits_affine_transform(version_tag)
         svd_transforms = filer.read_svd_transforms()
         opt_transforms = Util.find_closest_transforms(efp_w_cen, opticon, svd_transforms)
         opt_transform = opt_transforms[tgt_slice_no]

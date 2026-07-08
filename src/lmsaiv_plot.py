@@ -12,35 +12,29 @@ class Plot:
         return
 
     @staticmethod
-    def gap_samples(gap_samples, gap_thetas):
+    def gap_data(gap_data, det_thetas):
         figsize = [8, 8]
         fig, axes = plt.subplots(nrows=2, ncols=1, figsize=figsize,
                                  sharex='all', squeeze=True)
-        gap_data = np.array(gap_samples)
-        sw_mos_idxs = np.int64(gap_data[:, 0])
-        rows = gap_data[:, 3]
-        gaps = gap_data[:, 4]
-        for pane, sw_mos_idx in enumerate(np.unique(sw_mos_idxs)):
-            idx, = np.where(sw_mos_idxs == sw_mos_idx)
-            x = rows[idx]
-            y = gaps[idx]
+
+        for pane, det_nos in enumerate(['12', '34']):
             ax = axes[pane]
-            m = int(sw_mos_idx)
-            title = ''
-            for key in gap_thetas:
-                theta = gap_thetas[key]
-                sw_mos_idx, lw_mos_idx, theta, theta_err, mean_gap = theta
-                if sw_mos_idx == m:
-                    tag = r'{:d}{:d}'.format(int(sw_mos_idx), int(lw_mos_idx))
-                    title = r'$\theta_{:s}$ = {:8.3f}$\pm${:5.3f} deg.'.format(tag, theta, theta_err)
+            x, y = [], []
+            for slice_no in gap_data:
+                gap = gap_data[slice_no]
+                if str(gap['det_no']) in det_nos:
+                    x.append(gap['u_mean'])
+                    y.append(gap['col_gap'])
+            # tag = r'{:s}'.format(det_nos)
+            theta, theta_err = det_thetas[det_nos]
+            title = r'$\theta_{:s}$ = {:8.3f}$\pm${:5.3f} deg.'.format(det_nos, theta, theta_err)
 
             ax.set_title(title)
             ax.set_xlabel('Row')
-            ax.set_ylabel("Intra mosaic gap {:d}{:d}".format(m, m+1))
+            ax.set_ylabel("Intra mosaic gap {:s}".format(det_nos))
             ax.plot(x, y, linestyle='none', marker='x', color='blue')
         plt.show()
         return
-
 
     @staticmethod
     def mosaic(mosaic, **kwargs):
@@ -50,7 +44,6 @@ class Plot:
         :return:
         """
         file_name, primary_hdr, hdus = mosaic
-
         cmap_name = kwargs.get('cmap', 'hot')
         cmap = mpl.colormaps[cmap_name]
         sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
@@ -60,24 +53,24 @@ class Plot:
         fig = plt.figure(figsize=(8, 7))
         fig.suptitle(suptitle)
         grid = ImageGrid(fig, 111,
-                         nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), share_all=True, cbar_location="right",
+                         nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), cbar_location="right",  share_all=True,
                          cbar_mode="single", cbar_size="7%", cbar_pad=0.15,
                          )
         # Set plot limits
-        xmin, xmax = 0, hdus[0].shape[0]
-        ymin, ymax = 0, hdus[0].shape[1]
+        xmin, xmax = 0, hdus[0].shape[1]
+        ymin, ymax = 0, hdus[0].shape[0]
         bounds = kwargs.get('bounds', (xmin, xmax, ymin, ymax))
         xmin, xmax, ymin, ymax = bounds
 
         vmin, vmax = 1.E6, -1.E6
         for hdu in hdus:
             vmin_hdu, vmax_hdu = np.nanmin(hdu.data), np.nanmax(hdu.data)
-            vmin = vmin if vmin < vmin_hdu else vmin_hdu
-            vmax = vmax if vmax > vmax_hdu else vmax_hdu
+            vmin = min(vmin, vmin_hdu)
+            vmax = max(vmax ,vmax_hdu)
         if 'vmin' in kwargs:
-            vmin = kwargs.get('vmin', np.nanmin(hdus))
+            vmin = kwargs.get('vmin', vmin)
         if 'vmax' in kwargs:
-            vmax = kwargs.get('vmax', np.nanmax(hdus))
+            vmax = kwargs.get('vmax', vmax)
         ax, im = None, None
         data_origin = primary_hdr['ORIGIN']
         is_toysim = 'TOYSIM' in data_origin
@@ -87,17 +80,18 @@ class Plot:
             ax = grid[det_idx]
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
-            # ax.set_title("SS_DET_{:d}".format(det_no))
-            ax.set_aspect('equal', 'box')
+            aspect_ratio = (xmax-xmin)/(ymax-ymin)
+            ax.set_aspect(aspect_ratio)
+            x1, x2, y1, y2 = int(xmin), int(xmax), int(ymin), int(ymax)
             image = hdus[det_idx].data
             mask = kwargs.get('mask', None)
             if mask is not None:
                 mask_value, mask_colour = mask
                 image = np.ma.masked_where(image == mask_value, image)
                 cmap.set_bad(color=mask_colour)
-
-            im = ax.imshow(image, extent=(xmin-0.5, xmax+0.5, ymin-0.5, ymax+0.5),
-                           interpolation='nearest', cmap=cmap, vmin=vmin, vmax=vmax, origin='lower')
+            im = ax.imshow(image[y1:y2, x1:x2], extent=(xmin-.5, xmax+.5, ymin-1.5, ymax-.5),
+                           interpolation='nearest', aspect=aspect_ratio,
+                           cmap=cmap, vmin=vmin, vmax=vmax, origin='lower')
             if sb is not None:
                 det_no = sb['det_no']
                 idx = np.argwhere(det_no == det_idx + 1)
@@ -117,8 +111,68 @@ class Plot:
                             pt_v_coords = det_trace['pt_v_coords']
                             xs = pt_u_coords if is_alpha else pt_v_coords
                             ys = pt_v_coords if is_alpha else pt_u_coords
-                            ax.plot(xs, ys, marker='o', ms=2.0, color='cyan', linestyle='none')
+                            ax.plot(xs, ys, marker='o', ms=4.0, color='cyan', linestyle='none')
+                            popt = det_trace['popt']
+                            xhw = 1024 if is_alpha else 40
+                            x1 = det_trace['u_mean'] - xhw
+                            x2 = x1 + 2 * xhw
+                            x = np.arange(x1, x2, 10)
+                            y = Globals.polynomial(x, *popt)
+                            if is_alpha:
+                                ax.plot(x, y, color='blue', linestyle='solid')
+                            else:
+                                ax.plot(y, x, color='blue', linestyle='solid')
         ax.cax.colorbar(im)
+        plt.show()
+        return
+
+    @staticmethod
+    def det_traces(alpha_traces, lambda_traces, config_id, **kwargs):
+        fig = plt.figure(figsize=(8, 7))
+
+        fig.suptitle('Configuration ' + config_id)
+        grid = ImageGrid(fig, 111,
+                         nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), share_all=True
+                         )
+        # Set plot limits
+        xmin, xmax = 0, Globals.det_format[1]
+        ymin, ymax = 0, Globals.det_format[0]
+        bounds = kwargs.get('bounds', (xmin, xmax, ymin, ymax))
+        xmin, xmax, ymin, ymax = bounds
+
+        alpha_stretch = kwargs.get('alpha_stretch', 1.)
+        ybar = {}
+
+        for det_traces in [alpha_traces, lambda_traces]:
+            for det_trace in det_traces:
+                det_no = det_trace['det_no']
+                ax = grid[det_no - 1]
+
+                is_alpha = det_trace['type'] == 'iso-alpha'
+                popt = det_trace['popt']
+                xhw = 1024 if is_alpha else 40
+                x1 = det_trace['u_mean'] - xhw
+                x2 = x1 + 2 * xhw
+                x = np.arange(x1, x2, 10)
+                y = Globals.polynomial(x, *popt)
+                if is_alpha:
+                    slice_no = det_trace['slice_no']
+                    if slice_no not in ybar:        # Use the first y_bar value found for this slice.
+                        ybar[slice_no] = np.mean(y)
+                    y = y + (y - ybar[slice_no]) * alpha_stretch
+                    ax.plot(x, y, color='blue', linestyle='solid', lw=.5)
+                else:
+                    ax.plot(y, x, color='orange', linestyle='solid', lw=.5)
+        coords = kwargs.get('coords', None)
+        if coords is not None:
+            det_nos = coords['det_no']
+            rows = coords['row']
+            cols = coords['col']
+            for i in range(0, len(det_nos)):
+                det_no = det_nos[i]
+                ax = grid[det_no - 1]
+                x, y = cols[i], rows[i]
+                ax.plot(x, y, marker='o', ms=2.0, color='black', linestyle='none')
 
         plt.show()
         return

@@ -42,7 +42,7 @@ class Model:
 
     # Define one or more (point-like) pinhole masks which will spatially filter the extended source.  The model
     # specified PSFs at +-4 slices from the target slice will be convolved with the 'pinhole' images.
-    fp_masks = {'cfopnh': {'id': 'cfo', 'efp_xy_bs': [[0., 0.]],           # On-axis pinhole on boresight
+    fp_masks = {'pnh-1': {'id': 'cfo', 'efp_xy_bs': [[0., 0.]],           # On-axis pinhole on boresight
                     'mask_ext': 'cfo_mask'},
                 'lm_pinhole': {'id': 'wcu', 'efp_xy_bs': [[0., 0.]],       # Steerable pinhole in WCU.
                     'mask_ext': 'wcu_mask'},
@@ -367,7 +367,7 @@ class Model:
         model_configurations = {nominal: nom_config, spifu: spifu_config}
         model_config = model_configurations[opticon]
         filer = Filer()
-        filer.set_configuration('iq', opticon)
+        filer.set_configuration('iq', opticon, False)
         defoc_str = '_defoc000um'
 
         _, _, date_stamp, _, _, _ = model_config

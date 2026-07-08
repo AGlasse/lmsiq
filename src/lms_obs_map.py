@@ -43,15 +43,19 @@ class ObsMap:
             is_pnh = is_wcu_pnh or is_cfo_pnh
             is_wcu_bb = 'closed' not in sim_config['wcu_bb_ap_mask']
             if is_pnh and is_wcu_bb:
-                cfg_tag += 'iso_alpha_'
+                cx_off_str = sim_config['cfo_chop_off_x']
+                cx_off_int = int(1000. * float(cx_off_str))
+                cx_off_sgn = 'm' if cx_off_int < 0 else 'p'
+                cx_off_tag = "{:s}{:03d}".format(cx_off_sgn, abs(cx_off_int))
+                cfg_tag += "iso_alpha_aoff_{:s}_".format(cx_off_tag)
             if sim_config['dpr_type'] == 'flat_lamp':
                 cfg_tag += 'flat_'
 
             if sim_config['wcu_laser_tune'] == 'true':
                 lt_off_str = sim_config['wcu_laser_tune_woff']
                 lt_off_nm = int(1000. * float(lt_off_str))
-                lt_off_tag = "{:03d}".format(lt_off_nm)
-                lt_off_tag = lt_off_tag.replace('-', 'm')
+                lt_off_sgn = 'm' if lt_off_nm < 0 else 'p'
+                lt_off_tag = "{:s}{:03d}".format(lt_off_sgn, lt_off_nm)
                 cfg_tag += "iso_lambda_woff_{:s}nm_".format(lt_off_tag)
 
             cfg_id = test_name + '_' + step_no + '_' + opticon[0:3] + '_' + cfg_tag[0:-1]
