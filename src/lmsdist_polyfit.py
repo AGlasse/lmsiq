@@ -94,21 +94,20 @@ class PolyFit:
         term_fits = []
         wxo_fit, wxo_fit_order = None, None
         surface_model = PolyFit.surface_model
-        for slice_no in Globals.slice_no_ranges[opticon]:
-            for spifu_no in Globals.spifu_no_ranges[opticon]:
-                slice_transforms = Util.filter_transform_list(svd_transforms,
-                                                              slice_no=slice_no,
-                                                              spifu_no=spifu_no)
-                term_values = Util.get_term_values(slice_transforms, slice_no, spifu_no)
+        for fslice_no in Globals.fslice_no_range[opticon]:
+            for pslice_no in Globals.pslice_no_range[opticon]:
+                slice_no = Util.encode_slice_no(fslice_no, pslice_no)
+                slice_transforms = Util.filter_transform_list(svd_transforms, slice_no=slice_no)
+                term_values = Util.get_term_values(slice_transforms, fslice_no, pslice_no)
                 term_fit = PolyFit.find_slice_fit(term_values)
                 baseline_debug_level = Globals.debug_level
                 if Globals.is_debug('medium'):
                     Plot.transform_fit(term_fit, term_values, surface_model, do_plots=True)
                     Plot.transform_fit(term_fit, term_values, surface_model, do_plots=True, plot_residuals=True)
                     Globals.set_debug_level(baseline_debug_level)
-                term_fits.append([slice_no, spifu_no, term_fit])
+                term_fits.append([slice_no, term_fit])
                 slice_fits[slice_no] = term_fit
-                if slice_no == 13:
+                if fslice_no == 12:
                     wxo_fit = PolyFit.find_wxo_fit(term_values, Globals.surface_fit_order)
                     if Globals.is_debug('medium'):
                         Plot.wxo_fit(wxo_fit, term_values, surface_model, plot_residuals=False)

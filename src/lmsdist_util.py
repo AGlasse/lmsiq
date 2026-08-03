@@ -388,25 +388,26 @@ class Util:
         return text
 
     @staticmethod
-    def get_term_values(transforms, slice_no, spifu_no, debug=False):
-        """ Find the transforms which map the centre of slice 13 (alpha = 0.0) onto the EFP.
+    def get_term_values(transforms, fslice_no, pslice_no, debug=False):
+        """ Find the transforms which map the centre of slice 12 (alpha = 0.0) onto the EFP.
         """
+        slice_no = Util.encode_slice_no(fslice_no, pslice_no)
         phase = 0.                      # Across slice fractional displacement
-        y = Util.slice_to_efp_y(slice_no, phase)
+        y = Util.slice_to_efp_y(fslice_no, phase)
         efp_y = np.array([y.value])     # Location in EFP.
         efp_x = np.array([0.])
         efp_bs = {'efp_y': efp_y, 'efp_x': efp_x}
         if debug:
-            print("Slice no= {:d}, Sp. IFU no= {:d}".format(spifu_no))
+            print("Field slice no= {:d}, Pupil slice no= {:d}".format(fslice_no, pslice_no))
             fmt = "{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s}"
             print(fmt.format('pri_ang', 'ech_ang', 'efp_x', 'efp_y', 'mfp_x', 'mfp_y', 'w'))
-        term_values = {'slice_no': slice_no, 'spifu_no': spifu_no,
+        term_values = {'slice_no': fslice_no, 'spifu_no': pslice_no,
                        'pri_ang': [], 'ech_ang': [],
                        'mfp_y': [], 'w_bs': [], 'ech_ords': [], 'matrices': []}
         for transform in transforms:
             lms_config = transform.lms_configuration
             slice_cfg = transform.slice_configuration
-            if (slice_cfg['slice_no'] != slice_no) or (slice_cfg['spifu_no'] != spifu_no):
+            if (slice_cfg['slice_no'] != slice_no):
                 continue
             # Calculate the wavelength at fps_x = 0.0 (the mosaic column direction mid-line)
             w_min, w_max = slice_cfg['w_min'], slice_cfg['w_max']
@@ -432,6 +433,17 @@ class Util:
             term_values['w_bs'].append(mfp_w)
             term_values['matrices'].append(transform.matrices)
         return term_values
+
+    @staticmethod
+    def find_matching_transforms(a_transforms, b_transforms):
+        matching_transforms = []
+        for a_transform in a_transforms:
+            a_slice_no = a_transform.slice_configuration['slice_no']
+            for b_transform in b_transforms:
+                b_slice_no = b_transform.slice_configuration['slice_no']
+                if a_slice_no == b_slice_no:
+                    matching_transforms.append((a_transform, b_transform))
+        return matching_transforms
 
     @staticmethod
     def find_closest_transforms(wave, opticon, svd_transforms):
@@ -496,26 +508,42 @@ class Util:
         return not in_bounds
 
     @staticmethod
-    def efp_y_to_slice(efp_y):
-        """ Convert EFP y coordinate (mm) into a slice number and phase (the offset from the slice centre as
-        a fraction of the slice width.
+    def efp_y_to_slice_no(efp_y):
+        """ Convert EFP y coordinate (mm) into a field slice number and phase (the offset from a slice centre as
+        a fraction of the slice width.  Slice numbers run from 1 to 28, so y = 0 corresponds to
+        (slice, phase) = (14, 1.0) = (15, 0.0).  We then note that in the Zemax model, slice 28 maps onto
+        a negative efp_y (~-1.5 mm). Also, note that the centre of the extended mode fov is at fslice, phase 12, 0.5
         """
+        bs_slice_no, phase = 15, 0.
         efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_arcsec_mm
-        n_slices = Globals.n_lms_slices
-        y_s = efp_y / efp_slice_width
-        slice_coord = n_slices // 2 + y_s
-        slice_no = n_slices // 2 + y_s.astype(int)
-        phase = slice_coord - slice_no
+        s_offset = -efp_y / efp_slice_width
+        slice_no_float = bs_slice_no + s_offset.value
+        slice_no = int(slice_no_float)
+        phase = slice_no_float - slice_no
         return slice_no, phase
 
     @staticmethod
-    def slice_to_efp_y(slice_no, phase):
-        """ Return the EFP y coordinate of the slice centre (in mm).
+    def decode_slice_no(slice_no):
+        """ Convert a universal slice number into its spatial and spectral IFU slice numbers.
         """
+        pslice_no = slice_no // 100
+        fslice_no = slice_no % 100
+        return fslice_no, pslice_no
+
+    @staticmethod
+    def encode_slice_no(fslice_no, pslice_no):
+        slice_no = 100 * pslice_no + fslice_no
+        return slice_no
+
+    @staticmethod
+    def slice_to_efp_y(fslice_no, phase):
+        """ Return the EFP y coordinate of the field slice centre (in mm).
+        """
+        bs_slice_no, bs_phase = 15, 0.
         efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_arcsec_mm
-        n_slices = Globals.n_lms_slices
-        slice = slice_no + phase
-        efp_y = (slice - n_slices // 2) * efp_slice_width
+        slice_no_float = fslice_no + phase
+        s_offset = slice_no_float - (bs_slice_no + bs_phase)
+        efp_y = -s_offset * efp_slice_width
         return efp_y
 
     @staticmethod
@@ -613,6 +641,7 @@ class Util:
         slice_phase: Intra-slice position is degenerate with wavelength. It can be passed explicitly here, with
                      the default being to assume the centre of the slice in the EFP (slice_phase = 0.).
         """
+        lms_config = transform.lms_configuration
         ech_ord = transform.slice_configuration['ech_ord']
         slice_no = transform.slice_configuration['slice_no']
         mfp_x, mfp_y = mfp_points['mfp_x'], mfp_points['mfp_y']
@@ -623,8 +652,8 @@ class Util:
 
         ech_ords = np.full(alphas.shape, ech_ord)
         waves = Util.phases_to_waves(phases, ech_ords)
-
-        efp_y_val = Util.slice_to_efp_y(slice_no, slice_phase)
+        fslice_no, _ = Util.decode_slice_no(slice_no)
+        efp_y_val = Util.slice_to_efp_y(fslice_no, slice_phase)
         efp_y = np.full(alphas.shape, efp_y_val)
 
         efp_points = {'efp_x': alphas, 'efp_y': efp_y, 'efp_w': waves}
@@ -750,7 +779,7 @@ class Util:
 
         # Define EFP coordinates and target wavelength for spectrum
         efp_x_cen, efp_y_cen, efp_w_cen = 0., 0., 4.65
-        tgt_slice_nos, test_phases = Util.efp_y_to_slice([efp_y_cen])
+        tgt_slice_nos, test_phases = Util.efp_y_to_slice_no([efp_y_cen])
         tgt_slice_no = tgt_slice_nos[0]
 
         # Generate test spectrum for the wavelength/order which is closest to the mfp_y = 0. column.

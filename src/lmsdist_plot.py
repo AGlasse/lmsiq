@@ -7,6 +7,7 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from lms_globals import Globals
+from lmsdist_util import Util
 
 
 class Plot:
@@ -385,7 +386,8 @@ class Plot:
         return colours
 
     @staticmethod
-    def series(plot_type, traces, model_config, colour_by='config'):
+    def series(plot_type, traces, model_config,
+               colour_by='config', xlimits=None, ylimits=None, labels=False):
         _, opticon, _, _, _, _ = model_config
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
                   'dispersion': ('Dispersion [nm / column]', 'Dispersion [nm / pixel]'),
@@ -395,40 +397,40 @@ class Plot:
                                           ylabel=ylabel)
         fig.suptitle(title)
         ax = ax_list[0, 0]
-        slice_rgb = None
+        if xlimits is not None:
+            ax.set_xlim(xlimits)
+        if ylimits is not None:
+            ax.set_ylim(ylimits)
+
         if colour_by == 'slice':
-            slice_rgb = Plot.make_rgb_gradient(np.arange(28))
-        if colour_by == 'config':
-            slice_rgb = Plot.make_rgb_gradient(np.arange(108))
+            n_fslices = Globals.n_slices[opticon]
+            slice_rgb = Plot.make_rgb_gradient(np.arange(n_fslices))
         n_traces = len(traces)
+        if colour_by == 'config':
+            slice_rgb = Plot.make_rgb_gradient(np.arange(n_traces))
         for i, trace in enumerate(traces):
             ech_angle, prism_angle = trace.lms_config['ech_ang'], trace.lms_config['pri_ang']
-            n_slices, n_spifus = len(trace.unique_slices), len(trace.unique_spifu_slices)   # Multiple slices per trace
-            colour = None
-            perimeter_upper, perimeter_lower = None, None
+            colour, rgb = None, None
+            if colour_by == 'config':
+                idx = n_traces - i - 1
+                colour = slice_rgb[idx]
+            xperi, yperi = None, None
             for transform in trace.transforms:
                 slice_config = transform.slice_configuration
                 slice_no = slice_config['slice_no']
-                spifu_no = slice_config['spifu_no']
-                cfg = {}
-                for key in slice_config:
-                    cfg[key] = slice_config[key]
-                # cfg['opticon'] = opticon
-                waves = trace.get_series('wavelength', cfg)
-                mfp_x = trace.get_series('mfp_x', cfg)
-                mfp_y = trace.get_series('mfp_y', cfg)
-                if colour_by == 'slice_wave':
+                fslice_no, pslice_no = Util.decode_slice_no(slice_no)
+                waves = trace.get_series('wavelength', slice_config)
+                mfp_x = trace.get_series('mfp_x', slice_config)
+                mfp_y = trace.get_series('mfp_y', slice_config)
+                if colour_by == 'slice_wavelength':
                     rgb = Plot.make_rgb_gradient(waves)
                 if colour_by == 'slice':
-                    colour = slice_rgb[slice_no - 1]
-                if colour_by == 'config':
-                    idx = n_traces - i
-                    colour = slice_rgb[idx]
+                    colour = rgb[slice_no - 1]
 
                 x, y = None, None
                 if plot_type == 'coverage':
                     x = waves
-                    y = prism_angle + 0.1 * ech_angle + 0.004 * spifu_no + 0.001 * mfp_y
+                    y = prism_angle + 0.1 * ech_angle + 0.004 * fslice_no + 0.001 * mfp_y
                 nm_micron = 1000.0
                 if plot_type == 'nm_det':
                     x = waves
@@ -437,50 +439,53 @@ class Plot:
                     y = np.full(waves.shape, dw)
                 if plot_type == 'dispersion':
                     mm_pix = Globals.nom_pix_pitch / 1000.
-                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (mfp_x[1:] - mfp_x[:-1])  # nm / pix
+                    dw_dlmspix = -nm_micron * mm_pix * (waves[1:] - waves[:-1]) / (mfp_x[1:] - mfp_x[:-1])
                     x = waves[1:]
                     y = dw_dlmspix
 
-                tag = "{:5.2f}{:5.2f}".format(ech_angle, prism_angle)
-                # colour = config_colour[tag]
                 n_pts = len(x)
 
-                if colour_by == 'slice_wave':
+                if colour_by == 'slice_wavelength':
                     for i in range(0, n_pts):
                         ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
                                 fillstyle='none', marker='.', mew=1., ms=1, ls='None')
                 else:
-                    ax.plot(x, y, color=colour, clip_on=True,
+                    ax.plot(x, y, color=colour, clip_on=True,          # colour
                             fillstyle='none', marker='.', mew=1., ms=1, ls='None')
 
                 # Plot perimeter of dot pattern
                 unique_waves = np.unique(waves)
                 n_waves = len(unique_waves)
-                if perimeter_upper is None:
-                    perimeter_shape = n_spifus, n_waves, 2
-                    perimeter_upper, perimeter_lower = np.zeros(perimeter_shape), np.zeros(perimeter_shape)
-                unique_slices = trace.unique_slices
-                unique_spifus = trace.unique_spifu_slices
-                spifu_idx = np.argwhere(spifu_no == unique_spifus)[0][0]
-                is_slice_lower = slice_no == unique_slices[0]
-                is_slice_upper = slice_no == unique_slices[-1]
-                for wave_idx, uw in enumerate(unique_waves):
-                    indices = np.argwhere(x == uw)
-                    yp_unsort = y[indices]
-                    yp = np.sort(yp_unsort)
-                    if is_slice_lower:
-                        perimeter_lower[spifu_idx, wave_idx] = [uw, yp[-1][0]]
-                    if is_slice_upper:
-                        perimeter_upper[spifu_idx, wave_idx] = [uw, yp[0][0]]
+                if xperi is None:
+                    n_peri = 2 * n_waves + 1  # Number of points on perimeter, including return to first
+                    xperi, yperi = np.zeros(n_peri), np.zeros(n_peri)
+                is_slice_lower = slice_no == trace.unique_slice_nos[0]
+                if is_slice_lower:
+                    for i, w in enumerate(unique_waves):
+                        idx = np.argwhere(w == x)
+                        ys = y[idx]
+                        ymin = np.min(ys)
+                        xperi[i], yperi[i] = w, ymin
+                is_slice_upper = slice_no == trace.unique_slice_nos[-1]
+                if is_slice_upper:
+                    for i, w in enumerate(unique_waves):
+                        idx = np.argwhere(w == x)
+                        ys = y[idx]
+                        ymax = np.max(ys)
+                        xperi[n_peri-i-2], yperi[n_peri-i-2] = w, ymax
+                xperi[n_peri-1], yperi[n_peri-1] = xperi[0], yperi[0]
+            # plt.fill(xperi, yperi, color='pink')
+            ax.plot(xperi, yperi, color='black', linestyle='solid', lw=1.0)
 
-            for spifu_idx, spifu_no in enumerate(trace.unique_spifu_slices):
-                xyl = perimeter_lower[spifu_idx]
-                xyu = perimeter_upper[spifu_idx]
-                xyl = np.flip(xyl, axis=0)
-                xy = np.concatenate((xyu, xyl, xyu[0:1]))
-                plt.fill(xy[:, 0], xy[:, 1], color='pink')
-                ax.plot(xy[:, 0], xy[:, 1], color='black', linestyle='solid', lw=0.5)
-
+            if labels:
+                all_waves = trace.series['wavelength']
+                label_idx = np.argmax(all_waves)
+                x_label = all_waves[label_idx]
+                y_label = prism_angle + 0.1 * ech_angle + 0.004 * fslice_no + 0.01
+                lms_config = trace.lms_config
+                label = "PA{:6.3f}, EA{:6.3f}".format(lms_config['pri_ang'], lms_config['ech_ang'])
+                ax.text(x_label, y_label, label)
+            ax.grid(True)
         Plot.show()
         return
 

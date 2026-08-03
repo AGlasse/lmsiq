@@ -18,13 +18,12 @@ from lmsdist_util import Util
 from lmsdist_plot import Plot
 from lmsdist_trace import RayTrace
 from lms_globals import Globals
-from lms_detector import Detector
 from lms_transform import Transform
 from lmsdist_polyfit import PolyFit
 
-if __name__ == '__main__':
-
+def run(*args):
     print('lmsdist, distortion model - Starting')
+    print(args)
     _ = Globals()
     base_debug_level = 'off'
     Globals.set_debug_level(base_debug_level)
@@ -32,7 +31,8 @@ if __name__ == '__main__':
 
     """ SET MODEL CONFIGURATION HERE """
     is_ait_data = False
-    opticon = Globals.extended                   # 'nominal' or 'extended'
+
+    opticon = Globals.nominal                   # 'nominal' or 'extended'
     use_nominal_wpa_fit = True                  # Use the nominal fit for prism angle = f(wavelength)
 
     filer = Filer()
@@ -46,37 +46,27 @@ if __name__ == '__main__':
 
     # File locations and names
     zem_folder = filer.ray_trace_folder
-    detector = Detector()
-    focal_planes = {''}
 
     util = Util()
     plot = Plot()
+    _ = Transform()             # Force creation of 'global' affine transforms (M and MI)
 
-    n_mats = Globals.n_svd_matrices
     filer.set_configuration(analysis_type, opticon, is_ait_data)
-    st_file = open(filer.stats_file, 'w')
-
-    run_config = 4, 2
-    n_terms, poly_order = run_config
-    st_hdr = "Trace individual"
-    rt_text_block = ''
 
     # Generate transforms for the specific configurations with Zemax ray trace data provided.
     generate_transforms = True
     print('generate_transforms = {:s}'.format(str(generate_transforms)))
     if generate_transforms:
         print()
-        print("Generating distortion transforms (and prism angle fit parameters)")
-        fmt = "- reading Zemax ray trace data from folder {:s}"
-        print(fmt.format(zem_folder))
+        text = "Generating distortion transforms (and prism angle fit parameters) using "
+        fmt = "AIT data in folder {:s}" if is_ait_data else "Zemax data in folder {:s}"
+        print(text + fmt.format(zem_folder))
 
-        # Select *.csv files containing ray trace data
         file_list = listdir(zem_folder)
         file_list = [f for f in file_list if '.csv' in f]
         if opticon == Globals.extended:
             file_list = [f for f in file_list if 'in-band' in f]
 
-        n_traces = len(file_list)
         offset_data_list = []
         traces = []
         a_rms_list = []
@@ -133,18 +123,20 @@ if __name__ == '__main__':
         traces = Filer.read_pickle(filer.trace_file)
         model_config = filer.model_configuration
         if Globals.is_debug('low'):
-            plot.series('dispersion', traces, model_config)
-            plot.series('coverage', traces[0:1], model_config)
+            plot.series('coverage', traces, model_config,
+                        xlimits=[4.5, 5.0], ylimits=[6.25, 7.75], labels=True)
             plot.series('coverage', traces, model_config)
+            plot.series('dispersion', traces, model_config)
+            plot.series('coverage', traces[0:1], model_config, colour_by='slice_wavelength', )
 
-    fit_transforms = False
-    if fit_transforms:
+    fit_transforms = True
+    if fit_transforms and not is_ait_data:
         # Create 2D (prism and echelle angle) polynomial fits to the wavelength and distortion transforms.  The prism
         # angle is calculated (first) as a function of wavelength, for echelle angle = 0, (the blaze angle).
         # reflecting the requirement that the target wavelength must be directed through the curved slit at the
-        # pre-disperser output.  For the nominal mode, this is calculated for spatial slice number 'slice_no' 13).
-        # For the extended mode, it is for spectral slice number 'spifu_no' 3 and slice_no 13 through the slit.
-
+        # pre-disperser output.  For the nominal mode, this is calculated for spatial/field slice number 'fslice_no'
+        # 13).
+        # For the extended mode, it is for spectral/pupil slice number 'pslice_no' 3 and fslice_no 13 through the slit.
         opt_tag = opticon[0: 3]
         all_boresights = []                         # All boresights, including non-zero echelle angles
         traces = Filer.read_pickle(filer.trace_file)
@@ -236,87 +228,84 @@ if __name__ == '__main__':
     # (generated for the prism and echelle angles).
     evaluate_transforms = True
     print('evaluate_transforms = {:s}'.format(str(evaluate_transforms)))
-    if evaluate_transforms:
+    if evaluate_transforms and not is_ait_data:
         traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
         _, opticon, date_stamp, _, _, _ = filer.model_configuration
-        affines = filer.read_fits_affine_transform(date_stamp)
-        spifu_no = 0
-        inc_tags = ["efp_mfp_{:s}".format(opticon[0:3])]
+        # affines = filer.read_fits_affine_transform(date_stamp)
+        # spifu_no = 0
+        # inc_tags = ["efp_mfp_{:s}".format(opticon[0:3])]
         wpa_fit, wxo_fit, svd_fit = filer.read_fit_parameters(opticon)
         fmt = None
         if Globals.is_debug('medium'):
             fmt = '{:45s},{:8s},{:8s},{:8s},{:10s},{:10s},{:10s},{:1s},{:10s},{:10s},{:1s},{:10s},{:10s},{:1s},'
-            print(fmt.format('Trace', 'slice_no', 'spifu_no', 'ech_ord', 'wave_ref',
+            print(fmt.format('Trace', 'fslice_no', 'spifu_no', 'ech_ord', 'wave_ref',
                              'Zemax', 'Zemax', '|', 'Zemax', 'Zemax', '|', 'PolyFit', 'PolyFit', '', '', '|'))
             print(fmt.format('file name', '-', '-', '-', 'efp_w0',
                              'pri_ang', 'ech_ang', '|', 'mfp_x0', 'mfp_y0', '|', 'mfp_x0', 'mfp_y0', '|'))
             fmt = '{:45s},{:8d},{:8d},{:8d},{:10.3f},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s},{:10.3f},{:10.3f},{:1s}'
         debug_once = Globals.is_debug('low')
         for ray_trace in traces:
-            lms_config, wave_bs = None, None
+            # lms_config, wave_bs = None, None
             inc_tags = [ray_trace.transform_fits_name]
             trace_transforms = filer.read_svd_transforms(inc_tags=inc_tags, exc_tags=['fit_parameters'])
 
-            slice_nos = ray_trace.unique_slices
-            spifu_nos = ray_trace.unique_spifu_slices
+            slice_nos = ray_trace.unique_slice_nos
             ech_ords = ray_trace.unique_ech_ords
 
-            mfp_plot_points = {'slice_no': [], 'spifu_no': [], 'ech_ord': [], 'ray': [], 'sli': [], 'fit': []}
+            mfp_plot_points = {'slice_no': [], 'ech_ord': [], 'ray': [], 'sli': [], 'fit': []}
             for slice_no in slice_nos:
-                for spifu_no in spifu_nos:
-                    for ech_ord in ech_ords:
-                        slice_filter = {'slice_no':slice_no, 'spifu_no':spifu_no, 'ech_ord':ech_ord}
-                        # Start by finding the slice transform for this configuration
-                        slice_transform_zem = None
-                        for slice_transform_zem in trace_transforms:
-                            is_match = slice_transform_zem.is_match(slice_filter)
-                            if is_match:
-                                break
+                for ech_ord in ech_ords:
+                    slice_filter = {'slice_no':slice_no, 'ech_ord':ech_ord}
+                    # Start by finding the slice transform for this configuration
+                    slice_transform_zem = None
+                    for slice_transform_zem in trace_transforms:
+                        is_match = slice_transform_zem.is_match(slice_filter)
+                        if is_match:
+                            break
 
-                        efp_w = ray_trace.get_series('wavelength', slice_filter)
-                        if len(efp_w) < 1:      # spifu_no and ech_ord are not independent.
-                            continue
-                        efp_x = ray_trace.get_series('efp_x', slice_filter)
-                        efp_y = ray_trace.get_series('efp_y', slice_filter)
-                        efp_points = {'efp_x': efp_x, 'efp_y': efp_y, 'efp_w': efp_w}
-                        mfp_pts_sli_tform, _ = util.efp_to_mfp(slice_transform_zem, efp_points)
-                        mfp_x = ray_trace.get_series('mfp_x', slice_filter)
-                        mfp_y = ray_trace.get_series('mfp_y', slice_filter)
-                        mfp_pts_ray = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
-                        mfp_plot_points['ray'].append(mfp_pts_ray)
-                        mfp_plot_points['sli'].append(mfp_pts_sli_tform)
-                        mfp_plot_points['slice_no'].append(slice_no)
-                        mfp_plot_points['spifu_no'].append(spifu_no)
-                        mfp_plot_points['ech_ord'].append(ech_ord)
+                    efp_w = ray_trace.get_series('wavelength', slice_filter)
+                    if len(efp_w) < 1:      # spifu_no and ech_ord are not independent.
+                        continue
+                    efp_x = ray_trace.get_series('efp_x', slice_filter)
+                    efp_y = ray_trace.get_series('efp_y', slice_filter)
+                    efp_points = {'efp_x': efp_x, 'efp_y': efp_y, 'efp_w': efp_w}
+                    mfp_pts_sli_tform, _ = util.efp_to_mfp(slice_transform_zem, efp_points)
+                    mfp_x = ray_trace.get_series('mfp_x', slice_filter)
+                    mfp_y = ray_trace.get_series('mfp_y', slice_filter)
+                    mfp_pts_ray = {'mfp_x': mfp_x, 'mfp_y': mfp_y}
+                    mfp_plot_points['ray'].append(mfp_pts_ray)
+                    mfp_plot_points['sli'].append(mfp_pts_sli_tform)
+                    mfp_plot_points['slice_no'].append(slice_no)
+                    mfp_plot_points['ech_ord'].append(ech_ord)
 
-                        slice_config_zem = slice_transform_zem.slice_configuration
-                        fit_matrix = svd_fit[slice_no][spifu_no]
-                        lms_config = ray_trace.lms_config
-                        pri_ang = lms_config['pri_ang']
-                        ech_ang = lms_config['ech_ang']
-                        n_terms = Globals.svd_order
-                        matrices = {}
-                        for mat_name in Globals.matrix_names:
-                            matrix = np.zeros((n_terms, n_terms))
-                            matrices[mat_name] = matrix
-                            for row in range(0, n_terms):
-                                for col in range(0, n_terms):
-                                    fit_terms = fit_matrix[mat_name][row, col]
-                                    term = PolyFit.surface_model((pri_ang, ech_ang), *fit_terms)
-                                    matrix[row, col] = term
+                    slice_config_zem = slice_transform_zem.slice_configuration
+                    fit_matrix = svd_fit[slice_no]
+                    lms_config = ray_trace.lms_config
+                    pri_ang = lms_config['pri_ang']
+                    ech_ang = lms_config['ech_ang']
+                    n_terms = Globals.svd_order
+                    matrices = {}
+                    for mat_name in Globals.matrix_names:
+                        matrix = np.zeros((n_terms, n_terms))
+                        matrices[mat_name] = matrix
+                        for row in range(0, n_terms):
+                            for col in range(0, n_terms):
+                                fit_terms = fit_matrix[mat_name][row, col]
+                                term = PolyFit.surface_model((pri_ang, ech_ang), *fit_terms)
+                                matrix[row, col] = term
 
-                        slice_transform_fit = Transform(matrices=matrices, slice_config=slice_config_zem, lms_config=lms_config)
-                        mfp_pts_fit_tform, _ = util.efp_to_mfp(slice_transform_fit, efp_points)
-                        mfp_plot_points['fit'].append(mfp_pts_fit_tform)
+                    slice_transform_fit = Transform(matrices=matrices, slice_config=slice_config_zem, lms_config=lms_config)
+                    mfp_pts_fit_tform, _ = util.efp_to_mfp(slice_transform_fit, efp_points)
+                    mfp_plot_points['fit'].append(mfp_pts_fit_tform)
 
-                        mfp_x_fit = mfp_pts_fit_tform['mfp_x']
-                        mfp_y_fit = mfp_pts_fit_tform['mfp_y']
-                        wave_bs = np.mean(efp_w)
-                        if Globals.is_debug('medium'):
-                            text = fmt.format(ray_trace.transform_fits_name, slice_no, spifu_no, ech_ord, wave_bs,
-                                              pri_ang, ech_ang, '|', mfp_x[0], mfp_y[0], '|', mfp_x_fit[0], mfp_y_fit[0], '|'
-                                              )
-                            print(text)
+                    mfp_x_fit = mfp_pts_fit_tform['mfp_x']
+                    mfp_y_fit = mfp_pts_fit_tform['mfp_y']
+                    wave_bs = np.mean(efp_w)
+                    if Globals.is_debug('medium'):
+                        text = fmt.format(ray_trace.transform_fits_name, slice_no, ech_ord, wave_bs,
+                                          pri_ang, ech_ang, '|', mfp_x[0], mfp_y[0], '|', mfp_x_fit[0], mfp_y_fit[0], '|'
+                                          )
+                        print(text)
 
             if Globals.is_debug('low'):
                 title = ray_trace.get_plot_title()
@@ -329,7 +318,8 @@ if __name__ == '__main__':
                     debug_once = False
 
     test_transform_fit = True
-    if test_transform_fit:
+    print('testing transform fit polynomials = {:s}'.format(str(test_transform_fit)))
+    if test_transform_fit and not is_ait_data:
         test_waves = np.linspace(2.7, 5.4, 28, endpoint=True)
         if opticon == Globals.extended:
             test_waves = np.linspace(4.4, 4.6, 3, endpoint=True)
@@ -350,3 +340,6 @@ if __name__ == '__main__':
 
     print()
     print('lms_distort - Done')
+
+if __name__ == '__main__':
+    run()

@@ -8,10 +8,12 @@ Update:
 """
 import math
 import sys
+import warnings
 
 import numpy as np
 from scipy.optimize import curve_fit, OptimizeWarning
 
+import lmsdist
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_mosaic import Mosaic
@@ -29,23 +31,31 @@ class Opt02:
 
     @staticmethod
     def dist(title, as_built, **kwargs):
+        overwrite_as_built_traces = kwargs.get('overwrite_as_built_traces', True)
+
         test_name = 'lms_opt_02'
         opticon = Globals.nominal
-        skip_iso_alpha = False
-        skip_iso_lambda = False
+
+        misalign_detector = False
+        find_iso_alphas = True
+        find_iso_lambdas = True
+        calculate_transforms = True
+        test_transforms = True
+
+        snr_cut_alpha = 1.0     # Cut level to detect multiple (at least 3) iso-alpha traces from a single PSF
 
         inc_tags = [test_name, opticon[0:3]]         # Tokens to identify image files.
         filer = Filer()
         filer.set_configuration('distortion', opticon, is_ait_data=True)
 
         flag_text = 'Analysing'
-        if not skip_iso_alpha:
+        if find_iso_alphas:
             flag_text += ' iso-alpha'
-            if skip_iso_lambda:
+            if find_iso_lambdas:
                 flag_text += ' and'
-        if not skip_iso_lambda:
+        if find_iso_lambdas:
             flag_text += ' iso-lambda'
-        if skip_iso_alpha and skip_iso_lambda:
+        if not find_iso_alphas and not find_iso_lambdas:
             flag_text = 'Calculating trace intersections only '
         else:
             flag_text += ' traces'
@@ -55,12 +65,14 @@ class Opt02:
         slice_map = as_built["slice_map_{:s}".format(opticon)]
         if Globals.is_debug('medium'):
             Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+        slice_row_dict = Opt02._build_slice_row_dict(slice_map)         # Dictionary of per slice row bounds
 
-        if not skip_iso_alpha or not skip_iso_lambda:
-            # Set up a deliberately misaligned detector
+        # Set up a deliberately misaligned detector
+        test_det_no, test_det_offset, test_img_rot_deg = None, None, None
+        if misalign_detector:
             test_det_no = 2
             test_det_offset = 0, 0
-            test_det_rot_deg = 0.
+            test_det_rot_deg = 0.0
             test_img_rot_deg = -test_det_rot_deg
             print('Deliberately misaligning detector')
             print('det_no =       {:d}'.format(test_det_no))
@@ -68,43 +80,54 @@ class Opt02:
             print('det_rotation = {:5.3f} deg.'.format(test_det_rot_deg))
             print()
 
-        if not skip_iso_alpha:
-            # ---------- ISO-ALPHA -------------------
-            # Start with data loading and background subtraction.  The iso-alphas use the WCU BB and the lm_pinhole
-            # mask.  The background under the trace is then the emission spectrum of the mask (at 300 K).  We remove
-            # this by moving the pinhole out of the LMS field using the CFO chopper.
+        # ---------- ISO-ALPHA -------------------
+        # Start with data loading and background subtraction.  The iso-alphas use the WCU BB and the lm_pinhole
+        # mask.  The background under the trace is then the emission spectrum of the mask (at 300 K).  We remove
+        # this by moving the pinhole out of the LMS field using the CFO chopper.
+        if find_iso_alphas:
             print('Derive detector rotation and offset differences from iso-alpha trace data. ')
             alpha_traces = []
 
             # Load background images (BB flat field)
             print('Background')
-            bgd_mosaics = Filer.read_mosaic_list(inc_tags + ['flat'])
-            bgd_mosaic = OptTools.transform_detector_image(bgd_mosaics[0],
-                                                           det_no=test_det_no,
-                                                           xy_pix=test_det_offset,
-                                                           angle=test_img_rot_deg)
-            if Globals.is_debug('medium'):
-                Plot.mosaic(bgd_mosaic, title='WCU lm_pinhole mask background', cmap='hot')
-
-            sig_mosaics = Filer.read_mosaic_list(inc_tags + ['iso_alpha'])
-            for sig_mosaic in sig_mosaics:
-                print()
-                print("Processing mosaic file {:s}".format(sig_mosaic[0]))
-                sig_mosaic = OptTools.transform_detector_image(sig_mosaic,
+            flat_step = {Globals.nominal: 'step1_', Globals.extended: 'step38_'}[opticon]
+            bgd_mosaics = Filer.read_mosaic_list(Filer.test_data_folder, inc_tags + ['flat', flat_step])
+            bgd_mosaic = bgd_mosaics[0]
+            if misalign_detector:
+                bgd_mosaic = OptTools.transform_detector_image(bgd_mosaics[0],
                                                                det_no=test_det_no,
                                                                xy_pix=test_det_offset,
                                                                angle=test_img_rot_deg)
-                # Extract iso-alpha traces for all slices (snr_cut=0.)
-                tra_mosaic = Mosaic.diff_mosaics(sig_mosaic, bgd_mosaic)
-                if Globals.is_debug('medium'):
-                    Plot.mosaic(tra_mosaic, title='Signal')
-                    Plot.mosaic(sig_mosaic, title='Signal - Bgd')
+            if Globals.is_debug('medium'):
+                Plot.mosaic(bgd_mosaic, title='WCU lm_pinhole mask background', cmap='hot')
+            sig_file_list = Filer.get_file_list(Filer.test_data_folder, inc_tags=inc_tags + ['iso_alpha'])
+            # sig_mosaics = Filer.read_mosaic_list(inc_tags + ['iso_alpha'])
+            for sig_file in sig_file_list:
+                print()
+                sig_mosaic = Filer.read_mosaic(Filer.test_data_folder, sig_file)
+                print("Processing mosaic file {:s}".format(sig_mosaic.name))
+                if misalign_detector:
+                    sig_mosaic = OptTools.transform_detector_image(sig_mosaic,
+                                                                   det_no=test_det_no,
+                                                                   xy_pix=test_det_offset,
+                                                                   angle=test_img_rot_deg)
+                # Extract iso-alpha traces for all slices (by setting snr_cut=0.)
+                tra_mosaic = sig_mosaic.subtract(bgd_mosaic)
+                if Globals.is_debug('low'):
+                    Plot.mosaic(sig_mosaic, title='Signal')
+                if Globals.is_debug('low'):
+                    Plot.mosaic(tra_mosaic, title='Signal - Bgd')
 
+                # We find the multiple alpha traces in adjacent slices by accepting all traces above snr which
+                # is low enough to avoid fit problems in un-illuminated slices, but to include enough traces to
+                # calculate the PSF across-slice / beta phase.
                 psf_alpha_traces = Opt02._extract_det_traces(tra_mosaic, 'iso-alpha', slice_map,
-                                                             snr_cut=0.)
+                                                             snr_cut=1.)
                 # ..then fit a gaussian to all solid detections to find the single trace for the PSF centroid.
                 # The slice plus beta phase should ideally(!) match the WCU derived efp_y parameter.
-                alpha_trace_pair = Opt02._find_beta_phase(psf_alpha_traces, snr_cut=1.)
+                # The method clips any points which are displaced by more than 'sigma_clip' times the rms
+                # displacement from the best fit and then recalculates the best fit.
+                alpha_trace_pair = Opt02._find_beta_phase(psf_alpha_traces, opticon, snr_cut=1.)
                 if Globals.is_debug('high'):
                     print()
                     print('PSF iso-alpha traces found')
@@ -118,11 +141,8 @@ class Opt02:
                         print(fmt.format(det_no, slice_no, beta_phase))
 
                 if Globals.is_debug('low'):
-                    overlay = {'type': 'det_traces', 'data': alpha_trace_pair}
-                    row_fid = alpha_trace_pair[0]['v_fid']
-                    bounds = 0, 2048, row_fid-20, row_fid+20
-                    Plot.mosaic(sig_mosaic, title='Background subtracted', cmap='grey',
-                                bounds=bounds, overlay=overlay)
+                    overlay = {'type': 'det_traces', 'trace_type': 'iso_alpha', 'data': alpha_trace_pair}
+                    Plot.mosaic(sig_mosaic, title='Background subtracted', cmap='grey', overlay=overlay)
                 alpha_traces = alpha_traces + alpha_trace_pair         # 1 alpha traces per detector
 
             # Calculate mean angle between alpha traces and the row direction.
@@ -148,33 +168,36 @@ class Opt02:
                     print(fmt.format(det_no, slice_no, row_fid, mean_theta_disp))
                 alpha_trace['mean_theta_disp'] = mean_theta_disp
 
-            if 'alpha_traces' not in as_built.keys():
-                as_built['alpha_traces'] = alpha_traces
-            else:
-                alpha_traces_cache = as_built['alpha_traces']
-                alpha_traces_cache += alpha_traces
-                as_built['alpha_traces'] = alpha_traces
+            if 'alpha_traces' in as_built.keys() and not overwrite_as_built_traces:
+                alpha_traces_archive = as_built['alpha_traces']
+                alpha_traces_archive += alpha_traces
+            as_built['alpha_traces'] = alpha_traces
             Filer.write_pickle(Globals.as_built_file, as_built)
 
         # -----------------------
         # ISO-LAMBDA
-        if not skip_iso_lambda:
+        if find_iso_lambdas:
             print('2. Extract iso-lambda traces to measure the intra-detector gap and the line spread function.')
             print('   The gap calculation will assume that the laser lines are spaced according to a smooth polynomial.')
 
-            mosaics = Filer.read_mosaic_list(inc_tags + ['iso_lambda'])
+            raw_mosaics = Filer.read_mosaic_list(inc_tags + ['iso_lambda'])
+            # Plot.mosaic(raw_mosaics[0])
+            mosaics = OptTools.median_subtract(raw_mosaics)
+            # Plot.mosaic(mosaics[0])
+
             print(0)
             lambda_traces = []
 
             for mosaic in mosaics:
                 print()
-                print("Processing mosaic file {:s}".format(mosaic[0]))
-                mosaic = OptTools.transform_detector_image(mosaic,
-                                                           det_no=test_det_no,
-                                                           xy_pix=test_det_offset,
-                                                           angle=test_img_rot_deg)
-                lt_wave = mosaic[1]['HIERARCH ACHG LASER WAVE']
-                if Globals.is_debug('medium'):
+                print("Processing mosaic file {:s}".format(mosaic.name))
+                if misalign_detector:
+                    mosaic = OptTools.transform_detector_image(mosaic,
+                                                               det_no=test_det_no,
+                                                               xy_pix=test_det_offset,
+                                                               angle=test_img_rot_deg)
+                lt_wave = mosaic.primary_hdr['HIERARCH ACHG LASER WAVE']
+                if Globals.is_debug('low'):
                     Plot.mosaic(mosaic, title='laser_wavelength = ' + "{:10.3f}".format(lt_wave))
                 # Find the gap between detectors as a function of row number.
                 snr_cut = 10
@@ -183,27 +206,27 @@ class Opt02:
                 if len(mos_lambda_traces) == 0:
                     continue
                 if Globals.is_debug('low'):
-                    overlay = {'type': 'det_traces', 'data': mos_lambda_traces}
-                    col_fid = mos_lambda_traces[0]['v_fid']
-                    bounds = col_fid-100, col_fid+100, 0, 2048
+                    overlay = {'type': 'det_traces', 'trace_type': 'iso_lambda', 'data': mos_lambda_traces}
+                    row_fid = mos_lambda_traces[0]['v_fid']
+                    bounds = 0, 2048, row_fid-100, row_fid+100
                     Plot.mosaic(mosaic, title='Background subtracted', cmap='grey',
                                 bounds=bounds, overlay=overlay)
 
                 lambda_traces = lambda_traces + mos_lambda_traces
-            # Find the intra-detector gap from a list of column position v wavelength for tunable laser spectral lines.
-            gap_data, det_thetas = Opt02._find_detector_gaps(lambda_traces)
-            if Globals.is_debug('low'):
-                Plot.gap_data(gap_data, det_thetas)
-            if 'lambda_traces' not in as_built.keys():
-                as_built['lambda_traces'] = lambda_traces
-            else:
+
+            if 'lambda_traces' in as_built.keys() and not overwrite_as_built_traces:
                 lambda_traces_archive = as_built['lambda_traces']
                 lambda_traces_archive += lambda_traces
-                as_built['lambda_traces'] = lambda_traces
+            as_built['lambda_traces'] = lambda_traces
             Filer.write_pickle(Globals.as_built_file, as_built)
 
         alpha_traces = as_built['alpha_traces']
         lambda_traces = as_built['lambda_traces']
+
+        # Find the intra-detector gap from a list of column position v wavelength for tunable laser spectral lines.
+        gap_data, det_thetas = Opt02._find_detector_gaps(lambda_traces)
+        if Globals.is_debug('low'):
+            Plot.gap_data(gap_data, det_thetas)
 
         # Generate baseline affine transforms to project detector pixel coords into the mosaic focal plane.
         # We can/ought to project the detector intersections into the mosaic focal plane using the baseline
@@ -213,14 +236,26 @@ class Opt02:
                                            x_mfp_org_offsets=[0.]*4, y_mfp_org_offsets=[0.]*4,
                                            x_scale_offsets=[0.]*4, y_scale_offsets=[0.]*4)
 
+        # Find all LMS configurations
+        lms_config_ids = []
+        for alpha_trace in alpha_traces:
+            id = alpha_trace['lms_config_id']
+            if id not in lms_config_ids:
+                lms_config_ids.append(id)
+        for lms_config_id in lms_config_ids:
+            Plot.det_traces(alpha_traces, lambda_traces, lms_config_id)
+
         dist_coord = Opt02._find_trace_intersections(alpha_traces, lambda_traces, affines)
+        _ = Opt02._print_dist_coord(filer, dist_coord, to_csv=False)
+
         path = Opt02._print_dist_coord(filer, dist_coord, to_csv=True)
         print("Coordinates written to file {:s}".format(path))
+        print()
 
         for lms_config_id in dist_coord:
             coords = dist_coord[lms_config_id]
-            Plot.det_traces(alpha_traces, lambda_traces, lms_config_id, coords=coords)
-            Plot.det_traces(alpha_traces, lambda_traces, lms_config_id, alpha_stretch=10.)
+            Plot.det_traces(alpha_traces, lambda_traces, lms_config_id)
+            # Plot.det_traces(alpha_traces, lambda_traces, lms_config_id, coords=coords, bounds=(0, 600, 330, 430))
 
         as_built['affines'] = affines
         as_built['dist_coord'] = dist_coord
@@ -235,81 +270,130 @@ class Opt02:
             filer.set_configuration('distortion', opticon, is_ait_data)
             ait_transforms = filer.read_svd_transforms(inc_tags=inc_tags)
             # As a measure of accuracy, calculate the fractional difference between matrix terms,
-
-            for ait_transform in ait_transforms:
-                ait_slice_no = ait_transform.slice_configuration['slice_no']
+            matching_transforms = Util.find_matching_transforms(ait_transforms, zemax_transforms)
+            for ait_transform, zmx_transform in matching_transforms:
                 if Globals.is_debug('low'):
+                    a_slice_no = ait_transform.slice_configuration['slice_no']
                     fmt = "Slice {:d} fractional difference in matrix terms (AIT - ZMX) / ZMX"
-                    print(fmt.format(ait_slice_no))
-                for zmx_transform in zemax_transforms:
-                    zmx_slice_no = zmx_transform.slice_configuration['slice_no']
-                    if ait_slice_no == zmx_slice_no:
-                        ait_matrices = ait_transform.matrices
-                        zmx_matrices = zmx_transform.matrices
-                        for key in ait_matrices:
-                            if Globals.is_debug('low'):
-                                fmt = "Matrix {:s}"
-                                print(fmt.format(key.upper()))
-                            ait_matrix = ait_matrices[key]
-                            zmx_matrix = zmx_matrices[key]
-                            f_mat = (ait_matrix - zmx_matrix) / zmx_matrix
-                            nr, nc = ait_matrix.shape
-                            for r in range(0, nr):
-                                text = "{:>6s}{:4d}".format('Row', r)
-                                for c in range(0, nc - r):
-                                    f = f_mat[r, c]
-                                    text += "{:15.3f}".format(f)
-                                if Globals.is_debug('low'):
-                                    print(text)
-                print()
+                    print(fmt.format(a_slice_no))
+                ait_matrices = ait_transform.matrices
+                zmx_matrices = zmx_transform.matrices
+                for key in ait_matrices:
+                    if Globals.is_debug('low'):
+                        fmt = "Matrix {:s}"
+                        print(fmt.format(key.upper()))
+                    ait_matrix = ait_matrices[key]
+                    zmx_matrix = zmx_matrices[key]
+                    with warnings.catch_warnings(record=True):
+                        f_mat = (ait_matrix - zmx_matrix) / zmx_matrix
+                    nr, nc = ait_matrix.shape
+                    for r in range(0, nr):
+                        text = "{:>6s}{:4d}".format('Row', r)
+                        for c in range(0, nc - r):
+                            f = f_mat[r, c]
+                            text += "{:15.3f}".format(f)
+                        if Globals.is_debug('low'):
+                            print(text)
 
+        if calculate_transforms:
+            lmsdist.run()
+
+        if test_transforms:
+            print()
+            # Better yet, use the transforms to do a forward and back ray trace.
+            beta_phase = 0.5
+            for ait_transform, zmx_transform in matching_transforms:
+                slice_config = ait_transform.slice_configuration
+                slice_no = slice_config['slice_no']
+
+                efp_x = 0.
+                efp_y = Util.slice_to_efp_y(slice_no, beta_phase, opticon).value
+                efp_w = 0.5 * (slice_config['w_min'] + slice_config['w_max'])
+                efp_points = {'efp_x': np.array([efp_x]), 'efp_y': np.array([efp_y]), 'efp_w': np.array([efp_w])}
+                mfp_pts_ait = Util.efp_to_mfp(ait_transform, efp_points)
+                mfp_pts_zmx = Util.efp_to_mfp(zmx_transform, efp_points)
         return as_built
 
     @staticmethod
-    def _find_beta_phase(all_alpha_traces, snr_cut=1.):
-        """ Find the beta phase, the offset in slices of a PSF from the slice centre, from a list of alpha tracs for
-        a sliced PSF image.
+    def _build_slice_row_dict(slice_map):
+        # _, _, hdus = slice_map
+        slice_row_dict = {}
+        for hdu in slice_map.hdu_list:
+            image, hdr = hdu.data, hdu.header
+            det_no = int(hdr['ID'])
+            slice_row_dict[det_no] = {}
+            slice_nos = np.unique(image)
+            for slice_no in slice_nos:
+                if slice_no == 0.:
+                    continue
+                indices = np.argwhere(image == slice_no)
+                row_min = np.min(indices[:, 0])
+                row_max = np.max(indices[:, 0])
+                slice_row_dict[det_no][slice_no] = {'row_min': row_min, 'row_max': row_max}
+        return slice_row_dict
+
+    @staticmethod
+    def _find_beta_phase(all_alpha_traces, opticon, snr_cut=1.):
+        """ Find the beta phase, the offset in slices of a PSF from the slice centre, from a list of alpha traces for
+        a sliced PSF image.  For the extended mode only 3 spatial slices (11, 12, 13) are available, with up to 3
+        images per detector.
         :param all_alpha_traces:
         :return:
         """
         alpha_trace_list = []
-        for det_no in range(1, 5):
-            signal_list, slice_no_list, det_alpha_traces = [], [], []
-            is_detected = False
-            for alpha_trace in all_alpha_traces:
-                if det_no != alpha_trace['det_no']:
-                    continue
-                signal_list.append(alpha_trace['signal'])
-                slice_no_list.append(alpha_trace['slice_no'])
-                det_alpha_traces.append(alpha_trace)
-                snr = alpha_trace['snr']
-                is_detected = True if snr > snr_cut else is_detected
 
-            if len(signal_list) == 0 or not is_detected:
-                continue
-            signals, slice_nos = np.array(signal_list), np.array(slice_no_list)
-            sig_max = np.amax(np.array(signals))
-            idx_max = np.argmax(signals)
-            slice_no_peak = slice_nos[idx_max]
-            alpha_trace = det_alpha_traces[idx_max].copy()
-            psf_alpha_sigma = 2.5
-            p0_guess = [sig_max, slice_no_peak, psf_alpha_sigma]
-            try:
-                gopt, gcov = curve_fit(Globals.gauss, slice_nos, signals, p0=p0_guess)
-            except:
-                print('!! Error finding beta-phase !!')
-            beta_phase = gopt[1] - slice_no_peak + 0.5       # Phase = 0.5 for source centred in slice
-            alpha_trace['beta_phase'] = beta_phase
-            alpha_trace_list.append(alpha_trace)
+        for det_no in range(1, 5):
+            pslice_no_range = Globals.pslice_no_range[opticon]
+            for pslice_no in pslice_no_range:
+                signal_list, slice_no_list, spifu_alpha_traces = [], [], []
+                is_detected = False
+                for alpha_trace in all_alpha_traces:
+                    if det_no != alpha_trace['det_no']:
+                        continue
+                    trace_slice_no = alpha_trace['slice_no']
+                    trace_fslice_no, trace_pslice_no = Util.decode_slice_no(trace_slice_no)
+                    # trace_pslice_no = alpha_trace['pslice_no'] // 100
+                    if pslice_no != trace_pslice_no:
+                        continue
+                    # Select all slices with the same pupil slice number
+                    signal_list.append(alpha_trace['signal'])
+                    slice_no_list.append(trace_slice_no)
+                    spifu_alpha_traces.append(alpha_trace)
+                    snr = alpha_trace['snr']
+                    is_detected = True if snr > snr_cut else is_detected
+
+                if len(signal_list) == 0 or not is_detected:
+                    continue
+                signals, slice_nos = np.array(signal_list), np.array(slice_no_list)
+                sig_max = np.amax(np.array(signals))
+                idx_max = np.argmax(signals)
+                slice_no_peak = slice_nos[idx_max]
+                alpha_trace = spifu_alpha_traces[idx_max].copy()
+                psf_alpha_sigma = 2.5
+                p0_guess = [sig_max, slice_no_peak, psf_alpha_sigma]
+                is_error = False
+                try:
+                    gopt, gcov = curve_fit(Globals.gauss, slice_nos, signals, p0=p0_guess, maxfev=5000)
+                except (RuntimeError, TypeError, ValueError):
+                    print("!! Error finding beta-phase for det {:d} !!".format(det_no))
+                    is_error = True
+                if not is_error:
+                    beta_phase = gopt[1] - slice_no_peak + 0.5       # Phase = 0.5 for source centred in slice
+                    alpha_trace['beta_phase'] = beta_phase
+                    alpha_trace_list.append(alpha_trace)
         return alpha_trace_list
 
     @staticmethod
-    def _find_detector_gaps(lambda_traces):
+    def _find_detector_gaps(lambda_traces, order=2):
+        """ Calculate the gap width in pixels between detectors separated in the dispersion direction.  It does this
+        by fitting traces for the same slice in both short and long wave detectors, so the data must include
+        sufficient laser lines (>= 2 for a linear fit) on both detectors.
+        """
         gap_data = {}
         for lambda_trace in lambda_traces:
             slice_no = lambda_trace['slice_no']
             if slice_no not in gap_data:
-                gap_data[slice_no] = {'lams_l': [], 'lams_r': [], 'cols_l': [], 'cols_r': []}
+                gap_data[slice_no] = {'lams_l': [], 'lams_r': [], 'cols_l': [], 'cols_r': [], 'col_gap': None}
             det_no = lambda_trace['det_no']
             v_fid = lambda_trace['v_fid']
             lam = lambda_trace['efp_w']
@@ -329,21 +413,38 @@ class Opt02:
             lams_r = np.array(gap_sample['lams_r'])[idx_r]
             cols_l = np.array(gap_sample['cols_l'])[idx_l]
             cols_r = np.array(gap_sample['cols_r'])[idx_r]
-            lam_popt_l, _ = curve_fit(Globals.polynomial, cols_l, lams_l, p0=[0., 0.])
-            lam_mid_l = Globals.polynomial(2048, *lam_popt_l)       # Wavelength of RH edge of left hand detector
-            col_popt_r, _ = curve_fit(Globals.polynomial, lams_r, cols_r, p0=[0., 0.])
-            col_gap = -1. * Globals.polynomial(lam_mid_l, *col_popt_r)
+            # with warnings.catch_warnings(record=True):
+            if cols_l.shape[0] <= order or cols_r.shape[0] <= order:
+                print('Insufficient iso-lambda traces for slice ', slice_no)
+                continue
+            lam_popt_l, lam_mid_l = None, None
+            try:
+                lam_popt_l, _ = curve_fit(Globals.polynomial, cols_l, lams_l, p0=[0.]*order)
+            except:
+                print('Failed curve_fit ')
+            lam_mid_l = Globals.polynomial(2048., *lam_popt_l)[0]     # Wavelength of RH edge of left hand detector
+            try:
+                col_popt_r, _ = curve_fit(Globals.polynomial, lams_r, cols_r, p0=[0.]*order)
+            except:
+                print('Failed curve_fit ')
+            col_gap = -1. * Globals.polynomial(lam_mid_l, *col_popt_r)[0]
             gap_sample['col_gap'] = col_gap
 
         # Find angle between 1,2 and 3,4 by linear fitting to the intra-detector gap as a function of row number.
         det_thetas = {}
         for det_nos in ['12', '34']:
+            det_thetas[det_nos] = None
             col_gap_list, row_list = [], []
             for slice_no in gap_data:
                 gap_sample = gap_data[slice_no]
+                if gap_sample['col_gap'] is None:       # No gap value available
+                    continue
                 if str(gap_sample['det_no']) in det_nos:
                     col_gap_list.append(gap_sample['col_gap'])
                     row_list.append(gap_sample['u_mean'])
+            if len(col_gap_list) == 0:
+                print('Insufficient gap data for detector pair ', det_nos)
+                continue
 
             rows = np.array(row_list)
             gaps = np.array(col_gap_list)
@@ -351,10 +452,11 @@ class Opt02:
 
             linear_guess = [mean_gap, 0.]
             try:
+                print(rows, gaps)
                 popt, pcov = curve_fit(Globals.polynomial, rows, gaps, p0=linear_guess)
             except OptimizeWarning:
                 print('Warning: polynomial fit failed')
-            gradient = Globals.polynomial(mean_gap, *popt, gradient=True)
+            gradient = Globals.polynomial(mean_gap, *popt, gradient=True)[0]
             gradient_err = np.sqrt(pcov[1][1])
             deg_rad = 180. / math.pi
             theta = math.atan(gradient) * deg_rad
@@ -364,7 +466,7 @@ class Opt02:
 
     @staticmethod
     def _extract_det_traces(mosaic, trace_type, slice_map, snr_cut,
-                            lt_wave=None):
+                            lt_wave=None, sigma_clip=2.):
         """ Extract iso-alpha or iso-lambda traces from a spectral image.
         :param mosaic: Data tuple (name, _, image list)  Background subtracted trace mosaic
         :param trace_type: 'iso-alpha' or 'iso-lambda'
@@ -372,21 +474,22 @@ class Opt02:
         :param kwargs:
         :return:
         """
-        popt, pcov = None, None
-        mos_name, mos_primary_header, mos_hdus = mosaic
+        name, prim_hdr, hdul = mosaic.name, mosaic.primary_hdr, mosaic.hdu_list
 
         is_alpha = trace_type == 'iso-alpha'
 
         efp_w = -1. if is_alpha else lt_wave
-        efp_x = mosaic[1]['HIERARCH ACHG WCU X']
-        efp_y = mosaic[1]['HIERARCH ACHG WCU Y']
-        ref_ech_ord = mosaic[1]['HIERARCH ACHG REF_ECH_ORD']
-        opticon = mosaic[1]['HIERARCH AIT OPTICON']
-        pri_ang = mosaic[1]['HIERARCH AIT PRI_ANG']
-        ech_ang = mosaic[1]['HIERARCH AIT ECH_ANG']
+        efp_chop_x = prim_hdr['HIERARCH ACHG CFO CHOP X']
+        efp_chop_y = prim_hdr['HIERARCH ACHG CFO CHOP Y']
+        efp_x, efp_y = efp_chop_x, efp_chop_y
+
+        ref_ech_ord = prim_hdr['HIERARCH ACHG REF_ECH_ORD']
+        opticon = prim_hdr['HIERARCH AIT OPTICON']
+        pri_ang = prim_hdr['HIERARCH AIT PRI_ANG']
+        ech_ang = prim_hdr['HIERARCH AIT ECH_ANG']
 
         det_traces = []
-        _, _, slice_map_hdus = slice_map
+        # _, _, slice_map_hdus = slice_map
         fmt = ''
         if Globals.is_debug('high'):
             rowcol_tag = 'Row' if is_alpha else 'Column'
@@ -399,22 +502,20 @@ class Opt02:
             print(fmt.format('Number  ', 'Number',  sli_tag   , abs_tag    ,   'DN/sec', 'DN/sec', '1 sigma', '-'))
             fmt = "{:>12d},{:>12d},{:>20d},{:>20d},{:>12.2f},{:>12.2f},{:>12.2f},{:>12.1f}"
 
-        for hdu in mos_hdus:
+        for hdu in hdul:
             det_no = int(hdu.header['ID'].strip())
             mos_idx = Globals.mos_idx[det_no]
-            # Read in image and replace low (dark) values with the median/background level
-            raw_image = np.array(hdu.data)
-            bgd = np.median(raw_image)
-            image = np.where(raw_image < 0.2 * bgd, bgd, raw_image)
+            image = np.array(hdu.data)
 
-            slice_map_data = np.array(slice_map_hdus[mos_idx].data)
+            slice_map_data = np.array(slice_map.hdu_list[mos_idx].data)
             snu = np.unique(slice_map_data)
             slice_nos = [int(s) for s in snu if s > 0.]
             # Start by extracting the data for each slice.
             for slice_no in slice_nos:
-                ism = int(0.5 * Globals.intra_slice_gap)        # Intra-slice margin
+                ism = int(0.5 * Globals.intra_slice_gap)                # Intra-slice margin
                 idx = np.argwhere(slice_no == slice_map_data)
                 slice_row_min, slice_row_max = np.amin(idx[:, 0]) - ism, np.amax(idx[:, 0]) + ism
+
                 # Extract slice image
                 slice_image = np.array(image[slice_row_min:slice_row_max, :])
                 (u_axis, v_axis) = (1, 0) if is_alpha else (0, 1)
@@ -444,22 +545,44 @@ class Opt02:
                     continue
                 pt_u_coords, pt_v_coords, is_error = Opt02._get_trace_coordinates(slice_image, slice_row_min,
                                                                                   v_max_signal, is_alpha)
+                u_mean = np.mean(pt_u_coords)       # Initialise trace parameters (overwritten by fit)
+                v_fid = np.mean(pt_v_coords)
+                popt, pcov = None, None
                 if is_error and Globals.is_debug('high'):
                     text = fmt.format(det_no, slice_no, v_max_signal, row_max_signal, signal, bgd, noise, snr)
                     print(text + ' Gaussian fit failed')
 
-                u_mean = np.mean(pt_u_coords)
-                p0_guess = [u_mean, 0., 0., 0.]
+                p0_guess = [0.]*4
                 n_func_pars = len(p0_guess)
-                n_data_points = len(pt_u_coords)
-                if n_data_points < n_func_pars:
-                    continue
-                try:
-                    popt, pcov = curve_fit(Globals.polynomial, pt_u_coords, pt_v_coords, p0=p0_guess)
-                except OptimizeWarning as e:           # OptimizeWarning: RuntimeError
-                    print('!! Error finding polynomial trace fit !!' + e)
-                v_fid = Globals.polynomial(u_mean, *popt)
 
+                sigma_filter = True
+                while sigma_filter:
+                    n_data_points = len(pt_u_coords)
+                    if n_data_points < n_func_pars:
+                        sigma_filter = False
+                        # print('Skipping polynomial fit')
+                        continue
+                    u_mean = np.mean(pt_u_coords)
+                    p0_guess[0] = u_mean
+                    with warnings.catch_warnings(record=True):
+                        popt, pcov = curve_fit(Globals.polynomial, pt_u_coords, pt_v_coords, p0=p0_guess)
+                    vs = Globals.polynomial(pt_u_coords, *popt)
+                    displacements = np.array(pt_v_coords) - vs
+                    clip_limit = np.std(displacements) * sigma_clip
+                    indices = np.argwhere(np.abs(displacements) > clip_limit)
+                    if indices.shape[0] == 0:
+                        sigma_filter = False
+                        # print(slice_no, n_data_points, 'No points to delete')
+                    else:
+                        idx = indices[0, 0]     # Remove points one at a time
+                        # print(slice_no, n_data_points, pt_v_coords[idx], displacements[idx])
+                        pt_u_coords = np.delete(pt_u_coords, idx, axis=0)
+                        pt_v_coords = np.delete(pt_v_coords, idx, axis=0)
+                    v_fid = Globals.polynomial(u_mean, *popt)[0]
+
+                if popt is None:
+                    # print(slice_no, n_data_points, 'No polynomial trace fit found')
+                    continue
                 lms_config = Globals.lms_config_template.copy()
                 lms_config['opticon'] = opticon
                 lms_config['pri_ang'] = pri_ang
@@ -473,13 +596,13 @@ class Opt02:
                              'popt': popt, 'pcov': pcov, 'pt_u_coords': pt_u_coords, 'pt_v_coords': pt_v_coords,
                              'u_mean': u_mean, 'v_fid': v_fid, 'efp_x': efp_x, 'efp_y': efp_y, 'efp_w': efp_w,
                              'ref_ech_ord': ref_ech_ord, 'opticon': opticon, 'pri_ang': pri_ang, 'ech_ang': ech_ang,
-                             'fits_name': mos_name
+                             'fits_name': name
                              }
                 det_traces.append(det_trace)
         det_traces = OptTools._find_thetas(det_traces)          # Add detector rotation angle measurements
         print("- {:d} {:s} traces found with snr > {:4.1f}".format(len(det_traces), trace_type, snr_cut))
         if Globals.is_debug('high'):
-            Opt02._print_det_traces(det_traces, 'iso-lambda')
+            Opt02._print_det_traces(det_traces, trace_type)
         return det_traces
 
     @staticmethod
@@ -540,7 +663,8 @@ class Opt02:
                 pt_u_coords.append(float(u + u_off))
                 pt_v_coords.append(v_cen)
             except:
-                is_error = True
+                a = 1
+
         return pt_u_coords, pt_v_coords, is_error
 
     @staticmethod
@@ -558,6 +682,7 @@ class Opt02:
                     continue
                 slice_no_alpha = alpha_trace['slice_no']
                 a_config_id = alpha_trace['lms_config_id']
+                print(a_config_id)
                 for lambda_trace in lambda_traces:
                     if np.array(lambda_trace['det_no']) != det_no:
                         continue
@@ -565,6 +690,8 @@ class Opt02:
                     if slice_no_alpha != slice_no_lambda:
                         continue
                     l_config_id = lambda_trace['lms_config_id']
+                    print(l_config_id)
+                    print()
                     if a_config_id == l_config_id:
                         if a_config_id in dist_coord:           # Add points to existing LMS configuration.
                             points = dist_coord[a_config_id]
@@ -578,31 +705,31 @@ class Opt02:
                                       'det_no': [], 'slice_no': [], 'row': [], 'col': [],
                                       'efp_x': [], 'efp_y': [], 'efp_w': []}
                             dist_coord[a_config_id] = points
-                    a_popt = np.array(alpha_trace['popt'])
-                    l_popt = np.array(lambda_trace['popt'])
-                    efp_x, efp_y, efp_w = alpha_trace['efp_x'], alpha_trace['efp_y'], lambda_trace['efp_w']
-                    # Use an iterative method to find the intersection (y = a(x), x = w(y))
-                    x, y, dx_res, dy_res = 1024., 1024., .01, .01
-                    is_converged, count = False, 0
-                    while not is_converged:
-                        yp = Globals.polynomial(x, *a_popt)
-                        dy = math.fabs(yp - y)
-                        xp = Globals.polynomial(yp, *l_popt)
-                        dx = math.fabs(xp - x)
-                        x, y = xp, yp
-                        count += 1
-                        is_converged = dy < dy_res and dx < dx_res
-                    points['det_no'].append(det_no)
-                    points['slice_no'].append(slice_no_alpha)
-                    points['col'].append(x)
-                    points['row'].append(y)
-                    points['efp_x'].append(efp_x)
-                    points['efp_y'].append(efp_y)
-                    points['efp_w'].append(efp_w)
-                    dfp_xy = {'dfp_x': np.array(points['col']), 'dfp_y': np.array(points['row']),
-                              'det_nos': np.array(points['det_no'])}
-                    mfp_xy = util.dfp_to_mfp(affines, dfp_xy)
-                    points['mfp_x'], points['mfp_y'] = mfp_xy['mfp_x'], mfp_xy['mfp_y']
+                        a_popt = np.array(alpha_trace['popt'])
+                        l_popt = np.array(lambda_trace['popt'])
+                        efp_x, efp_y, efp_w = alpha_trace['efp_x'], alpha_trace['efp_y'], lambda_trace['efp_w']
+                        # Use an iterative method to find the intersection (y = a(x), x = w(y))
+                        x, y, dx_res, dy_res = 1024., 1024., .01, .01
+                        is_converged, count = False, 0
+                        while not is_converged:
+                            yp, = Globals.polynomial(x, *a_popt)
+                            dy = math.fabs(yp - y)
+                            xp, = Globals.polynomial(yp, *l_popt)
+                            dx = math.fabs(xp - x)
+                            x, y = xp, yp
+                            count += 1
+                            is_converged = dy < dy_res and dx < dx_res
+                        points['det_no'].append(det_no)
+                        points['slice_no'].append(slice_no_alpha)
+                        points['col'].append(x)
+                        points['row'].append(y)
+                        points['efp_x'].append(efp_x)
+                        points['efp_y'].append(efp_y)
+                        points['efp_w'].append(efp_w)
+                        dfp_xy = {'dfp_x': np.array(points['col']), 'dfp_y': np.array(points['row']),
+                                  'det_nos': np.array(points['det_no'])}
+                        mfp_xy = util.dfp_to_mfp(affines, dfp_xy)
+                        points['mfp_x'], points['mfp_y'] = mfp_xy['mfp_x'], mfp_xy['mfp_y']
         return dist_coord
 
     @staticmethod

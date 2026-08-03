@@ -25,7 +25,8 @@ class Plot:
                 if str(gap['det_no']) in det_nos:
                     x.append(gap['u_mean'])
                     y.append(gap['col_gap'])
-            # tag = r'{:s}'.format(det_nos)
+            if det_thetas[det_nos] is None:
+                continue
             theta, theta_err = det_thetas[det_nos]
             title = r'$\theta_{:s}$ = {:8.3f}$\pm${:5.3f} deg.'.format(det_nos, theta, theta_err)
 
@@ -40,30 +41,88 @@ class Plot:
     def mosaic(mosaic, **kwargs):
         """ Plot the mosaic data structure (2 x 2 LMS images)
         :param mosaic:
-        :param kwargs:
+        :param kwargs:  sb - Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
+                        cmap - Colour map for image
+                        title - Plot title
+                        overlay - Overlay graphical elements (iso-alpha/beta traces etc.)
         :return:
         """
-        file_name, primary_hdr, hdus = mosaic
         cmap_name = kwargs.get('cmap', 'hot')
         cmap = mpl.colormaps[cmap_name]
-        sb = kwargs.get('sb', None)         # Slice bounds (QTable format, det_no, slice_no, spifu_no, col, rowmin, rowmax)
+        sb = kwargs.get('sb', None)
         title = kwargs.get('title', '-')
-        suptitle = file_name + '\n' + title
-        # Set up figure and image grid
-        fig = plt.figure(figsize=(8, 7))
+        suptitle = mosaic.name + '\n' + title
+        figsize = 8, 7
+        nrows, ncols = 2, 2
+        ax_datas = {}
+        overlay = kwargs.get('overlay', None)
+        shareall = True                                 # Share axis scaling for all plots
+        axes_pad = 0.15, 0.15
+        if overlay is None:
+            for hdu in mosaic.hdu_list:
+                det_no = int(hdu.header['ID'])
+                ax_data = {'image': hdu.data}
+                ax_idx = det_no - 1
+                ax_datas[ax_idx] = ax_data
+        else:
+            if overlay['type'] == 'det_traces':
+                is_iso_alpha = overlay['trace_type'] == 'iso_alpha'
+                shareall = False
+                axes_pad = 0.5, 0.5
+                det_traces = overlay['data']
+                for det_trace in det_traces:
+                    det_no = det_trace['det_no']
+                    det_idx = det_no - 1
+                    ax_col = det_idx % 2
+                    ax_row = det_idx // 2
+                    is_extended = det_trace['opticon'] == Globals.extended
+                    if is_extended:
+                        nrows, ncols = 3, 4
+                        ax_row = ((det_trace['slice_no'] // 100) - 1) % 3
+                        ax_col = det_idx
+                    ax_idx = ax_col + ncols * ax_row
+                    v_fid = int(det_trace['v_fid'])
+                    u_mean = int(det_trace['u_mean'])
+                    bounds = 9999, -9999, 9999, -9999
+                    if is_iso_alpha:
+                        bounds = 0, 2048, v_fid - 20, v_fid + 20
+                    else:
+                        xmin = min(bounds[0], v_fid - 10)
+                        xmax = max(bounds[1], v_fid + 10)
+                        ymin = min(bounds[2], u_mean - 80)
+                        ymax = max(bounds[3], u_mean + 80)
+                        bounds = xmin, xmax, ymin, ymax
+                    # print(bounds)
+                    ax_data = {'image': mosaic.hdu_list[det_idx].data, 'det_trace': det_trace, 'bounds': bounds}
+                    ax_datas[ax_idx] = ax_data
+                for ax_row in range(nrows):
+                    for ax_col in range(ncols):
+                        ax_idx = ax_col + ncols * ax_row
+                        if ax_idx not in ax_datas.keys():
+                            im_shape = bounds[1] - bounds[0], bounds[3] - bounds[2]
+                            blank_image = np.zeros((im_shape))
+                            ax_datas[ax_idx] = {'image': blank_image, 'det_trace': None, 'bounds': bounds}
+        nrows_ncols = nrows, ncols
+        if overlay is None:
+            fig = plt.figure(figsize=figsize)  # Set up figure and image grid
+            grid = ImageGrid(fig, 111,
+                             nrows_ncols=nrows_ncols, axes_pad=axes_pad, cbar_location="right",  share_all=shareall,
+                             cbar_mode="single", cbar_size="7%", cbar_pad=0.15,
+                             )
+        else:
+            nrows, ncols = nrows_ncols
+            fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=figsize,
+                                     sharex='none', squeeze=True)
+            grid = axes.flatten()
         fig.suptitle(suptitle)
-        grid = ImageGrid(fig, 111,
-                         nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), cbar_location="right",  share_all=True,
-                         cbar_mode="single", cbar_size="7%", cbar_pad=0.15,
-                         )
-        # Set plot limits
-        xmin, xmax = 0, hdus[0].shape[1]
-        ymin, ymax = 0, hdus[0].shape[0]
+
+        # Set plot limits mosaic images with no overlay
+        xmin, xmax = 0, mosaic.hdu_list[0].shape[1]
+        ymin, ymax = 0, mosaic.hdu_list[0].shape[0]
         bounds = kwargs.get('bounds', (xmin, xmax, ymin, ymax))
         xmin, xmax, ymin, ymax = bounds
-
         vmin, vmax = 1.E6, -1.E6
-        for hdu in hdus:
+        for hdu in mosaic.hdu_list:
             vmin_hdu, vmax_hdu = np.nanmin(hdu.data), np.nanmax(hdu.data)
             vmin = min(vmin, vmin_hdu)
             vmax = max(vmax ,vmax_hdu)
@@ -72,18 +131,18 @@ class Plot:
         if 'vmax' in kwargs:
             vmax = kwargs.get('vmax', vmax)
         ax, im = None, None
-        data_origin = primary_hdr['ORIGIN']
-        is_toysim = 'TOYSIM' in data_origin
-        for hdu in hdus:
-            det_no = int(hdu.header['ID'])
-            det_idx = det_no - 1 if is_toysim else Globals.mos_idx[det_no]
-            ax = grid[det_idx]
+        for ax_idx in ax_datas:
+            ax_data = ax_datas[ax_idx]
+            ax = grid[ax_idx]
+            if overlay is not None and ax_data['bounds'] is not None:
+                xmin, xmax, ymin, ymax = ax_data['bounds']
             ax.set_xlim(xmin-1, xmax+1)
             ax.set_ylim(ymin-1, ymax+1)
             aspect_ratio = (xmax-xmin)/(ymax-ymin)
             ax.set_aspect(aspect_ratio)
             x1, x2, y1, y2 = int(xmin), int(xmax), int(ymin), int(ymax)
-            image = hdus[det_idx].data
+
+            image = ax_data['image']
             mask = kwargs.get('mask', None)
             if mask is not None:
                 mask_value, mask_colour = mask
@@ -100,36 +159,38 @@ class Plot:
                 ax.plot(x, yrmin, marker='o', ms=2.0, color='red', linestyle='none')
                 yrmax = sb['det_row_max'][idx]
                 ax.plot(x, yrmax, marker='o', ms=2.0, color='green', linestyle='none')
-            overlay = kwargs.get('overlay', None)
+            # overlay = kwargs.get('overlay', None)
             if overlay is not None:
                 if overlay['type'] == 'det_traces':
-                    trace_data = overlay['data']
-                    for det_trace in trace_data:
-                        if det_trace['det_no'] == det_no:
-                            is_alpha = det_trace['type'] == 'iso-alpha'
-                            pt_u_coords = det_trace['pt_u_coords']
-                            pt_v_coords = det_trace['pt_v_coords']
-                            xs = pt_u_coords if is_alpha else pt_v_coords
-                            ys = pt_v_coords if is_alpha else pt_u_coords
-                            ax.plot(xs, ys, marker='o', ms=4.0, color='cyan', linestyle='none')
-                            popt = det_trace['popt']
-                            xhw = 1024 if is_alpha else 40
-                            x1 = det_trace['u_mean'] - xhw
-                            x2 = x1 + 2 * xhw
-                            x = np.arange(x1, x2, 10)
-                            y = Globals.polynomial(x, *popt)
-                            if is_alpha:
-                                ax.plot(x, y, color='blue', linestyle='solid')
-                            else:
-                                ax.plot(y, x, color='blue', linestyle='solid')
-        ax.cax.colorbar(im)
+                    det_trace = ax_data['det_trace']
+                    if det_trace is None:
+                        continue
+                    is_alpha = det_trace['type'] == 'iso-alpha'
+                    pt_u_coords = det_trace['pt_u_coords']
+                    pt_v_coords = det_trace['pt_v_coords']
+                    xs = pt_u_coords if is_alpha else pt_v_coords
+                    ys = pt_v_coords if is_alpha else pt_u_coords
+                    title = "{:d}, {:d}".format(det_trace['det_no'], det_trace['slice_no'])
+                    ax.set_title(title)
+                    ax.plot(xs, ys, marker='o', ms=4.0, color='cyan', linestyle='none')
+                    popt = det_trace['popt']
+                    xhw = 1024 if is_alpha else 40
+                    x1 = det_trace['u_mean'] - xhw
+                    x2 = x1 + 2 * xhw
+                    x = np.arange(x1, x2, 10)
+                    y = Globals.polynomial(x, *popt)
+                    if is_alpha:
+                        ax.plot(x, y, color='blue', linestyle='solid')
+                    else:
+                        ax.plot(y, x, color='blue', linestyle='solid')
+        if overlay is None:
+            ax.cax.colorbar(im)
         plt.show()
         return
 
     @staticmethod
     def det_traces(alpha_traces, lambda_traces, config_id, **kwargs):
         fig = plt.figure(figsize=(8, 7))
-
         fig.suptitle('Configuration ' + config_id)
         grid = ImageGrid(fig, 111,
                          nrows_ncols=(2, 2), axes_pad=(0.15, 0.15), share_all=True
@@ -140,13 +201,14 @@ class Plot:
         bounds = kwargs.get('bounds', (xmin, xmax, ymin, ymax))
         xmin, xmax, ymin, ymax = bounds
 
-        alpha_stretch = kwargs.get('alpha_stretch', 1.)
-        ybar = {}
-
         for det_traces in [alpha_traces, lambda_traces]:
             for det_trace in det_traces:
                 det_no = det_trace['det_no']
                 ax = grid[det_no - 1]
+                ax.set_xlim(xmin - 1, xmax + 1)
+                ax.set_ylim(ymin - 1, ymax + 1)
+                aspect_ratio = (xmax - xmin) / (ymax - ymin)
+                ax.set_aspect(aspect_ratio)
 
                 is_alpha = det_trace['type'] == 'iso-alpha'
                 popt = det_trace['popt']
@@ -155,23 +217,24 @@ class Plot:
                 x2 = x1 + 2 * xhw
                 x = np.arange(x1, x2, 10)
                 y = Globals.polynomial(x, *popt)
+                colour = 'blue' if is_alpha else 'red'
                 if is_alpha:
-                    slice_no = det_trace['slice_no']
-                    if slice_no not in ybar:        # Use the first y_bar value found for this slice.
-                        ybar[slice_no] = np.mean(y)
-                    y = y + (y - ybar[slice_no]) * alpha_stretch
-                    ax.plot(x, y, color='blue', linestyle='solid', lw=.5)
+                    ax.plot(x, y, color=colour, linestyle='solid', lw=.5)
                 else:
-                    ax.plot(y, x, color='orange', linestyle='solid', lw=.5)
+                    ax.plot(y, x, color=colour, linestyle='solid', lw=.5)
         coords = kwargs.get('coords', None)
         if coords is not None:
-            det_nos = coords['det_no']
-            rows = coords['row']
-            cols = coords['col']
-            for i in range(0, len(det_nos)):
-                det_no = det_nos[i]
-                ax = grid[det_no - 1]
-                x, y = cols[i], rows[i]
+            det_nos = np.array(coords['det_no'])
+            rows = np.array(coords['row'])
+            cols = np.array(coords['col'])
+            for i in range(0, 4):
+                idx = np.argwhere(det_nos == i+1)[:]
+                x, y = cols[idx], rows[idx]
+                ax = grid[i]
+                ax.set_xlim(xmin - 1, xmax + 1)
+                ax.set_ylim(ymin - 1, ymax + 1)
+                aspect_ratio = (xmax - xmin) / (ymax - ymin)
+                ax.set_aspect(aspect_ratio)
                 ax.plot(x, y, marker='o', ms=2.0, color='black', linestyle='none')
 
         plt.show()
@@ -179,12 +242,11 @@ class Plot:
 
     @staticmethod
     def histograms(mosaic):
-        file_name, hdr, hdus = mosaic
         n_bins = 200
         fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, tight_layout=True)
-        fig.suptitle(file_name)
+        fig.suptitle(mosaic.name)
 
-        for i, hdu in enumerate(hdus):
+        for i, hdu in enumerate(mosaic.hdu_list):
             ax_row, ax_col = int(i / 2), i % 2
             vals = hdu.data.flatten()
             axs[ax_row, ax_col].hist(vals, bins=n_bins)

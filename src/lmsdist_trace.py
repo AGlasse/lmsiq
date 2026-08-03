@@ -20,7 +20,7 @@ from lms_transform import Transform
 class RayTrace:
 
     # Configuration dicts.  Note lms_config is instantiated from Globals.
-    series_fmt = {'ech_ord': 'int', 'slice_no': 'int', 'spifu_no': 'int',
+    series_fmt = {'ech_ord': 'int', 'fslice_no': 'int', 'pslice_no': 'int',
                   'wavelength': 'float',
                   'efp_x': 'float', 'efp_y': 'float', 'efp_w': 'float',
                   'slicer_x': 'float', 'slicer_y': 'float',
@@ -30,8 +30,8 @@ class RayTrace:
                   'mfp_x': 'float', 'mfp_y': 'float',
                   'cf_vig': 'float'}
 
-    nom_csv_map = {'sp_slice': 'spifu_no', 'order': 'ech_ord',
-                   'slice': 'slice_no', 'wavelength': 'wavelength',
+    nom_csv_map = {'sp_slice': 'pslice_no', 'order': 'ech_ord',
+                   'slice': 'fslice_no', 'wavelength': 'wavelength',
                    'fp2_x': 'efp_x',  'fp2_y': 'efp_y',
                    'slicer_x': 'slicer_x', 'slicer_y': 'slicer_y',
                    'ifu_x': 'ifu_x', 'ifu_y': 'ifu_y',
@@ -40,8 +40,8 @@ class RayTrace:
                    'chief_ray_vignetted?': 'cf_vig'
                   }
 
-    ext_csv_map = {'sp_slice': 'spifu_no', 'order': 'ech_ord',
-                   'slice': 'slice_no', 'wavelength': 'wavelength',
+    ext_csv_map = {'sp_slice': 'pslice_no', 'order': 'ech_ord',
+                   'slice': 'fslice_no', 'wavelength': 'wavelength',
                    'fp1_x': 'efp_x', 'fp1_y': 'efp_y',
                    'slicer_x': 'slicer_x', 'slicer_y': 'slicer_y',
                    'ifu_x': 'ifu_x', 'ifu_y': 'ifu_y',
@@ -50,18 +50,17 @@ class RayTrace:
                    'chief_ray_vignetted?': 'cf_vig'
                    }
     nominal_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
-                            'Slicer': ('slicer_x', 'slicer_y'),
+                            'Slicer': ('slicer_y', 'slicer_x'),     # This focal plane has swapped axes
                             'IFU': ('ifu_x', 'ifu_y'),
                             'Slit': ('slit_x', 'slit_y'),
                             'Det. mosaic': ('mfp_x', 'mfp_y')}
     spifu_focal_planes = {'LMS EFP': ('efp_x', 'efp_y'),
-                          'Slicer': ('slicer_x', 'slicer_y'),
+                          'Slicer': ('slicer_y', 'slicer_x'),       # Swapped axes
                           'IFU': ('ifu_x', 'ifu_y'),
                           'SP slicer': ('sp_slicer_x', 'sp_slicer_y'),
                           'Det. mosaic': ('mfp_x', 'mfp_y')}
     cfg_tags, cfg_id_counter = [], 0
 
-    # affines, inverse_affines = None, None      # Global MFP <-> DFP transforms.  Written once during __init__
     model_config = None
 
     def __init__(self, **kwargs):
@@ -74,8 +73,9 @@ class RayTrace:
         self.is_extended = None
         self.series = None
         self.unique_ech_ords = None
-        self.unique_slices = None
-        self.unique_spifu_slices = None
+        # self.unique_fslice_nos = None
+        # self.unique_pslice_nos = None
+        self.unique_slice_nos = None            # Encoded 100 x pslice_no + fslice_no
         self.unique_waves = None
         self.wave_reference = None
         self.n_rays = None
@@ -103,15 +103,16 @@ class RayTrace:
         # Count the number of slices and rays
         ech_ords = series['ech_ord']
         self.unique_ech_ords = np.unique(ech_ords)
-        slice_nos = series['slice_no']
-        self.unique_slices = np.unique(slice_nos)
-        spifus = series['spifu_no']
-        self.unique_spifu_slices = np.unique(spifus)
+        fslice_nos = series['fslice_no']
+        pslice_nos = series['pslice_no']
+        slice_nos = 100 * pslice_nos + fslice_nos
+        series['slice_no'] = slice_nos
+        self.unique_slice_nos = np.unique(slice_nos)
         waves = series['wavelength']
 
         self.wave_reference = self._get_wave_reference()
         self.unique_waves = np.unique(waves)
-        self.n_rays, = slice_nos.shape
+        self.n_rays, = fslice_nos.shape
         self._create_mask(silent)
         do_plot = kwargs.get('do_plot', True)
         self.create_svd_transforms(do_plot=do_plot)
@@ -132,6 +133,8 @@ class RayTrace:
         for transform in self.transforms:
             # Start by finding the detector and row for the slice centre.
             slice_no = transform.slice_configuration['slice_no']
+            opticon = transform.lms_configuration['opticon']
+            fslice_no, _ = Util.decode_slice_no(slice_no)
             efp_y = Util.slice_to_efp_y(slice_no, 0.).value
             efp_ref_points = {'efp_x': np.array([0., 0.]), 'efp_y': np.array([efp_y, efp_y]),
                               'efp_w': np.array([self.wave_reference, self.wave_reference])}
@@ -150,7 +153,7 @@ class RayTrace:
         fmt = "{:s}, EA={:6.3f} deg, PA={:6.3f} deg, "
         opticon = RayTrace.model_config[1]
         string = fmt.format(opticon, self.lms_config['ech_ang'], self.lms_config['pri_ang'])
-        smin, smax = self.unique_slices[0], self.unique_slices[-1]
+        smin, smax = self.unique_slice_nos[0], self.unique_slice_nos[-1]
         string += "slices {:d}-{:d}".format(int(smin), int(smax))
         return string
 
@@ -158,10 +161,10 @@ class RayTrace:
         """ Find the boresight wavelength for a specific slice in the configuration defined by this trace,
         where the boresight is defined as having a detector mosaic x coordinate = 0.
         """
-        spifu_no = 0 if opticon == Globals.nominal else 3
-        # In extended mode there are 3 echelle orders in each trace, with spifu_no = 3 using the 'middle' order.
+        pslice_no = 0 if opticon == Globals.nominal else 3
+        # In extended mode there are 3 echelle orders in each trace, with pslice_no = 3 using the 'middle' order.
         ech_ord = self.unique_ech_ords[0] if opticon == Globals.nominal else self.unique_ech_ords[1]
-        slice_filter = {'slice_no': 13, 'spifu_no': spifu_no, 'ech_ord': ech_ord}
+        slice_filter = {'fslice_no': 13, 'pslice_no': pslice_no, 'ech_ord': ech_ord}
         mfp_x = self.get_series('mfp_x', slice_filter)
         waves = self.get_series('wavelength', slice_filter)
         wave_bs = np.interp(0.0, mfp_x, waves)              # Find wavelength where 'det_x' (== mfp_x) == 0.
@@ -178,48 +181,47 @@ class RayTrace:
         _, _, _, _, fp_in, fp_out = self.model_config
         is_first = True
         a_rms_list = []
-        for spifu_no in self.unique_spifu_slices:
-            for slice_no in self.unique_slices:
-                for ech_ord in self.unique_ech_ords:
-                    slice_config = {'slice_no': slice_no, 'spifu_no': spifu_no, 'ech_ord':ech_ord}
-                    transform = Transform(lms_config=self.lms_config, slice_config=slice_config)
-                    waves = self.get_series('wavelength', slice_config)
-                    if len(waves) < 1:      # This happens for mismatched spectral slice and echelle order.
-                        continue
-                    w_min, w_max = np.amin(waves), np.amax(waves)
-                    slice_config['w_min'], slice_config['w_max'] = w_min, w_max
+        # for pslice_no in self.unique_pslice_nos:
+        #     for fslice_no in self.unique_fslice_nos:
+        for slice_no in self.unique_slice_nos:
+            for ech_ord in self.unique_ech_ords:
+                # fslice_no, pslice_no = Util.decode_slice_no(slice_no)
+                slice_filter = {'slice_no': slice_no, 'ech_ord':ech_ord}
+                transform = Transform(lms_config=self.lms_config, slice_config=slice_filter)
+                waves = self.get_series('wavelength', slice_filter)
+                if len(waves) < 1:      # This happens for mismatched spectral slice and echelle order.
+                    continue
+                transform.wavelength_bounds = np.amin(waves), np.amax(waves)
 
-                    n_waves, = waves.shape
-                    if n_waves == 0:
-                        continue
-                    ech_ords = self.get_series('ech_ord', slice_config)
-                    alpha = self.get_series('efp_x', slice_config)
-                    mfp_x = self.get_series(fp_out[0], slice_config)
-                    mfp_y = self.get_series(fp_out[1], slice_config)
+                n_waves, = waves.shape
+                if n_waves == 0:
+                    continue
+                ech_ords = self.get_series('ech_ord', slice_filter)
+                alpha = self.get_series('efp_x', slice_filter)
+                mfp_x = self.get_series(fp_out[0], slice_filter)
+                mfp_y = self.get_series(fp_out[1], slice_filter)
 
-                    phase = Util.waves_to_phases(waves, ech_ords)
-                    a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
-                    ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
+                phase = Util.waves_to_phases(waves, ech_ords)
+                a, b = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=False)
+                ai, bi = Util.solve_svd_distortion(phase, alpha, mfp_x, mfp_y, slice_order, inverse=True)
 
-                    mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
-                    off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
-                    off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
-                    a_rms_list.append(off_mfp_a)
+                mfp_x_fit, mfp_y_fit = Util.apply_svd_distortion(phase, alpha, a, b)
+                off_mfp_x, off_mfp_y = mfp_x - mfp_x_fit, mfp_y - mfp_y_fit
+                off_mfp_a = np.sqrt(np.square(off_mfp_x) + np.square(off_mfp_y))
+                a_rms_list.append(off_mfp_a)
 
-                    mats = transform.matrices
-                    mats['a'] = a
-                    mats['b'] = b
-                    mats['ai'] = ai
-                    mats['bi'] = bi
-                    rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
-                    if do_plot and is_first:        # Plot intermediate and full fit to data
-                        fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
-                        tlin1 = fmt.format(Globals.svd_cutoff)
-                        self.plot_scatter(transform, rays, plot_correction=True, tlin1=tlin1)
-                        is_first = False
-                    self.transforms.append(transform)
-        a_rms = np.sqrt(np.mean(np.square(np.array(a_rms_list))))
-        self.a_rms = a_rms
+                mats = transform.matrices
+                mats['a'] = a
+                mats['b'] = b
+                mats['ai'] = ai
+                mats['bi'] = bi
+                rays = waves, phase, alpha, mfp_x, mfp_y, mfp_x_fit, mfp_y_fit
+                if do_plot and is_first:        # Plot intermediate and full fit to data
+                    fmt = "Distortion residuals, A,B, polynomial fit, SVD cutoff = {:5.1e}\n"
+                    tlin1 = fmt.format(Globals.svd_cutoff)
+                    self.plot_scatter(transform, rays, plot_correction=True, tlin1=tlin1)
+                    is_first = False
+                self.transforms.append(transform)
         return
 
     def get_series(self, tag, series_filter):
@@ -227,21 +229,32 @@ class RayTrace:
         a specified spatial and (if the spectral IFU is selected) spectral slice.
         :rtype: ndarray[tuple[Any, ...], dtype[_ScalarT]] | ndarray[tuple[Any, ...], dtype[Any]]
         """
-        slice_no = series_filter.get('slice_no', 13)
-        spifu_no = series_filter.get('spifu_no', 0)
-        ech_ord = series_filter.get('ech_ord', None)
-        a = self.series[tag]
-        slice_nos = self.series['slice_no']
-        slice_no_mask = slice_nos == slice_no
-        spifu_slices = self.series['spifu_no']
-        spifu_no_mask = spifu_slices == spifu_no
-        mask = np.logical_and(slice_no_mask, spifu_no_mask)
-        if ech_ord is not None:
-            ech_ords = self.series['ech_ord']
-            ech_ord_mask = ech_ords == ech_ord
-            mask = np.logical_and(mask, ech_ord_mask)
-        a = np.compress(mask, a)
-        return a
+        series_shape = self.series['slice_no'].shape
+        idx_register = np.full(series_shape, True, dtype=bool)
+        for key in series_filter:
+            array = self.series[key]
+            idx = np.argwhere(array != series_filter[key])
+            idx_register[idx] = False
+            # idx_register[idx] = np.logical_and(idx[0], idx_register[idx])
+        idx = np.argwhere(idx_register)
+        out = self.series[tag][idx]
+        return out[:, 0]
+
+        # slice_no = series_filter['slice_no']
+        # # pslice_no = series_filter.get('pslice_no', 0)
+        # ech_ord = series_filter.get('ech_ord', None)
+        # a = self.series[tag]
+        # fslice_nos = self.series['fslice_no']
+        # fslice_no_mask = fslice_nos == fslice_no
+        # pslice_nos = self.series['pslice_no']
+        # pslice_no_mask = pslice_nos == pslice_no
+        # mask = np.logical_and(fslice_no_mask, pslice_no_mask)
+        # if ech_ord is not None:
+        #     ech_ords = self.series['ech_ord']
+        #     ech_ord_mask = ech_ords == ech_ord
+        #     mask = np.logical_and(mask, ech_ord_mask)
+        # a = np.compress(mask, a)
+        # return a
 
     def plot_fit_maps(self, **kwargs):
         """ Plot ray coordinates at the detector for the reference zemax data and also as projected using the
@@ -253,21 +266,20 @@ class RayTrace:
         plot = Plot()
 
         plotdiffs = kwargs.get('plotdiffs', False)
-        field = kwargs.get('field', False)
         subset = kwargs.get('subset', False)
         name = self.csv_name
         echelle_angle = self.lms_config['ech_ang']
         fig_title = "{:s} ea = {:4.2f}".format(name, echelle_angle)
         # SPIFU 1 column per spatial slice, 1 column
-        n_rows, n_cols = 7, 4
-        unique_spifus, unique_slices = self.unique_spifu_slices, self.unique_slices
-        spifu_start, slice_start = unique_spifus[0], unique_slices[0]
-        if self.is_extended:
-            n_rows, = unique_spifus.shape
-            n_cols, = unique_slices.shape
-        if subset:
-            n_rows = 3
-            n_cols = 1
+        # n_rows, n_cols = 7, 4
+        # unique_slices = self.unique_slice_nos
+        # slice_start = unique_slices[0]
+        # if self.is_extended:
+        #     n_rows = 6
+        #     n_cols = 3
+        # if subset:
+        #     n_rows = 3
+        #     n_cols = 1
         xlim = (None if plotdiffs else [-40.0, 40.0])
         fig, ax_list = plot.set_plot_area(fontsize=14.0, sharex=False, sharey=False,
                                           nrows=1, ncols=1, xlim=xlim)
@@ -276,10 +288,9 @@ class RayTrace:
         for transform in self.transforms:
             slice_config = transform.slice_configuration
             slice_no = slice_config['slice_no']
-            spifu_no = slice_config['spifu_no']
             ech_ord = slice_config['ech_ord']
-
-            slice_filter = {'slice_no': slice_no, 'spifu_no': spifu_no, 'ech_ord': ech_ord}
+            fslice_no, pslice_no = Util.decode_slice_no(slice_no)
+            slice_filter = {'fslice_no': fslice_no, 'pslice_no': pslice_no, 'ech_ord': ech_ord}
             efp_x = self.get_series('efp_x', slice_filter)
             efp_y = self.get_series('efp_y', slice_filter)
             efp_w = self.get_series('wavelength', slice_filter)
@@ -289,9 +300,9 @@ class RayTrace:
             mfp_fit_points, oob = Util.efp_to_mfp(transform, efp_points)
             det_x_fit, det_y_fit = mfp_fit_points['mfp_x'], mfp_fit_points['mfp_y']
             u, v = mfp_x - det_x_fit, mfp_y - det_y_fit
-            # q = ax.quiver(det_x_fit, det_y_fit, u, v,
-            #               angles='xy', scale_units='xy', scale=.001,
-            #               width=0.001)
+            _ = ax.quiver(det_x_fit, det_y_fit, u, v,
+                          angles='xy', scale_units='xy', scale=.001,
+                          width=0.001)
         plot.show()
         return
 
@@ -537,7 +548,7 @@ class RayTrace:
                 break
 
             if opticon == Globals.nominal:
-                series['spifu_no'].append(nom_spifu_no)      # Trap special cases
+                series['pslice_no'].append(nom_spifu_no)      # Trap special cases
                 series['ech_ord'].append(nom_ech_order)
                 series['cf_vig'].append(0.)
 

@@ -6,7 +6,6 @@ from lms_filer import Filer
 _ = Globals()
 _ = Filer()
 cap_name = 'lms_opt_02_dist'             # Name of analysis project
-
 test_data_folder = 'test_toysim'
 Filer.set_test_data_folder(test_data_folder)
 

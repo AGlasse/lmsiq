@@ -8,6 +8,7 @@ import numpy as np
 import scipy.signal
 from astropy import units as u
 from astropy.io.fits import ImageHDU
+
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
@@ -27,6 +28,9 @@ class Toy:
         """
         wave_ref, w_pnh = None, None            # Define local variables
         psf_dict = None
+        beta_phase, beta_weight = None, None
+
+        # efp_y = Util.slice_to_efp_y(13, 0.0)
 
         analysis_type = 'distortion'
         filer = Filer()
@@ -39,19 +43,33 @@ class Toy:
                       'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
                       coord_in, coord_out)
 
-        spifu_date_stamp = '20260112'
-        spifu_config = (analysis_type, Globals.extended, spifu_date_stamp,
-                        'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                        coord_in, coord_out)
-        model_configurations = {Globals.nominal: nom_config, Globals.extended: spifu_config}
+        ext_date_stamp = '20260112'
+        ext_config = (analysis_type, Globals.extended, ext_date_stamp,
+                      'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
+                      coord_in, coord_out)
+        model_configurations = {Globals.nominal: nom_config, Globals.extended: ext_config}
         model = Model()
         print(model)
+
+        if Globals.is_debug('low'):        # Test mapping from EFP_Y to slice number, phase
+            print('Test of Util.slice_to_efp_y and Util.efp_y_to_slice')
+            slice_test_list = {'nom_min': (1, 0.), 'nom_bs': (14, 1.), 'nom_max': (28, 1.),
+                               'ext_min': (12, 0.), 'ext_bs': (13, 0.5), 'ext_max': (14, 1.),
+                               }
+            fmt = "{:>20s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},"
+            print(fmt.format('Location', 'slice_no_in', 'phase_in', 'EFP_Y', 'slice_no_out', 'phase_out'))
+            fmt = "{:>20s},{:10d},{:10.2f},{:>10.3f},{:10d},{:10.2f},"
+            for key in slice_test_list:
+                slice_no1_test, phase1_test = slice_test_list[key]
+                efp_y_test = Util.slice_to_efp_y(slice_no1_test, phase1_test)
+                slice_no2_test, phase2_test = Util.efp_y_to_slice_no(efp_y_test)
+                print(fmt.format(key, slice_no1_test, phase1_test, efp_y_test, slice_no2_test, phase2_test))
 
         # =================================================================================================
         t_start = time.perf_counter()
 
         # Model PSFs are available up to 4 slices away from the slice the target is centred on.
-        zemax_psf_slice_range = [-4, 4]
+        zemax_psf_fslice_bounds = [-4, 4]
 
         for obs_name in sim_configs:
             print('Running simulation - ' + obs_name)
@@ -70,12 +88,23 @@ class Toy:
                 svd_dict_path = fmt.format(opticon, opticon[0:3], ait_tag)
                 svd_transform_dict = filer.read_pickle(svd_dict_path)
                 w_ech_off = float(sim_config['lms_ech_w_off'])
+                if Globals.is_debug('low'):         # Print out configuration codes
+                    fmt = "{:>10s},{:>14s},{:>14s},{:>14s},{:>24s},"
+                    print(fmt.format('Code', 'Ref.Order', 'Ech.Ang', 'Pri.Ang', 'Ref. Wavelength'))
+                    fmt = "{:>10s},{:14d},{:14.3f},{:14.3f},{:24.3f},"
+                    for code in svd_transform_dict:
+                        svd = svd_transform_dict[code]
+                        ech_ords = svd['ech_ords']
+                        ref_ech_ord = ech_ords[0] if opticon == Globals.nominal else ech_ords[1]
+                        print(fmt.format(code, ref_ech_ord, svd['ech_ang'], svd['pri_ang'], svd['wav_ref']))
                 if Globals.is_debug('medium'):
                     fmt = "{:2s},{:<10s},{:<10s},{:<10s},{:<10s},{:<10s},{:<50s},"
                     print(fmt.format(' ', 'Config', 'Ref.', 'Prism', 'Ech', 'Ref. ech', 'FITS'))
                     print(fmt.format(' ', 'name', 'wave', 'angle', 'angle', 'order', 'file'))
                     fmt = "{:2s},{:<10s},{:10.3f},{:10.3f},{:>10.2f},{:>10d},{:>50s}"
                 for lms_cfg in svd_transform_dict:
+                    if lms_cfg != sim_config['lms_cfg_code']:
+                        continue
                     svd_entry = svd_transform_dict[lms_cfg]
                     fits_name = svd_entry['fits_name']
                     wave_ref = svd_entry['wav_ref'] * u.micron
@@ -105,7 +134,6 @@ class Toy:
                                                  select='min_ech_ang')
 
             efp_ws = None            # Initialise variables which may be assigned within loops etc.
-
             lms_pp1 = sim_config['lms_pp1']
             model_config = model_configurations[opticon]
             PolyFit(opticon)                    # Instantiate the polynomial fit tools.
@@ -131,26 +159,28 @@ class Toy:
             # which slice the central image will fall on and store it in the fp_mask object.
             # there is a PSF which has a trace in this slice, we add it to the spectrum.
             fp_mask = model.get_fp_mask(sim_config['wcu_fp2_1'], sim_config['cfo_fp2'])
-            fp_mask['slice_no_pnh_cens'], fp_mask['efp_xy_pnh_cens'] = [], []
+            fp_mask['fslice_no_pnh_cen'], fp_mask['efp_xy_pnh_cen'] = [], []
             cfo_chop_x, cfo_chop_y = sim_config['cfo_chop_off_x'], sim_config['cfo_chop_off_y']
             efp_chop_x, efp_chop_y = float(cfo_chop_x), float(cfo_chop_y)
+
             if fp_mask['efp_xy_bs'] is not None:
-                fp_mask['slice_range'] = zemax_psf_slice_range
+                fp_mask['fslice_bounds'] = zemax_psf_fslice_bounds
                 efp_xy_list = fp_mask['efp_xy_bs']
                 for efp_xy_bs in efp_xy_list:
                     efp_x_bs, efp_y_bs = efp_xy_bs
                     efp_x_pnh = efp_x_bs + efp_chop_x
                     efp_y_pnh = efp_y_bs + efp_chop_y
-                    slice_no_pnh_cen, beta_phase = Util.efp_y_to_slice(efp_y_pnh * u.mm)
-                    print("PSF will fall in slice {:2d} with phase {:5.3f}".format(slice_no_pnh_cen.value, beta_phase))
-                    fp_mask['slice_no_pnh_cens'].append(slice_no_pnh_cen.value)
-                    fp_mask['efp_xy_pnh_cens'].append([efp_x_pnh, efp_y_pnh])
-                    primary_header['HIERARCH ACHG WCU X'] = efp_x_pnh
-                    primary_header['HIERARCH ACHG WCU Y'] = efp_y_pnh
+                    fslice_no_pnh_cen, beta_phase = Util.efp_y_to_slice_no(efp_y_pnh * u.mm)
+                    fmt = "PSF will fall in fslice.phase {:2d}.{:5.3f}"
+                    print(fmt.format(fslice_no_pnh_cen, beta_phase))
+                    fp_mask['fslice_no_pnh_cen'].append(fslice_no_pnh_cen)
+                    fp_mask['efp_xy_pnh_cen'].append([efp_x_pnh, efp_y_pnh])
+            primary_header['HIERARCH ACHG CFO CHOP X'] = efp_chop_x
+            primary_header['HIERARCH ACHG CFO CHOP Y'] = efp_chop_y
             primary_header['HIERARCH ACHG LASER WAVE'] = Model.get_laser_wavelength(sim_config)
 
-            dit = float(sim_config['lms_dit'])         # 1.3  # Integration time in seconds.
-            ndit = int(sim_config['lms_ndit'])         # No. of integrations
+            dit = float(sim_config['lms_dit'])          # 1.3  # Integration time in seconds.
+            n_dit = int(sim_config['lms_ndit'])         # No. of integrations
 
             # Find EFP bounds
             efp_xmax = Globals.efp_x_fov_mm
@@ -161,23 +191,23 @@ class Toy:
             # f_units_ext_in = 'phot/s/m2/um/arcsec2',
             bgd_src_list, pnh_src_list, lt_w_offset = Model.load_source_lists(sim_config)
 
-
-            # Set up dictionary of blaze wavelengths from ech_angle=0 transforms
-            if Globals.is_debug('medium'):
-                fmt = "{:>10s},{:>6s},{:>6s},{:>6s},{:>8s},{:>8s},{:>8s},{:>8s},{:>15s},{:>11s},{:>10s},{:>10s}"
-                title_txt = fmt.format('t_elapsed', 'det_no', 'slice', 'spifu',
-                                       'pri_ang', 'ech_ang', 'ech_ord',
-                                       'w_blaze', 'w_range', 'det_rows', 'f_ext_max', 'f_psf_max')
-                print(title_txt)
             # Prepare to skip flux calculations for darks
             is_dark = sim_config['lms_pp1'] == 'closed' or 'dark' in sim_config['cfo_pp1']
             blaze = Model.make_blaze_dictionary(opt_transforms)
             spectra = Model.make_spectra(opt_transforms, bgd_src_list, pnh_src_list, lt_w_offset)
             out_folder = '../data/test_toysim/'
 
+            # Set up dictionary of blaze wavelengths from ech_angle=0 transforms
+            if Globals.is_debug('medium'):
+                fmt = "{:>10s},{:>6s},{:>6s},{:>8s},{:>8s},{:>8s},{:>8s},{:>15s},{:>11s},{:>10s},{:>10s}"
+                title_txt = fmt.format('t_elapsed', 'det_no', 'slice',
+                                       'pri_ang', 'ech_ang', 'ech_ord',
+                                       'w_blaze', 'w_range', 'det_rows', 'f_ext_max', 'f_psf_max')
+                print(title_txt)
+            pnh_image = None        # May be no pinholes
+
             # Loop through each slice/transform.
             for opt_transform in opt_transforms:
-
                 slice_cfg = opt_transform.slice_configuration
                 lms_cfg = opt_transform.lms_configuration
                 if is_dark:
@@ -185,16 +215,22 @@ class Toy:
 
                 ech_ord = slice_cfg['ech_ord']
                 slice_no = slice_cfg['slice_no']
-                spifu_no = slice_cfg['spifu_no']
+                fslice_no, pslice_no = Util.decode_slice_no(slice_no)
+                # spifu_no = slice_cfg['spifu_no']
                 ech_ang = lms_cfg['ech_ang']
                 pri_ang = lms_cfg['pri_ang']
 
-                # Load PSF dictionary.  This is used for both background and pinhole image convolution.
+                # Load PSF dictionary.  The central PSF (calculated for a source centred on a slice) is used
+                # for extended source (slice filling) convolution.  The PSFs for slices offset from the centre
+                # are used for pinhole image convolution.  Method 'fit_beta_weights' adds weights to the
+                # dictionary based on the across slice centring (beta_phase).
                 # PSFs are sampled at 4x detector resolution so need to be down-sampled.  We may wish to do this
                 # AFTER the convolution.
                 if psf_dict is None:
                     psf_dict = Model.load_psf_dict(opticon, ech_ord, downsample=True)
-                _, psf_ext = psf_dict[0]
+                    _, psf_ext = psf_dict[0]
+                if beta_phase is not None:
+                    beta_weight = Model.fit_beta_weights(psf_dict, beta_phase)
 
                 waves, f_ext, f_pnh = spectra[ech_ord]
                 affines = filer.read_fits_affine_transform(date_stamp)
@@ -206,10 +242,10 @@ class Toy:
                 w_blaze_max = w_blaze[idx_max]
 
                 w_min, w_max = slice_cfg['w_min']*u.micron, slice_cfg['w_max']*u.micron
-                yc = Util.slice_to_efp_y(slice_no, 0.).value  # Slice y (beta) coordinate in EFP
+                yc = Util.slice_to_efp_y(fslice_no, 0.5)  # Slice y (beta) coordinate in EFP
 
-                efp_ys = np.array([yc, yc])
-                efp_xs = np.array([0., 0.])                         # Slice x (alpha) bounds in EFP, map to dfp_y
+                efp_ys = np.array([yc.value]*2)*yc.unit
+                efp_xs = np.array([0.]*2)*yc.unit                  # Slice x (alpha) bounds in EFP, map to dfp_y
                 efp_w = (np.array([w_min.value, w_max.value]) + w_ech_off)*u.micron
                 efp_slice = {'efp_y': efp_ys, 'efp_x': efp_xs, 'efp_w': efp_w}    # Centre of slice for detector
                 mfp_slice, oob = Util.efp_to_mfp(opt_transform, efp_slice)
@@ -220,8 +256,9 @@ class Toy:
 
                 for det_no in dfp_slice['det_nos']:
                     det_idx = det_no - 1
-                    ext_sig = np.zeros(strip_shape)
+                    ext_ill = np.zeros(strip_shape)
                     psf_sig = np.zeros(strip_shape)
+
 
                     if is_dark:
                         print('Dark frame')
@@ -230,6 +267,8 @@ class Toy:
                     dfp_det_nos = np.full(n_det_cols, det_no)
                     dfp_pix_xs = np.arange(n_det_cols)              # Detector column indices
 
+                    # ########################################################################################
+                    #  EXTENDED BACKGROUND
                     n_rows_written = 0
                     w_illuminated = []
                     for det_row in range(det_row_min, det_row_max + 1):
@@ -249,45 +288,53 @@ class Toy:
                         tau_echelle = np.interp(w_obs, w_blaze, tau_blaze)
                         tau_ech_mosaic[det_idx][det_row, idx_illum] = tau_echelle
                         f_ext_obs = np.interp(w_obs, waves, f_ext)
-                        ext_sig[strip_row, idx_illum] = f_ext_obs * tau_echelle
+                        ext_ill[strip_row, idx_illum] = f_ext_obs * tau_echelle
                         waves_mosaic[det_idx][det_row, idx_illum] = w_obs
                         w_illuminated = w_illuminated + list(w_obs[:])
                         n_rows_written += 1
                     # Now convolve background flux map with bright slice psf. (ideally use filled slice psf)
                     # To start with, we just use PSFs for the boresight slice (slice no. 13)
                     image = image_mosaic[det_idx]
-                    image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_sig, psf_ext,
+                    image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_ill, psf_ext,
                                                                                  mode='same', boundary='symm')
+
                     t_now = time.perf_counter()
                     t_el = int(t_now - t_start)
                     # No pinholes selected, so go to the next detector for this slice.
-                    if fp_mask['id'] in ['open', 'closed'] or lms_pp1 == 'closed':
+                    is_no_pinholes = fp_mask['id'] in ['open', 'closed'] or lms_pp1 == 'closed'
+                    if is_no_pinholes:
                         if Globals.is_debug('medium'):
-                            fmt = "{:10d},{:6d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
-                            txt = fmt.format(t_el, det_no, slice_no, spifu_no, pri_ang, ech_ang, ech_ord,
+                            fmt = "{:10d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
+                            txt = fmt.format(t_el, det_no, slice_no, pri_ang, ech_ang, ech_ord,
                                              int(w_blaze_max.to(u.nm).value), int(w_min.to(u.nm).value),
                                              int(w_max.to(u.nm).value),
-                                             det_row_min, det_row_max, np.amax(ext_sig), np.amax(psf_sig))
+                                             det_row_min, det_row_max, np.amax(ext_ill), np.amax(psf_sig))
                             print(txt)
                         continue
 
-                    # ADD PINHOLE ILLUMINATION TO A BLANK IMAGE
-                    pnh_image = np.zeros(image.shape)
-                    slice_no_pnh_cens = np.array(fp_mask['slice_no_pnh_cens'])
-                    for slice_no_pnh_cen in slice_no_pnh_cens:
-                        slice_no_offset = slice_no - slice_no_pnh_cen
-                        sno_radius = 5 if opticon == Globals.nominal else 2
-                        in_range = math.fabs(slice_no_offset) < sno_radius
+                    sno_radius = list(psf_dict.keys())[-1]
+                    # ##########################################################################################
+                    #  PINHOLES !!
+                    # Add pinhole illumination to the blank images matched to the PSFs for 'off-centre' slices.
+                    psf_illum = {}
+                    for slice_no_offset in psf_dict:
+                        psf_illum[slice_no_offset] = np.zeros(Globals.det_format)
+
+                    psf_max = 0.0
+                    fslice_no_pnh_cens = np.array(fp_mask['fslice_no_pnh_cen'])
+                    for fslice_no_pnh_cen in fslice_no_pnh_cens:
+                        fslice_no_offset = fslice_no - fslice_no_pnh_cen
+                        in_range = math.fabs(fslice_no_offset) <= sno_radius
                         if not in_range:
                             continue
-                        if Globals.is_debug('medium'):
-                            print("Applying pinhole spectrum")
-                        _, psf_pnh = psf_dict[slice_no_offset]
-                        efp_xy_list = fp_mask['efp_xy_pnh_cens']
+                        _, psf_pnh = psf_dict[fslice_no_offset]
+                        efp_xy_list = fp_mask['efp_xy_pnh_cen']
+                        psf_ill_image = psf_illum[fslice_no_offset]
+                        r1, r2 = 3000, 0        # Min max rows to convolve
                         for efp_xy in efp_xy_list:
                             # Build pinhole point source spectrum in the EFP data cube
                             efp_x = efp_xy[0]
-                            efp_y = Util.slice_to_efp_y(slice_no, beta_phase)
+                            efp_y = Util.slice_to_efp_y(fslice_no, beta_phase)
                             n_vals, = efp_ws.shape
                             efp_ys = np.full(n_vals, efp_y)
                             efp_xs = np.full(n_vals, efp_x)
@@ -300,49 +347,37 @@ class Toy:
                             # Populate the psf_illum image column by column, with
                             dfp_x_pnh = dfp_pnh['dfp_x']
                             dfp_y_pnh = dfp_pnh['dfp_y']
-                            dfp_rows_pnh = np.round(dfp_y_pnh).astype(int)
-                            det_row_min_psf, det_row_max_psf = np.amin(dfp_rows_pnh), np.amax(dfp_rows_pnh)
+                            row_min, row_max = int(np.amin(dfp_y_pnh)), int(np.amax(dfp_y_pnh))
+                            r1 = r1 if r1 < row_min else row_min
+                            r2 = r2 if r2 > row_max else row_max
                             dfp_ys = dfp_pnh['dfp_y']
                             dfp_cols = np.floor(dfp_x_pnh).astype(int)
                             dfp_rows = np.floor(dfp_y_pnh).astype(int)
                             phase = dfp_ys - dfp_rows
                             wt_rows = 1. - np.fabs(phase - 0.5)     # Fraction of flux in row
                             is_above = phase > 0.5
-                            f = f_ps.value
+                            f = f_ps.value * beta_weight[fslice_no_offset]
                             for i in range(0, dfp_cols.shape[0]):
                                 dfp_col = dfp_cols[i]
                                 if dfp_col > 2047:
                                     continue
                                 dfp_row = dfp_rows[i]
                                 wt = wt_rows[i]
-                                image[dfp_row, dfp_col] += wt * f[i]
+                                psf_ill_image[dfp_row, dfp_col] += wt * f[i]
                                 drow = 1 if is_above[i] else -1
-                                pnh_image[dfp_row+drow, dfp_col] += (1. - wt) * f[i]
+                                psf_ill_image[dfp_row+drow, dfp_col] += (1. - wt) * f[i]
 
-                        r1, r2 = np.amin(dfp_rows) - 5, np.amax(dfp_rows) + 5
-                        pnh_image[r1:r2, :] += scipy.signal.convolve2d(pnh_image[r1:r2, :], psf_pnh,
+                        r1, r2 = r1 - 5, r2 + 5
+                        image[r1:r2, :] += scipy.signal.convolve2d(psf_ill_image[r1:r2, :], psf_pnh,
                                                                        mode = 'same', boundary = 'symm')
-                    image_mosaic[det_idx] += pnh_image
+                        psf_max_slice = np.amax(psf_ill_image[r1:r2, :])
+                        psf_max = psf_max if psf_max > psf_max_slice else psf_max_slice
 
-
-                                    # for det_row in range(det_row_min_psf, det_row_max_psf + 1):
-                                #     idx_illum = np.argwhere(dfp_rows_pnh == det_row)
-                                #     n_ib = len(idx_illum)
-                                #     if n_ib == 0:               # Skip unilluminated rows.
-                                #         continue
-                                #     # Apply extended spectrum (sky or black body) to illuminated rows
-                                #     strip_row = det_row - det_row_min
-                                #     w_obs = efp_ws[idx_illum][:]
-                                #     f_pnh_obs = np.interp(w_obs, waves, f_pnh)
-                                #     tau_echelle = np.interp(w_obs, w_blaze, tau_blaze)
-                                #     psf_sig[strip_row, idx_illum] = f_pnh_obs * tau_echelle
-                                #     image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(psf_sig, psf_pnh,
-                                #                                                              mode='same', boundary='symm')
                     if Globals.is_debug('medium'):
-                        fmt = "{:10d},{:6d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
-                        txt = fmt.format(t_el, det_no, slice_no, spifu_no, pri_ang, ech_ang, ech_ord,
+                        fmt = "{:10d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
+                        txt = fmt.format(t_el, det_no, slice_no, pri_ang, ech_ang, ech_ord,
                                          int(w_blaze_max.to(u.nm).value), int(w_min.to(u.nm).value), int(w_max.to(u.nm).value),
-                                         det_row_min, det_row_max, np.amax(ext_sig), np.amax(psf_sig))
+                                         det_row_min, det_row_max, np.amax(ext_ill), psf_max)
                         print(txt)
 
             n_exp = int(sim_config['lms_nexp'])
@@ -354,7 +389,7 @@ class Toy:
                 for det_no in range(1, 5):
                     det_idx = det_no - 1
                     image = image_mosaic[det_idx]
-                    frame = Detector.detect(image, dit, ndit)
+                    frame = Detector.detect(image, dit, n_dit)
                     hdu = ImageHDU(frame)
                     hdu.name = "DET{:d}.DATA".format(det_no)
                     hdu.header['ID'] = "{:d}".format(det_no)
@@ -384,6 +419,7 @@ class Toy:
                 if debug:
                     fits_waves_out_path = out_folder + '_waves.fits'
                     print("Writing fits file - {:s}".format(fits_waves_out_path))
+                    print()
                     mosaic = file_name + '_waves', primary_header, hdu_list
                     filer.write_mosaic(out_folder, mosaic)
         return

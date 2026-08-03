@@ -10,8 +10,7 @@ from lms_globals import Globals
 class Transform:
 
     kw_comments = {'opticon': 'LMS wavelength coverage (nominal or extended)',
-                   'slice_no': 'LMS spatial IFU slice number',
-                   'spifu_no': 'LMS spectral IFU slice number',
+                   'slice_no': 'LMS unique slice number',
                    'pri_ang': 'Prism rotation angle / deg.',
                    'ech_ang': 'Echelle rotation angle / deg.',
                    'ech_ord': 'Echelle diffraction order',
@@ -23,6 +22,7 @@ class Transform:
     affines = None               # Affine transforms common to all transforms
 
     def __init__(self, **kwargs):
+        self.wavelength_bounds = 0., 0.
         self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
         self.lms_configuration = kwargs.get('lms_config', Globals.lms_config_template.copy())
         self.slice_configuration = kwargs.get('slice_config', Globals.slice_config_template.copy())
@@ -79,9 +79,8 @@ class Transform:
 
     def is_match(self, slice_filter):
         slice_no_match = self.slice_configuration['slice_no'] == slice_filter['slice_no']
-        spifu_no_match = self.slice_configuration['spifu_no'] == slice_filter['spifu_no']
         ech_ord_match = self.slice_configuration['ech_ord'] == slice_filter['ech_ord']
-        is_match = slice_no_match and spifu_no_match and ech_ord_match
+        is_match = slice_no_match and ech_ord_match
         return is_match
 
     def minus(self, tr_in):
@@ -134,7 +133,7 @@ class Transform:
             card = Card(key.upper(), val, self.kw_comments[key])
             cards.append(card)
         hdr = fits.Header(cards)
-        hdu_name = "SLICE_{:d}_{:d}".format(sli_config['slice_no'], sli_config['spifu_no'])
+        hdu_name = "SLICE_{:d}".format(sli_config['slice_no'])
         bintable_hdu = fits.BinTableHDU.from_columns([col_a, col_b, col_ai, col_bi],
                                                      header=hdr, name=hdu_name)
         return bintable_hdu

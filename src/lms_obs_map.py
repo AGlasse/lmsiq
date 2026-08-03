@@ -12,6 +12,13 @@ class ObsMap:
         return
 
     @staticmethod
+    def _get_chop_tag(cxy_str):
+        cxy_int = int(1000. * float(cxy_str))
+        cxy_sgn = 'n' if cxy_int < 0 else 'p'
+        cxy_tag = "{:s}{:03d}".format(cxy_sgn, abs(cxy_int))
+        return cxy_tag
+
+    @staticmethod
     def get_configuration(test_name):
         """ Read configuration dictionary for a specific test from /config/lms-opt-config.csv
         """
@@ -35,19 +42,16 @@ class ObsMap:
                 sim_config[obs_key] = token.lower()
             opticon = sim_config['lms_msa']
             step_no = sim_config['step_no']
-            dpr_type = sim_config['dpr_type']
 
             cfg_tag = ''
-            is_wcu_pnh = 'lm_pinhole' in sim_config['wcu_fp2_1']
+            is_wcu_pnh = 'lm_pinhole' in sim_config['wcu_fp2_1'] or 'lm_grid' in sim_config['wcu_fp2_1']
             is_cfo_pnh = 'pnh-1' in sim_config['cfo_fp2']
             is_pnh = is_wcu_pnh or is_cfo_pnh
             is_wcu_bb = 'closed' not in sim_config['wcu_bb_ap_mask']
             if is_pnh and is_wcu_bb:
-                cx_off_str = sim_config['cfo_chop_off_x']
-                cx_off_int = int(1000. * float(cx_off_str))
-                cx_off_sgn = 'm' if cx_off_int < 0 else 'p'
-                cx_off_tag = "{:s}{:03d}".format(cx_off_sgn, abs(cx_off_int))
-                cfg_tag += "iso_alpha_aoff_{:s}_".format(cx_off_tag)
+                cx_off_tag = ObsMap._get_chop_tag(sim_config['cfo_chop_off_x'])
+                cy_off_tag = ObsMap._get_chop_tag(sim_config['cfo_chop_off_y'])
+                cfg_tag += "iso_alpha_a{:s}_b{:s}".format(cx_off_tag, cy_off_tag)
             if sim_config['dpr_type'] == 'flat_lamp':
                 cfg_tag += 'flat_'
 
@@ -55,7 +59,7 @@ class ObsMap:
                 lt_off_str = sim_config['wcu_laser_tune_woff']
                 lt_off_nm = int(1000. * float(lt_off_str))
                 lt_off_sgn = 'm' if lt_off_nm < 0 else 'p'
-                lt_off_tag = "{:s}{:03d}".format(lt_off_sgn, lt_off_nm)
+                lt_off_tag = "{:s}{:03d}".format(lt_off_sgn, abs(lt_off_nm))
                 cfg_tag += "iso_lambda_woff_{:s}nm_".format(lt_off_tag)
 
             cfg_id = test_name + '_' + step_no + '_' + opticon[0:3] + '_' + cfg_tag[0:-1]

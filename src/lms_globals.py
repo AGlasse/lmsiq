@@ -64,14 +64,13 @@ class Globals:
     dist_ext_config = ('distortion', extended, '20260112', ext_fov_text, coord_in, coord_out)
     dist_ext_config_ait = ('distortion', extended, 'ait', ext_fov_text, coord_in, coord_out)
     iq_nom_config = ('iq', nominal, '2024073000', nom_fov_text, coord_in, coord_out)
-    iq_ext_config = ('iq', extended, '2024061802', ext_fov_text, coord_in, coord_out)
+    iq_ext_config = ('iq', extended, '2024032401', ext_fov_text, coord_in, coord_out)
     model_configurations = {'distortion': {nominal: dist_nom_config, extended: dist_ext_config},
-                            'distortion_ait': {nominal: dist_nom_config_ait,
-                                               extended: dist_ext_config_ait},
+                            'distortion_ait': {nominal: dist_nom_config_ait, extended: dist_ext_config_ait},
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}
                             }
     lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_ang': None}
-    slice_config_template = {'slice_no': None, 'spifu_no': None, 'ech_ord': None, 'w_min': None, 'w_max': None}
+    slice_config_template = {'slice_no': None, 'ech_ord': None, 'w_min': None, 'w_max': None}   # , 'pslice_no': None
 
     # Transform parameters
     svd_order = 4
@@ -88,19 +87,29 @@ class Globals:
     zemax_configuration = None
     n_lms_detectors = 4
     det_pix_size, im_pix_size = None, None
+
     optical_configurations = [nominal, extended]
-    slice_no_ranges = {nominal: range(1, 29), extended: range(12, 15)}
-    spifu_no_ranges = {nominal: range(0, 1), extended: range(1, 7)}
+
+    # Field and pupil IFU parameters
+    n_fslices = {nominal: 28, extended: 3}
+    n_pslices = {nominal: 1, extended: 6}
+
+    fslice_ext_centre = 13.5
+    fslice_no_lims = {nominal: (1, 29), extended: (12, 15)}
+    fslice_no_range = {nominal: range(1, 29), extended: range(12, 15)}
+    pslice_no_range = {nominal: range(0, 1), extended: range(1, 7)}
 
     ipc_on_tag, ipc_off_tag = '_ipc_01_3', '_ipc_00_0'      # IPC/diffusion file tags
 
-    slice_id_fmt = "{:s}_{:d}_{:02d}_{:d}"        # Define transforms by opticon, ech_ord, slice_no, spifu_no
+    slice_id_fmt = "{:s}_{:d}_{:02d}_{:d}"        # Define transforms by opticon, ech_ord, fslice_no, pslice_no
 
     # The field of view in the optical design is quoted in the FDR design report (E-REP-ATC-MET-1003) is then
     alpha_fov = 0.897 * u.arcsec
     beta_fov = beta_slice.to(u.arcsec) * 28
-    efp_x_fov_mm = alpha_fov / efp_arcsec_mm   # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
+    efp_x_fov_mm = alpha_fov / efp_arcsec_mm    # EFP field of view (mm) (Note ray trace bounds 5.842063, 3.208105)
     efp_y_fov_mm = beta_fov / efp_arcsec_mm
+
+    efp_mm_wcu_as = 1.55 / 0.341550             # Based on WCU grid limit of 0.341550 arcsec falling at EFP_Y = 1.55 mm
 
     # Diffraction grating parameters
     blaze_angle = 51.23                                     # Echelle blaze angle (deg)
@@ -108,10 +117,6 @@ class Globals:
     ge_refractive_index = 4.05                              # Refractive index of germanium
     wav_first_order = 2. * rule_spacing * ge_refractive_index
     wav_first_order = 21 * 5.216                            # First order blaze wavelength
-
-    # IFU parameters
-    n_lms_slices = 28
-    n_lms_spifu_slices = 6
 
     nom_pix_pitch = 18.0                                    # LMS pixel pitch in microns
     det_gap = 3.0				            # Gap between active regions of detectors in 2 x 2 mosaic (mm)
@@ -192,14 +197,17 @@ class Globals:
         :param covariance:  If True, calculate the error.
         :return: y(x) or dy_dx(x) if gradient is True.
         """
+        if isinstance(x, float):
+            x = [x]
+        x = np.array(x)
         order = len(opt) - 1         # order = highest exponent (last term).
         if gradient:
-            dy_dx = 0.
+            dy_dx = np.zeros(x.shape)
             for exp in range(1, order+1):
-                dy_dx += opt[exp] * exp * (x ** (exp-1))
+                dy_dx = np.add(dy_dx, opt[exp] * exp * np.power(x, (exp - 1)))
             return dy_dx
         else:
-            y = 0.
+            y = np.zeros(x.shape)
             for exp in range(0, order+1):
-                y += opt[exp] * (x ** exp)
+                y = np.add(y, opt[exp] * np.power(x, exp))
         return y

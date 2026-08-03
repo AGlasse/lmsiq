@@ -7,6 +7,7 @@ import numpy as np
 import synphot.units
 from astropy.io import fits
 from astropy import units as u
+from scipy.optimize import curve_fit, OptimizeWarning
 
 from lmsdist_util import Util
 from lms_globals import Globals
@@ -31,7 +32,6 @@ class Model:
     # Define a list of extended illumination sources.  These images will be convolved with the 'target slice' PSF.
     bgd_srcs = {'dark': {'sed': 'dark'},
                 'wcu_bb': {'sed': 'bb', 'temperature': 1000., 'tau': tau_whs},  # 1000 K black body
-                # 'wcu_mask': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},  # 1000 K black body
                 'cfo_mask': {'sed': 'bb', 'temperature': 70., 'tau': tau_cfo_lms},
                 'wcu_amb': {'sed': 'bb', 'temperature': 300., 'tau': tau_wfp},
                 'wcu_ls': {'sed': 'laser', 'power': 5.E+03, 'wavelength': 3.390, 'wrange':0, 'tau': tau_whs},
@@ -46,7 +46,7 @@ class Model:
                     'mask_ext': 'cfo_mask'},
                 'lm_pinhole': {'id': 'wcu', 'efp_xy_bs': [[0., 0.]],       # Steerable pinhole in WCU.
                     'mask_ext': 'wcu_mask'},
-                'grid_lm': {'id': 'wcu', 'efp_xy_bs': [],                  # Steerable grid of pinholes in WCU.
+                'lm_grid': {'id': 'wcu', 'efp_xy_bs': [],                  # Steerable grid of pinholes in WCU.
                     'mask_ext': 'wcu_mask'},
                 'align+dark': {'id': 'closed', 'efp_xy_bs': None,             # Blank position in CFO FP wheel
                     'mask_ext': 'cfo_mask'},
@@ -131,7 +131,11 @@ class Model:
         if wcu_mask in ['lm_pinhole']:
             fp_mask = Model.fp_masks[wcu_mask]
             file_name = 'fp_mask_pinhole_lm'
-            fp_mask['efp_xy_bs'] = Filer.read_pinholes(file_name, xy_filter=(0.5, 1.0))
+            fp_mask['efp_xy_bs'] = Filer.read_pinholes(file_name)
+        if wcu_mask in ['lm_grid']:
+            fp_mask = Model.fp_masks[wcu_mask]
+            file_name = 'fp_mask_grid_lm'
+            fp_mask['efp_xy_bs'] = Filer.read_pinholes(file_name)
         if fp_mask is None:
             print('!! Focal plane mask ' + wcu_mask, ' not found !!')
         return fp_mask
@@ -195,12 +199,13 @@ class Model:
                     n_ds_rows, n_ds_cols = int(n_psf_rows / oversampling), int(n_psf_ncols / oversampling)
                     psf = psf.reshape(n_ds_rows, oversampling, n_ds_cols, -1).mean(axis=3).mean(axis=1)   # down sample
                 slice_no_offset = slice_no - slice_no_tgt
-                psf_dict[slice_no_offset] = hdr, psf
+                psf_dict[slice_no_offset] = hdr, psf, np.zeros(Globals.det_format)
+
                 psf_sum += np.sum(psf)
             # Normalise the PSFs to have unity total flux in detector space
             for slice_no in range(sn_min, sn_max):
                 slice_no_offset = slice_no - slice_no_tgt
-                _, psf = psf_dict[slice_no_offset]
+                _, psf, _ = psf_dict[slice_no_offset]
                 norm_factor = oversampling * oversampling / psf_sum
                 psf *= norm_factor
         return psf_dict
@@ -230,7 +235,7 @@ class Model:
                     k_bb = float(bb_aper[4:]) / 15.
                 bgd_src_list.append(('wcu_bb', k_bb))
                 bgd_src_list.append(('wcu_amb', 1. - k_bb))
-            if sim_config['wcu_fp2_1'] == 'lm_pinhole':  # Ambient mask in beam
+            if sim_config['wcu_fp2_1'] == 'lm_pinhole' or sim_config['wcu_fp2_1'] == 'lm_grid':  # Ambient mask in beam
                 pnh_src_list = bgd_src_list.copy()
                 bgd_src_list = [('wcu_amb', 1.)]
         if 'field' not in sim_config['cfo_fp2']:  # CFO focal plane mask is in beam
@@ -279,7 +284,9 @@ class Model:
         for transform in transforms:
             lms_cfg = transform.lms_configuration
             slice_cfg = transform.slice_configuration
-            if slice_cfg['slice_no'] != 13:
+            slice_no = slice_cfg['slice_no']
+            fslice_no, _ = Util.decode_slice_no(slice_no)
+            if fslice_no != 13:
                 continue
             ech_ang = lms_cfg['ech_ang']
             mfp_bs = {'mfp_x': [0.], 'mfp_y': [0.]}
@@ -349,80 +356,78 @@ class Model:
         return waves*u.micron, tk
 
     @staticmethod
-    def load_psf_dict(opticon, ech_ord, downsample=False, slice_no_tgt=13):
-        analysis_type = 'iq'
-
-        nominal = Globals.nominal
-        nom_iq_date_stamp = '2024073000'
-        nom_config = (analysis_type, nominal, nom_iq_date_stamp,
-                      'Nominal spectral coverage (fov = 1.0 x 0.5 arcsec)',
-                      None, None)
-
-        spifu = Globals.extended
-        spifu_date_stamp = '2024061802'
-        spifu_config = (analysis_type, spifu, spifu_date_stamp,
-                        'Extended spectral coverage (fov = 1.0 x 0.054 arcsec)',
-                        None, None)
-
-        model_configurations = {nominal: nom_config, spifu: spifu_config}
-        model_config = model_configurations[opticon]
+    def load_psf_dict(opticon, ech_ord, downsample=False, sno_tgt=13):
         filer = Filer()
         filer.set_configuration('iq', opticon, False)
         defoc_str = '_defoc000um'
+        _, _, data_set, _, _, _ = filer.model_configuration
 
-        _, _, date_stamp, _, _, _ = model_config
-        dataset_folder = '../data/model/iq/' + opticon + '/' + date_stamp + '/'
-        psf_folder = filer.psf_folder
-        config_no = 41 - ech_ord if opticon == nominal else 0
+        config_no = 41 - ech_ord if opticon == Globals.nominal else 0
         config_str = "_config{:03d}".format(config_no)
 
         psf_sum = 0.
-        # Find a slice number
-        nom_slice_no_rep_field = {1: (9, 17)}
-
         psf_dict = {}  # Create a new set of psfs
-
         # Use the boresight field position (field_no = 1) for now...
-        (fn_min, fn_max) = (1, 2) if opticon == nominal else (1, 4)
+        (fn_min, fn_max) = (1, 2) if opticon == Globals.nominal else (1, 4)
         for field_no in range(fn_min, fn_max):
             field_idx = field_no - 1
             field_str = "_field{:03d}".format(field_no)
-            iq_folder = 'lms_' + date_stamp + config_str + field_str + defoc_str
+            iq_folder = 'lms_' + data_set + config_str + field_str + defoc_str
+
             spec_no = 0
-            sn_radius = 4 if opticon == nominal else 1
-            sn_min, sn_max = slice_no_tgt - sn_radius, slice_no_tgt + sn_radius + 1
-
-            if opticon == spifu:
-                # field_idx = field_no - 1
+            sno_radius = 4
+            if opticon == Globals.extended:
                 spec_no = 1
-                sn_min = slice_no_tgt - 1 + field_idx % 3
-                sn_max = sn_min + 1
+                sno_radius = 1
+            sno_min, sno_max = sno_tgt - sno_radius, sno_tgt + sno_radius + 1
 
-            for slice_no in range(sn_min, sn_max):
+            for slice_no in range(sno_min, sno_max):
                 iq_slice_str = "_spat{:02d}".format(slice_no) + "_spec{:d}_detdesi".format(spec_no)
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
-                # file_path = dataset_folder + iq_path
-                file_path = psf_folder + iq_path
+                file_path = filer.psf_folder + iq_path
                 hdu_list = filer.read_zemax_fits(file_path)
                 hdr, psf = hdu_list[0].header, hdu_list[0].data
-
-                # print("slice_no={:d}, psf_max={:10.3e}".format(slice_no, np.amax(psf)))
                 if downsample:
                     oversampling = 4
                     n_psf_rows, n_psf_ncols = psf.shape
                     n_ds_rows, n_ds_cols = int(n_psf_rows / oversampling), int(n_psf_ncols / oversampling)
                     psf = psf.reshape(n_ds_rows, oversampling, n_ds_cols, -1).mean(axis=3).mean(axis=1)  # down sample
-                slice_no_offset = slice_no - slice_no_tgt
+                slice_no_offset = slice_no - sno_tgt
                 psf_dict[slice_no_offset] = hdr, psf
                 psf_sum += np.sum(psf)
             # Normalise the PSFs so that the total flux of all slices sums to unity in detector space
-            for slice_no in range(sn_min, sn_max):
-                slice_no_offset = slice_no - slice_no_tgt
+            for slice_no in range(sno_min, sno_max):
+                slice_no_offset = slice_no - sno_tgt
                 _, psf = psf_dict[slice_no_offset]
                 norm_factor = oversampling * oversampling / psf_sum
                 psf *= norm_factor
         return psf_dict
+
+    @staticmethod
+    def fit_beta_weights(psf_dict, beta_phase):
+        """ Find the function which applies PSF weights the PSFs according the the across slice position
+        of the point source, as a Gaussian profile with a peak at beta_phase = 0.5.  Note, the PSF dictionary is
+        calculated for a source with beta_phase = 0.5
+        """
+        x_list, y_list = [], []
+        for slice_offset in psf_dict:
+            _, psf = psf_dict[slice_offset]
+            x_list.append(slice_offset + 0.5)
+            y_list.append(np.sum(psf))
+        xs = np.array(x_list)
+        ys = np.array(y_list)
+        p0_guess = [np.amax(ys), 0., 1.]
+        is_error = False
+        try:
+            gopt, gcov = curve_fit(Globals.gauss, xs, ys, p0=p0_guess)
+        except:
+            is_error = True
+        beta_weight = {}
+        for slice_offset in psf_dict:
+            x = slice_offset + beta_phase
+            beta_weight[slice_offset] = Globals.gauss(x, *gopt) / gopt[0]
+        return beta_weight
 
     @staticmethod
     def load_sky_emission(waves):

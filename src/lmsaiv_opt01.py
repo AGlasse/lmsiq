@@ -16,7 +16,7 @@ from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
 from lmsaiv_plot import Plot
 from lms_filer import Filer
-
+from lmsdist_util import Util
 
 class Opt01:
 
@@ -53,11 +53,12 @@ class Opt01:
         # Coadd all flood images to allow full coverage (using multiple LMS configurations)
         flood = None
         for mosaic in mosaics:
-            Plot.mosaic(mosaic, title=mosaic[0])
+            if Globals.is_debug('low'):
+                Plot.mosaic(mosaic, title=mosaic.name)
             if flood is None:
-                flood = Mosaic.copy_mosaic(mosaic, clear_data=False, copy_name='')
+                flood = mosaic.copy(clear_data=False, copy_name='')
                 continue
-            flood = Mosaic.sum_mosaics(flood, mosaic)
+            flood = flood.add(mosaic)
 
         if Globals.is_debug('low'):
             Plot.mosaic(flood, title='Coadded flood illumination')
@@ -73,18 +74,18 @@ class Opt01:
     def _find_rrf(flood, slice_map):
         # Generate relative response tuple.
         cols = np.arange(0, 4096, 1)
-        rrf = OptTools.copy_mosaic(slice_map, copy_name='rel_res_function')
-        rrf_name, rrf_primary_header, rrf_hdus = rrf
+        rrf = slice_map.copy(copy_name='rel_res_function')
+        # rrf_name, rrf_primary_header, rrf_hdus = rrf
 
-        name, primary_hdr, hdus = flood
-        wave_mosaic_cen = primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
-        _, _, slice_map_hdus = slice_map
+        # name, primary_hdr, hdus = flood
+        wave_mosaic_cen = flood.primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
+        # _, _, slice_map_hdus = slice_map
         for i in range(0, 4):
-            slice_map_data = slice_map_hdus[i].data
+            slice_map_data = slice_map.hdu_list[i].data
             slice_mask = np.where(slice_map_data > 0., 1., 0.)
             # Very approximate dispersion...!
-            hdr = hdus[i].header
-            flood_image = hdus[i].data
+            hdr = flood.hdu_list[i].header
+            flood_image = flood.hdu_list[i].data
             x_det_cen = float(hdr['X_CEN']) * u.mm
             n_det_rows, n_det_cols = flood_image.shape
             pix_size = float(hdr['HIERARCH AIT PIXEL_PITCH']) * u.mm
@@ -93,11 +94,11 @@ class Opt01:
             disp = .08 * u.micron / (2. * n_det_cols)
             waves = wave_mosaic_cen + disp * (c_det_org + cols)
             flux = Model.black_body(waves, tbb=1000.)
-            rrf_image = rrf_hdus[i].data
+            rrf_image = rrf.hdu_list[i].data
             for row in range(0, n_det_rows):
                 idx = np.argwhere(slice_mask[row] > 0.)
                 rrf_image[row, idx] = flood_image[row, idx] / flux[idx]
-            rrf_hdus[i].data = rrf_image
+            rrf.hdu_list[i].data = rrf_image
         Plot.mosaic(rrf, title='Rel Response Function', cmap='grey', mask=(0.0, 'black'))
         return
 
@@ -105,17 +106,17 @@ class Opt01:
     def _find_slices(mosaic, smooth=None, snr_cut=5):
         """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
         """
-        file_name, hdr, hdus = mosaic
-        opticon = hdr['HIERARCH AIT OPTICON']
+        # file_name, hdr, hdus = mosaic
+        opticon = mosaic.primary_hdr['HIERARCH AIT OPTICON']
         # Slice order from low to high detector number and low to high row number
-        # opticon: {det_nos_12: (spifu_start, spifu_end, slice_start, slice_end),
-        #           det_nos_34: (spifu_start, spifu_end, slice_start, slice_end)
+        # opticon: {det_nos_12: (pslice_start, pslice_end, fslice_start, fslice_end),
+        #           det_nos_34: (pslice_start, pslice_end, fslice_start, fslice_end)
         slice_order = {Globals.nominal: {'12': (0, 0, 15, 28), '34': (0, 0, 1, 14)},
                        Globals.extended: {'12': (1, 3, 11, 13), '34': (4, 6, 11, 13)}
                        }
         cut = 0.5       # Fraction of bright signal defining cut level
         print()
-        print("File = {:s}".format(file_name))
+        print("File = {:s}".format(mosaic.name))
         print("Identifying slices from along column profiles of flood illuminated images ")
         fmt = "Design fov, alpha pixel x slice width = {} x {}"
         print(fmt.format(Globals.alpha_pix, Globals.beta_slice))
@@ -133,22 +134,22 @@ class Opt01:
         profile_column_list = {1: [600, 800, 1000, 1200], 2: [300, 1400, 1700, 2000],
                                3: [600, 700, 800, 1200], 4: [300, 1600, 1800, 2000]}
         profiles = []
-        for hdu in hdus:
+        for hdu in mosaic.hdu_list:
             det_no = int(hdu.header['ID'])
             det_tag = {1: '12', 2: '12', 3: '34', 4: '34'}[det_no]
             det_slice_order = slice_order[opticon]
-            spifu_start, spifu_end, slice_start, slice_end = det_slice_order[det_tag]
+            pslice_start, pslice_end, fslice_start, fslice_end = det_slice_order[det_tag]
 
             img = hdu.data
             profile_columns = profile_column_list[det_no]
             for profile_column in profile_columns:
-                spifu_no = spifu_start
-                slice_no = slice_start
+                pslice_no = pslice_start
+                fslice_no = fslice_start
                 pc1, pc2 = profile_column - 4, profile_column + 5
                 if Globals.is_debug('high'):
                     print('Opt01._find_slices, '
-                          'det_no= ', det_no, 'spifu_no= ', spifu_no, 'slice_no= ',
-                          slice_no, 'col= ', profile_column)
+                          'det_no= ', det_no, 'pslice_no= ', pslice_no, 'fslice_no= ',
+                          fslice_no, 'col= ', profile_column)
                 signal = np.mean(img[:, pc1:pc2], axis=1)
                 if smooth is not None:
                     boxcar = Box1DKernel(smooth)
@@ -180,8 +181,8 @@ class Opt01:
                     if Globals.is_debug('high'):
                         print("- {:5.2f}, {:5d}, {:5.2f}, {:5.3f}".format(rlo, row_bright, rhi, y_cut))
                     slice_coords['det_nos'].append(det_no)
+                    slice_no = Util.encode_slice_no(fslice_no, pslice_no)
                     slice_coords['slice_nos'].append(slice_no)
-                    slice_coords['spifu_nos'].append(spifu_no)
                     slice_coords['col_mins'].append(pc1)
                     slice_coords['col_maxs'].append(pc2)
                     slice_coords['row_mins'].append(rlo)
@@ -194,16 +195,15 @@ class Opt01:
                     # signal[row_lo - gap_hw: row_hi + gap_hw] = 0.
                     signal[0: row_hi + gap_hw] = 0.
 
-                    slice_no += 1
-                    if slice_no > slice_end:        # this should only be true in extended mode.
+                    fslice_no += 1
+                    if fslice_no > fslice_end:        # this should only be true in extended mode.
                         signal[row_lo - gap_hw: row_hi + spifu_gap] = 0.
-                        slice_no = slice_start
-                        spifu_no += 1
-                        if spifu_no > spifu_end:
+                        fslice_no = fslice_start
+                        pslice_no += 1
+                        if pslice_no > pslice_end:
                             more_rows = False
                 label = "col={}".format(profile_column)
                 profiles.append((label, det_no, profile_column, original_signal, pts))
-
 
         # Convert lists to numpy arrays
         for key in slice_coords:
@@ -215,46 +215,40 @@ class Opt01:
     @staticmethod
     def _make_slice_map(slice_coords, mosaic):
         """ Create slice map, which is a fits HDU detector mosaic image where each pixel takes the value of
-        its slice number N, such that N = slice_no + 100 x spifu_no
+        its slice number N, such that N = slice_no + 100 x pslice_no
         """
-        slice_map = OptTools.copy_mosaic(mosaic, clear_data=True, copy_name='slice_map')
-        slice_map_name, slice_map_hdr, slice_map_hdus = slice_map
-        opticon = slice_map_hdr['HIERARCH AIT OPTICON']
-
-        for hdu in slice_map_hdus:
+        slice_map = mosaic.copy(clear_data=True, copy_name='slice_map')
+        for hdu in slice_map.hdu_list:
             det_no = int(hdu.header['ID'])
             det_no_idxs = slice_coords['det_nos'] == det_no
-            uni_spifu_nos = np.unique(slice_coords['spifu_nos'][det_no_idxs])
-            for spifu_no in uni_spifu_nos:
-                spifu_no_idxs = np.logical_and(slice_coords['spifu_nos'] == spifu_no, det_no_idxs)
-                uni_slice_nos = np.unique(slice_coords['slice_nos'])
-                for slice_no in uni_slice_nos:
-                    idxs = np.logical_and(slice_coords['slice_nos'] == slice_no, spifu_no_idxs)
-                    row_mins = np.array(slice_coords['row_mins'])[idxs]
-                    if len(row_mins) < 1:       # Catch cases where the slice is not on the detector
-                        continue
-                    row_maxs = np.array(slice_coords['row_maxs'])[idxs]
-                    col_mins = np.array(slice_coords['col_mins'])[idxs]
-                    col_maxs = np.array(slice_coords['col_maxs'])[idxs]
-                    cols = 0.5 * (col_mins + col_maxs)
-                    row_min_fit = np.polyfit(cols, row_mins, 2)
-                    row_max_fit = np.polyfit(cols, row_maxs, 2)
+            uni_slice_nos = np.unique(slice_coords['slice_nos'][det_no_idxs])
+            for slice_no in uni_slice_nos:
+                idxs = np.argwhere(slice_coords['slice_nos'] == slice_no)
+                row_mins = np.array(slice_coords['row_mins'])[idxs]
+                if len(row_mins) < 1:       # Catch cases where the slice is not on the detector
+                    continue
+                row_maxs = np.array(slice_coords['row_maxs'])[idxs][:,0]
+                col_mins = np.array(slice_coords['col_mins'])[idxs][:,0]
+                col_maxs = np.array(slice_coords['col_maxs'])[idxs][:,0]
+                cols = 0.5 * (col_mins + col_maxs)
+                row_min_fit = np.polyfit(cols, row_mins, 2)
+                row_max_fit = np.polyfit(cols, row_maxs, 2)
 
-                    nr, nc = hdu.data.shape
-                    cs = np.arange(0, nc, 1)
-                    r1s = np.rint(np.polyval(row_min_fit, cs))
-                    r2s = np.rint(np.polyval(row_max_fit, cs))
-                    for c, r1, r2 in zip(cs, r1s, r2s):
-                        hdu.data[int(r1):int(r2), int(c)] = int(slice_no + 100 * spifu_no)
+                nr, nc = hdu.data.shape
+                cs = np.arange(0, nc, 1)
+                r1s = np.rint(np.polyval(row_min_fit, cs))
+                r2s = np.rint(np.polyval(row_max_fit, cs))
+                for c, r1, r2 in zip(cs, r1s, r2s):
+                    hdu.data[int(r1):int(r2), int(c)] = int(slice_no)
         return slice_map
 
     @staticmethod
     def _calculate_fov(slice_map):
-        _, pri_hdu, hdu_list = slice_map
-        opticon = pri_hdu['HIERARCH AIT OPTICON']
+        # _, pri_hdu, hdu_list = slice_map
+        opticon = slice_map.primary_hdr['HIERARCH AIT OPTICON']
         n_rows, n_cols = Globals.det_format
         n_illum = 0
-        for hdu in hdu_list:
+        for hdu in slice_map.hdu_list:
             n_illum += np.count_nonzero(hdu.data)
 
         n_slices = 28 if opticon == Globals.nominal else 3

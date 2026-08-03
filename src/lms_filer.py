@@ -6,6 +6,7 @@ from astropy.io import fits
 from astropy.io.fits import Card, HDUList, PrimaryHDU
 from lms_globals import Globals
 from lms_transform import Transform
+from lms_mosaic import Mosaic
 import numpy as np
 
 
@@ -16,6 +17,7 @@ class Filer:
 
     def __init__(self):
         self.model_configuration = None
+        self.test_data_folder = None
         self.psf_folder, self.sim_folder, self.output_folder = None, None, None
         self.tf_dir, self.trace_file, self.poly_file = None, None, None
         self.wcal_file, self.stats_file, self.tf_fit_file, self.cube_folder = None, None, None, None
@@ -30,7 +32,7 @@ class Filer:
         self.model_configuration = model_configuration
         sub_folder = "{:s}/{:s}/{:s}".format(analysis_type, opticon, data_set)
 
-        # self.data_folder = Filer.get_folder('./data/model/' + sub_folder)
+        # self.test_data_folder = Filer.get_folder('./data/' + sub_folder)
         self.psf_folder = Filer.get_folder('../data/' + sub_folder)
         self.ray_trace_folder = Filer.get_folder('../data/' + sub_folder)
         self.output_folder = Filer.get_folder('../output/' + sub_folder)
@@ -84,12 +86,12 @@ class Filer:
                 fmt = "- storing ScopeSim det_no= {:d} (x, y) = ({:6.3f}, {:6.3f}), at mosaic list index= {:d}"
                 print(fmt.format(det_no, x, y, mos_idx))
             hdu_list[mos_idx] = hdu_in
-        mosaic = file_name, primary_hdr, hdu_list
+        mosaic = Mosaic(file_name, primary_hdr, hdu_list)
         return mosaic
 
     @staticmethod
-    def read_mosaic_list(*args):
-        """ Read an LMS data file into a mosaic tuple.  For ScopeSim data, the HDU.header['ID'] holds the detector
+    def read_mosaic_list(folder, *args):
+        """ Read a LMS data files into a list of mosaic objects.  For ScopeSim data, the HDU.header['ID'] holds the detector
         number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.
         Here, T=Top (slices 15 to 28), B = Bottom (slices 1 to 14),
         L = Left (short wavelength), R = Right (long wavelength).
@@ -99,7 +101,6 @@ class Filer:
         inc_tags = args[0]
         exc_tags = args[1] if n_args > 1 else []
         mosaic_list = []
-        folder = Filer.test_data_folder
         file_list = Filer.get_file_list(folder, inc_tags=inc_tags, exc_tags=exc_tags)
         if len(file_list) == 0:
             text = "Files in {:s} including tags ".format(folder)
@@ -154,11 +155,13 @@ class Filer:
         return out_path
 
     @staticmethod
-    def read_pinholes(file_name, xy_filter=(0.5, 1.0)):
+    def read_pinholes(file_name, efp_xy_filter=(1.6, 2.7)):
         path = './inst_pkgs/METIS/wcu/' + file_name + '.dat'
         efp_xy_list = []
+        k_efp_wcu = Globals.efp_mm_wcu_as
         if Globals.is_debug('high'):
-            print('Reading pinhole mask from {:s}'.format(file_name))
+            fmt = "Reading pinhole mask from {:s}, coords scaled by {:10.3f} EFP(mm) per WCU(arcsecond"
+            print(fmt.format(file_name, k_efp_wcu))
         with open(path, 'r') as text_file:
             records = text_file.read().splitlines()
             for record in records:
@@ -169,10 +172,11 @@ class Filer:
                 if 'x' in record:  # Skip column label line
                     continue
                 tokens = record.split()
-                if len(tokens) < 2: continue
-                efp_x = float(tokens[0])
-                efp_y = float(tokens[1])
-                if abs(efp_x) < xy_filter[0] and abs(efp_y) < xy_filter[1]:
+                if len(tokens) < 2:
+                    continue
+                wcu_x, wcu_y = float(tokens[0]), float(tokens[1])
+                efp_x, efp_y = k_efp_wcu * wcu_x, k_efp_wcu * wcu_y
+                if abs(efp_x) < efp_xy_filter[0] and abs(efp_y) < efp_xy_filter[1]:
                     efp_xy_list.append([efp_x, efp_y])
         return efp_xy_list
 
@@ -203,13 +207,12 @@ class Filer:
         wpa_hdu = fits.BinTableHDU(data=wpa_table, header=wpa_hdr)
         hdu_list.append(wpa_hdu)
 
-        wxo_column_names = ['SLICE_NO', 'SPIFU_NO'] + wxo_hdr
-        n_columns = len(wxo_column_names)
-        wxo_data = np.zeros(n_columns)
+        wxo_column_names = ['SLICE_NO'] + wxo_hdr
+        n_wxo_columns = len(wxo_column_names)
+        wxo_data = np.zeros(n_wxo_columns)
         # Write wavelength x echelle order fit parameters to second HDU
         wxo_data[0] = wxo_fit['slice_no']
-        wxo_data[1] = wxo_fit['spifu_no']
-        wxo_data[2:n_columns] = wxo_fit['wxo_opt']     # All slices have the same wxo fit parameters...
+        wxo_data[1:n_wxo_columns] = wxo_fit['wxo_opt']     # All slices have the same wxo fit parameters...
         order = wxo_fit['order']
         n_coeffs = wxo_fit['n_coefficients']
         wxo_cards = [Card('DESCR', 'Fit parms to map prism and echelle angle to slice 13 wavelength', ''),
@@ -227,26 +230,26 @@ class Filer:
                       ]
         term_hdr = fits.Header(term_cards)
         mat_tags_uc = ['A', 'B', 'AI', 'BI']
-        term_names = ['SLICE_NO', 'SPIFU_NO', 'ROW', 'COL']
+        term_names = ['SLICE_NO', 'ROW', 'COL']
         for mat_tag in mat_tags_uc:
-            for tag in wxo_column_names[2:]:
+            for tag in wxo_column_names[1:]:
                 term_names.append(mat_tag + '_' + tag)
         n_columns = len(term_names)
         n_records_slice = Globals.svd_order * Globals.svd_order
         term_data = np.zeros((n_slices * n_records_slice, n_columns))
         data_row = 0                           # Row counter in term_data array
         for i, term_row in enumerate(term_fits):
-            matrices = term_row[2]
+            matrices = term_row[1]
             nr, nc, nvals = matrices['a'].shape
             nrc = nr * nc
-            term_data[data_row:data_row + nrc, 0:2] = term_row[0:2]     # slice_no, spifu_no
+            term_data[data_row:data_row + nrc, 0] = term_row[0]
             rows, cols = [], []
             for rc in range(0, nr*nc):
                 rows.append(int(rc / nr))
                 cols.append(int(rc % nc))
-            term_data[data_row:data_row + nrc, 2] = rows  # matrix row and column nos.
-            term_data[data_row:data_row + nrc, 3] = cols
-            data_col = 4
+            term_data[data_row:data_row + nrc, 1] = rows  # matrix row and column nos.
+            term_data[data_row:data_row + nrc, 2] = cols
+            data_col = 3
             for key in matrices:
                 data_row = i * nrc
                 matrix = matrices[key]
@@ -282,9 +285,8 @@ class Filer:
         wxo_fit_order, n_wxo_coeffs = wxo_header['ORDER'], wxo_header['N_COEFFS']
         wxo_data = hdu_list[2].data
         slice_no = int(wxo_data['SLICE_NO'][0])
-        spifu_no = int(wxo_data['SPIFU_NO'][0])
         wxo_fit = {'order': wxo_fit_order, 'n_coeffs': n_wxo_coeffs,
-                   'slice_no': slice_no, 'spifu_no': spifu_no,
+                   'slice_no': slice_no,
                    'wxo_opt': list(wxo_data[0][2:])}
 
         term_header = hdu_list[3].header
@@ -297,19 +299,17 @@ class Filer:
         # Should have 18 elements for ext, 28 for nominal
         for data_rec in np.array(term_data):
             data_array = list(data_rec)
-            slice_no, spifu_no = int(data_array[0]), int(data_array[1])
+            slice_no = int(data_array[0])
             if slice_no not in term_fits.keys():
                 term_fits[slice_no] = {}
-            if spifu_no not in term_fits[slice_no].keys():
-                term_fits[slice_no][spifu_no] = {}
                 for mat_name in Globals.matrix_names:
-                    term_fits[slice_no][spifu_no][mat_name] = np.zeros(mat_shape)
-            mat_row, mat_col = int(data_array[2]), int(data_array[3])
-            data_col = 4
+                    term_fits[slice_no][mat_name] = np.zeros(mat_shape)
+            mat_row, mat_col = int(data_array[1]), int(data_array[2])
+            data_col = 3
             for mat_name in Globals.matrix_names:
-                mat = term_fits[slice_no][spifu_no][mat_name]
+                mat = term_fits[slice_no][mat_name]
                 mat[mat_row, mat_col] = data_array[data_col: data_col + n_term_coeffs]
-                term_fits[slice_no][spifu_no][mat_name] = mat
+                term_fits[slice_no][mat_name] = mat
                 data_col += n_term_coeffs
         return wpa_fit, wxo_fit, term_fits
 
