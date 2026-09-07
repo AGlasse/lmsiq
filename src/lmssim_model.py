@@ -9,6 +9,7 @@ from astropy.io import fits
 from astropy import units as u
 from scipy.optimize import curve_fit, OptimizeWarning
 
+from lms_obs_map import ObsMap
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
@@ -116,7 +117,7 @@ class Model:
 
             f_ext_min, f_ext_max = np.amin(flux), np.amax(flux)
             if Globals.is_debug('medium'):
-                fmt = "Adding {:s} flux with min/max signal = {:10.1f} /{:10.1f} el/pix/sec"
+                fmt = "Adding {:s} flux with min/max signal = {:10.2f} /{:10.2f} el/pix/sec"
                 print(fmt.format(sed, f_ext_min.value, f_ext_max.value))
         return waves, flux
 
@@ -218,7 +219,13 @@ class Model:
         """
         lt_w_offset = 0.
         bgd_src_list, pnh_src_list = [], []
-        if sim_config['wcu_per_arm'] == 'out':  # IN = Looking at Leiden sky
+        # Trap darks
+        is_dark = ObsMap.is_dark(sim_config)
+        if is_dark:
+            bgd_src_list.append(('dark', 1.))
+            pnh_src_list.append(('dark', 1.))
+            return bgd_src_list, pnh_src_list, lt_w_offset
+        if sim_config['wcu_per_arm'] == 'out':          # IN = Looking at Leiden sky
             bgd_src_list.append(('sky', 1.))
         else:  # Looking at WCU
             if sim_config['wcu_laser_sw'] != 'false':
@@ -431,14 +438,12 @@ class Model:
 
     @staticmethod
     def load_sky_emission(waves):
-        path = '../data/sky/elt_sky.fits'
+        path = '../data/sky/leiden/LBL_A10_w3000_R0120000_ALL_Leiden_LM_R.fits'
+        wave_unit = u.micron if 'Leiden' in path else u.nm
         hdu_list = fits.open(path, mode='readonly')
         data_table = hdu_list[1].data
-        waves_all = data_table['lam'] * u.nm
+        waves_all = data_table['lam'] * wave_unit
         flux_all, flux_errs = data_table['flux'], None
-        # flux_units = u.ph / u.second / u.m / u.m / u.micron / u.arcsec / u.arcsec    # 'ph/s/m2/um/arcsec2'
-
-        # print("Loaded sky transmission and emission spectrum with units {:s}".format(flux_units))
         flux = np.zeros(waves.shape)
         i = 0
         fmt = "{:10s}{:10s}{:10s}{:10s}{:10s}{:10s}"
@@ -453,4 +458,5 @@ class Model:
             i += 1
             if i >= n_waves_all - 1:
                 break
-        return flux * synphot.units.PHOTLAM
+            f_units = 1 / u.s / u.m / u.m / u.arcsec / u.arcsec / u.micron
+        return flux * f_units            # Leiden units - phot/sec/m2/arcsec2/micron * synphot.units.PHOTLAM

@@ -9,6 +9,7 @@ import scipy.signal
 from astropy import units as u
 from astropy.io.fits import ImageHDU
 
+from lms_obs_map import ObsMap
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
@@ -29,9 +30,6 @@ class Toy:
         wave_ref, w_pnh = None, None            # Define local variables
         psf_dict = None
         beta_phase, beta_weight = None, None
-
-        # efp_y = Util.slice_to_efp_y(13, 0.0)
-
         analysis_type = 'distortion'
         filer = Filer()
 
@@ -192,17 +190,17 @@ class Toy:
             bgd_src_list, pnh_src_list, lt_w_offset = Model.load_source_lists(sim_config)
 
             # Prepare to skip flux calculations for darks
-            is_dark = sim_config['lms_pp1'] == 'closed' or 'dark' in sim_config['cfo_pp1']
+            is_dark = ObsMap.is_dark(sim_config)
             blaze = Model.make_blaze_dictionary(opt_transforms)
             spectra = Model.make_spectra(opt_transforms, bgd_src_list, pnh_src_list, lt_w_offset)
             out_folder = '../data/test_toysim/'
 
             # Set up dictionary of blaze wavelengths from ech_angle=0 transforms
             if Globals.is_debug('medium'):
-                fmt = "{:>10s},{:>6s},{:>6s},{:>8s},{:>8s},{:>8s},{:>8s},{:>15s},{:>11s},{:>10s},{:>10s}"
+                fmt = "{:>10s},{:>8s},{:>6s},{:>8s},{:>8s},{:>8s},{:>8s},{:>15s},{:>11s},{:>10s},{:>10s}"
                 title_txt = fmt.format('t_elapsed', 'det_no', 'slice',
                                        'pri_ang', 'ech_ang', 'ech_ord',
-                                       'w_blaze', 'w_range', 'det_rows', 'f_ext_max', 'f_psf_max')
+                                       'w_blaze', 'w_range', 'det_rows', 'f_bgd_max', 'f_psf_max')
                 print(title_txt)
             pnh_image = None        # May be no pinholes
 
@@ -210,8 +208,8 @@ class Toy:
             for opt_transform in opt_transforms:
                 slice_cfg = opt_transform.slice_configuration
                 lms_cfg = opt_transform.lms_configuration
-                if is_dark:
-                    continue
+                # if is_dark:
+                #     continue
 
                 ech_ord = slice_cfg['ech_ord']
                 slice_no = slice_cfg['slice_no']
@@ -253,12 +251,12 @@ class Toy:
                 det_row_min = int(dfp_slice['dfp_y'][0] - 100)      # Bracket slices which typically cover 120 rows.
                 det_row_max = det_row_min + n_det_rows_slice
                 strip_shape = n_det_rows_slice, n_det_cols
+                psf_max = 0.0
 
                 for det_no in dfp_slice['det_nos']:
                     det_idx = det_no - 1
                     ext_ill = np.zeros(strip_shape)
                     psf_sig = np.zeros(strip_shape)
-
 
                     if is_dark:
                         print('Dark frame')
@@ -298,18 +296,9 @@ class Toy:
                     image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_ill, psf_ext,
                                                                                  mode='same', boundary='symm')
 
-                    t_now = time.perf_counter()
-                    t_el = int(t_now - t_start)
                     # No pinholes selected, so go to the next detector for this slice.
                     is_no_pinholes = fp_mask['id'] in ['open', 'closed'] or lms_pp1 == 'closed'
                     if is_no_pinholes:
-                        if Globals.is_debug('medium'):
-                            fmt = "{:10d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
-                            txt = fmt.format(t_el, det_no, slice_no, pri_ang, ech_ang, ech_ord,
-                                             int(w_blaze_max.to(u.nm).value), int(w_min.to(u.nm).value),
-                                             int(w_max.to(u.nm).value),
-                                             det_row_min, det_row_max, np.amax(ext_ill), np.amax(psf_sig))
-                            print(txt)
                         continue
 
                     sno_radius = list(psf_dict.keys())[-1]
@@ -373,12 +362,15 @@ class Toy:
                         psf_max_slice = np.amax(psf_ill_image[r1:r2, :])
                         psf_max = psf_max if psf_max > psf_max_slice else psf_max_slice
 
-                    if Globals.is_debug('medium'):
-                        fmt = "{:10d},{:6d},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
-                        txt = fmt.format(t_el, det_no, slice_no, pri_ang, ech_ang, ech_ord,
-                                         int(w_blaze_max.to(u.nm).value), int(w_min.to(u.nm).value), int(w_max.to(u.nm).value),
-                                         det_row_min, det_row_max, np.amax(ext_ill), psf_max)
-                        print(txt)
+                if Globals.is_debug('medium'):
+                    t_now = time.perf_counter()
+                    t_el = int(t_now - t_start)
+                    det_no_text = '12' if det_no < 3 else '34'
+                    fmt = "{:10d},{:>8s},{:6d},{:8.3f},{:8.3f},{:8d},{:8.0f},{:8.0f},{:6.0f},{:5d},{:5d},{:10.1f},{:10.1f}"
+                    txt = fmt.format(t_el, det_no_text, slice_no, pri_ang, ech_ang, ech_ord,
+                                     int(w_blaze_max.to(u.nm).value), int(w_min.to(u.nm).value), int(w_max.to(u.nm).value),
+                                     det_row_min, det_row_max, np.amax(ext_ill), psf_max)
+                    print(txt)
 
             n_exp = int(sim_config['lms_nexp'])
             n_exp = 1

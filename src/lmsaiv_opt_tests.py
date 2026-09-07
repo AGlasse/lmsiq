@@ -3,6 +3,7 @@ from lms_filer import Filer
 from lmsaiv_opt01 import Opt01
 from lmsaiv_opt02 import Opt02
 from lmsaiv_opt03 import Opt03
+from lmsaiv_opt04 import Opt04
 
 
 class OptTests:
@@ -15,6 +16,7 @@ class OptTests:
         optical_test = {'lms_opt_01_fov': (Opt01.fov, 'Field of view and RSRF'),
                         'lms_opt_02_dist': (Opt02.dist, 'Distortion transforms and enslitted profiles'),
                         'lms_opt_03_psf': (Opt03.psf, 'Monochomatic Point and line spread function'),
+                        'lms_opt_04_ghost': (Opt04.ghost, 'Deep imaging of any ghosts detected in LMS-OPT-03'),
                         # 'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
                         }
         OptTests.optical_test = optical_test

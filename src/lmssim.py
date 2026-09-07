@@ -26,7 +26,7 @@ def run():
     if redownload_metis:
         sim.download_packages(["METIS", "ELT", "Armazones"], release="latest")
     # ============================== Set simulator parameters here ====================================
-    test_name = 'lms_opt_04'        # Name of test to simulate, e.g 'lms_opt_01'
+    test_name = 'lms_opt_01'        # Name of test to simulate, e.g 'lms_opt_01'
     use_scope_sim = False
 
     base_debug_level = 'medium'

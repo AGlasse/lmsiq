@@ -8,9 +8,8 @@ Update:
 """
 import astropy.units as u
 import numpy as np
-from astropy.convolution import convolve, Box1DKernel
+from astropy.convolution import Box1DKernel
 
-from lms_mosaic import Mosaic
 from lmssim_model import Model
 from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
@@ -30,15 +29,14 @@ class Opt01:
         map in the AsBuilt object
         """
         Opt01._analyse_darks()
-        for opticon in [Globals.nominal, Globals.extended]:
-            Opt01._find_fov(opticon, as_built)
+        Opt01._find_fov(as_built)
         print('Done')
         return as_built
 
     @staticmethod
     def _analyse_darks():
         inc_tags = ['lms_opt_01', '_dark']
-        darks = Filer.read_mosaic_list(inc_tags)
+        darks = Filer.read_mosaic_list(Filer.test_data_folder, inc_tags)
         OptTools.dark_stats(darks)
         if Globals.is_debug('low'):
             title = 'Dark'
@@ -47,39 +45,82 @@ class Opt01:
         return
 
     @staticmethod
-    def _find_fov(opticon, as_built):
-        opticon_tag = opticon[0:3]
-        mosaics = Filer.read_mosaic_list(['lms_opt_01', 'flat_lamp', opticon_tag])
-        # Coadd all flood images to allow full coverage (using multiple LMS configurations)
-        flood = None
-        for mosaic in mosaics:
-            if Globals.is_debug('low'):
-                Plot.mosaic(mosaic, title=mosaic.name)
-            if flood is None:
-                flood = mosaic.copy(clear_data=False, copy_name='')
-                continue
-            flood = flood.add(mosaic)
+    def _find_fov(as_built):
+        config_tag = {Globals.nominal: [['2', '3'], ['5', '6'], ['8', '9']],
+                      Globals.extended: [['11', '12', '13']]}
+        for opticon in config_tag:
+            coadd_title = ''
+            for step_list in config_tag[opticon]:
+                flood = None
+                for step in step_list:
+                    step_tag = "step{:s}".format(step)
+                    inc_filter = ['lms_opt_01', 'flat_bb', step_tag]
+                    mosaic = Filer.read_mosaic_list(Filer.test_data_folder, inc_filter)[0]
+                    # Coadd all flood images in each LMS configuration to support full coverage.
+                    if Globals.is_debug('low'):
+                        Plot.mosaic(mosaic)
+                    if flood is None:
+                        flood = mosaic.copy(clear_data=False, copy_name='')
+                        coadd_title = 'Coadded steps ' + step + ','
+                        continue
+                    flood = flood.add(mosaic)
+                    coadd_title += step + ','
 
-        if Globals.is_debug('low'):
-            Plot.mosaic(flood, title='Coadded flood illumination')
-        profiles = Opt01._find_slices(flood, smooth=3, snr_cut=5)
-        slice_map = Opt01._make_slice_map(profiles, flood)
-        Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
-        Opt01._calculate_fov(slice_map)
-        Opt01._find_rrf(flood, slice_map)
-        as_built['slice_map_' + opticon] = slice_map
+                flood.name = coadd_title[0:-1]
+                if Globals.is_debug('low'):
+                    Plot.mosaic(flood)
+                profiles = Opt01._find_slices(flood, smooth=3, snr_cut=10)
+                slice_gaps = Opt01._find_gaps(profiles)
+                if Globals.is_debug('low'):
+                    Plot.slice_gaps(slice_gaps)
+                slice_map = Opt01._make_slice_map(profiles, flood)
+                Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
+                Opt01._calculate_fov(slice_map)
+                Opt01._find_rrf(flood, slice_map)
+                as_built['slice_map_' + opticon[0:3] + step_tag] = slice_map
         return as_built
+
+    @staticmethod
+    def _find_gaps(profiles):
+        fmt = None
+        gap_list = []
+        if Globals.is_debug('medium'):
+            fmt = "{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},{:>14s}"
+            print(fmt.format('det_no', 'slice_a', 'slice_b', 'col_min', 'col_max', 'gap'))
+            fmt = "{:>10d},{:>10d},{:>10d},{:>10d},{:>10d},{:>14.3f}"
+
+        n_profiles = profiles['det_nos'].shape[0]
+        for i in range(0, n_profiles):
+            for j in range(0, n_profiles):
+                if i == j:
+                    continue
+                det_no_i = profiles['det_nos'][i]
+                det_no_j = profiles['det_nos'][j]
+                if det_no_j != det_no_i:
+                    continue
+                slice_no_i = profiles['slice_nos'][i]
+                slice_no_j = profiles['slice_nos'][j]
+                if slice_no_j - slice_no_i != 1:
+                    continue
+                col_min_i = profiles['col_mins'][i]
+                col_min_j = profiles['col_mins'][j]
+                if col_min_j != col_min_i:
+                    continue
+                col_max_j = profiles['col_maxs'][j]
+                gap_size = profiles['row_mins'][j] - profiles['row_maxs'][i]
+                if Globals.is_debug('medium'):
+                    print(fmt.format(det_no_i, slice_no_i, slice_no_j, col_min_j, col_max_j, gap_size))
+                gap = det_no_i, slice_no_i, slice_no_j, col_min_j, col_max_j, gap_size
+                gap_list.append(gap)
+        return gap_list
 
     @staticmethod
     def _find_rrf(flood, slice_map):
         # Generate relative response tuple.
         cols = np.arange(0, 4096, 1)
         rrf = slice_map.copy(copy_name='rel_res_function')
-        # rrf_name, rrf_primary_header, rrf_hdus = rrf
 
-        # name, primary_hdr, hdus = flood
         wave_mosaic_cen = flood.primary_hdr['HIERARCH ESO INS WLEN CEN'] * u.micron
-        # _, _, slice_map_hdus = slice_map
         for i in range(0, 4):
             slice_map_data = slice_map.hdu_list[i].data
             slice_mask = np.where(slice_map_data > 0., 1., 0.)
@@ -106,11 +147,7 @@ class Opt01:
     def _find_slices(mosaic, smooth=None, snr_cut=5):
         """ Calculate fov and return dictionary of slice_bounds and profiles used to calculate them.
         """
-        # file_name, hdr, hdus = mosaic
         opticon = mosaic.primary_hdr['HIERARCH AIT OPTICON']
-        # Slice order from low to high detector number and low to high row number
-        # opticon: {det_nos_12: (pslice_start, pslice_end, fslice_start, fslice_end),
-        #           det_nos_34: (pslice_start, pslice_end, fslice_start, fslice_end)
         slice_order = {Globals.nominal: {'12': (0, 0, 15, 28), '34': (0, 0, 1, 14)},
                        Globals.extended: {'12': (1, 3, 11, 13), '34': (4, 6, 11, 13)}
                        }
@@ -128,11 +165,16 @@ class Opt01:
         gap_hw = int(0.5 * gap)
         spifu_gap = 200
 
-        slice_coords = {'det_nos': [], 'slice_nos': [], 'spifu_nos': [],
-                        'col_mins': [], 'col_maxs': [], 'row_mins': [], 'row_maxs': []}
+        slice_coords = {'det_nos': [], 'slice_nos': [],
+                        'col_mins': [], 'col_maxs': [],
+                        'row_mins': [], 'row_maxs': []}
 
-        profile_column_list = {1: [600, 800, 1000, 1200], 2: [300, 1400, 1700, 2000],
-                               3: [600, 700, 800, 1200], 4: [300, 1600, 1800, 2000]}
+        profile_colours = ['red', 'blue', 'green', 'magenta']
+        pc_list_default = [400, 800, 1200, 1600]
+        profile_column_list = {1: pc_list_default,
+                               2: pc_list_default,
+                               3: pc_list_default,
+                               4: pc_list_default}
         profiles = []
         for hdu in mosaic.hdu_list:
             det_no = int(hdu.header['ID'])
@@ -142,7 +184,7 @@ class Opt01:
 
             img = hdu.data
             profile_columns = profile_column_list[det_no]
-            for profile_column in profile_columns:
+            for i, profile_column in enumerate(profile_columns):
                 pslice_no = pslice_start
                 fslice_no = fslice_start
                 pc1, pc2 = profile_column - 4, profile_column + 5
@@ -150,11 +192,11 @@ class Opt01:
                     print('Opt01._find_slices, '
                           'det_no= ', det_no, 'pslice_no= ', pslice_no, 'fslice_no= ',
                           fslice_no, 'col= ', profile_column)
-                signal = np.mean(img[:, pc1:pc2], axis=1)
+                raw_signal = np.mean(img[:, pc1:pc2], axis=1)
+                signal = np.copy(raw_signal)
                 if smooth is not None:
                     boxcar = Box1DKernel(smooth)
                     signal = np.convolve(signal, boxcar, mode='same')
-                original_signal = np.array(signal)
                 bgd_noise_level = np.std(signal[0:70])
                 row_lo = 0
                 pts = []
@@ -168,16 +210,16 @@ class Opt01:
                     row_bright = row_lo + np.argmax(signal[row_lo:row_lo + slice_hw])
                     y_bright = signal[row_bright]                 # Typical peak signal in slice
                     y_cut = cut * y_bright
-
+                    # Advance to row above cut signal level
                     row_lo += np.argwhere(signal[row_lo:] > cut * y_bright)[0][0]      # Row after 50 % point
-                    ya, yb = signal[row_lo-1], signal[row_lo]
-                    dr = (yb - ya) / y_cut
+                    y_a, y_b = signal[row_lo-1], signal[row_lo]
+                    dr = (y_cut - y_a) / (y_b - y_a)
                     rlo = row_lo + dr - 1                           # Add pixel fraction for cut level.
 
                     row_hi = row_bright + np.argwhere(signal[row_bright:] < y_cut)[0][0]
-                    ya, yb = signal[row_hi - 1], signal[row_hi]
-                    dr = (yb - ya) / y_cut
-                    rhi = row_hi - dr - 1
+                    y_a, y_b = signal[row_hi - 1], signal[row_hi]
+                    dr = (y_cut - y_a) / (y_b - y_a)
+                    rhi = row_hi + dr - 1
                     if Globals.is_debug('high'):
                         print("- {:5.2f}, {:5d}, {:5.2f}, {:5.3f}".format(rlo, row_bright, rhi, y_cut))
                     slice_coords['det_nos'].append(det_no)
@@ -203,7 +245,9 @@ class Opt01:
                         if pslice_no > pslice_end:
                             more_rows = False
                 label = "col={}".format(profile_column)
-                profiles.append((label, det_no, profile_column, original_signal, pts))
+                colour = profile_colours[i]
+                profile = label, colour, det_no, profile_column, raw_signal, pts
+                profiles.append(profile)
 
         # Convert lists to numpy arrays
         for key in slice_coords:

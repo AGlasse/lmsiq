@@ -91,8 +91,8 @@ class Filer:
 
     @staticmethod
     def read_mosaic_list(folder, *args):
-        """ Read a LMS data files into a list of mosaic objects.  For ScopeSim data, the HDU.header['ID'] holds the detector
-        number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.
+        """ Read a LMS data files into a list of mosaic objects.  For ScopeSim data, the HDU.header['ID'] holds the
+        detector number, ordered det 2 (TR), 1 (TL), 3 (BL), 4 (BR) for extensions 1, 2, 3, 4.
         Here, T=Top (slices 15 to 28), B = Bottom (slices 1 to 14),
         L = Left (short wavelength), R = Right (long wavelength).
         We write these into the mosaic tuple as a list, with indices = 0 (TL), 1 (TR), 2 (BL), 3 (BR).

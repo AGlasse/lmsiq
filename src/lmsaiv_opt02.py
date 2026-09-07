@@ -16,7 +16,6 @@ from scipy.optimize import curve_fit, OptimizeWarning
 import lmsdist
 from lmsdist_util import Util
 from lms_globals import Globals
-from lms_mosaic import Mosaic
 from lmsaiv_opt_tools import OptTools
 from lmsaiv_plot import Plot
 from lms_filer import Filer
@@ -37,12 +36,10 @@ class Opt02:
         opticon = Globals.nominal
 
         misalign_detector = False
-        find_iso_alphas = True
+        find_iso_alphas = False
         find_iso_lambdas = True
         calculate_transforms = True
         test_transforms = True
-
-        snr_cut_alpha = 1.0     # Cut level to detect multiple (at least 3) iso-alpha traces from a single PSF
 
         inc_tags = [test_name, opticon[0:3]]         # Tokens to identify image files.
         filer = Filer()
@@ -100,8 +97,8 @@ class Opt02:
                                                                angle=test_img_rot_deg)
             if Globals.is_debug('medium'):
                 Plot.mosaic(bgd_mosaic, title='WCU lm_pinhole mask background', cmap='hot')
+
             sig_file_list = Filer.get_file_list(Filer.test_data_folder, inc_tags=inc_tags + ['iso_alpha'])
-            # sig_mosaics = Filer.read_mosaic_list(inc_tags + ['iso_alpha'])
             for sig_file in sig_file_list:
                 print()
                 sig_mosaic = Filer.read_mosaic(Filer.test_data_folder, sig_file)
@@ -180,14 +177,11 @@ class Opt02:
             print('2. Extract iso-lambda traces to measure the intra-detector gap and the line spread function.')
             print('   The gap calculation will assume that the laser lines are spaced according to a smooth polynomial.')
 
-            raw_mosaics = Filer.read_mosaic_list(inc_tags + ['iso_lambda'])
-            # Plot.mosaic(raw_mosaics[0])
+            raw_mosaics = Filer.read_mosaic_list(Filer.test_data_folder, inc_tags + ['iso_lambda'])
             mosaics = OptTools.median_subtract(raw_mosaics)
-            # Plot.mosaic(mosaics[0])
 
             print(0)
             lambda_traces = []
-
             for mosaic in mosaics:
                 print()
                 print("Processing mosaic file {:s}".format(mosaic.name))
@@ -236,7 +230,7 @@ class Opt02:
                                            x_mfp_org_offsets=[0.]*4, y_mfp_org_offsets=[0.]*4,
                                            x_scale_offsets=[0.]*4, y_scale_offsets=[0.]*4)
 
-        # Find all LMS configurations
+        # Find all unique LMS configurations and plot the traces
         lms_config_ids = []
         for alpha_trace in alpha_traces:
             id = alpha_trace['lms_config_id']
@@ -247,7 +241,6 @@ class Opt02:
 
         dist_coord = Opt02._find_trace_intersections(alpha_traces, lambda_traces, affines)
         _ = Opt02._print_dist_coord(filer, dist_coord, to_csv=False)
-
         path = Opt02._print_dist_coord(filer, dist_coord, to_csv=True)
         print("Coordinates written to file {:s}".format(path))
         print()
@@ -682,7 +675,7 @@ class Opt02:
                     continue
                 slice_no_alpha = alpha_trace['slice_no']
                 a_config_id = alpha_trace['lms_config_id']
-                print(a_config_id)
+                # print(a_config_id)
                 for lambda_trace in lambda_traces:
                     if np.array(lambda_trace['det_no']) != det_no:
                         continue
@@ -690,8 +683,8 @@ class Opt02:
                     if slice_no_alpha != slice_no_lambda:
                         continue
                     l_config_id = lambda_trace['lms_config_id']
-                    print(l_config_id)
-                    print()
+                    # print(l_config_id)
+                    # print()
                     if a_config_id == l_config_id:
                         if a_config_id in dist_coord:           # Add points to existing LMS configuration.
                             points = dist_coord[a_config_id]
