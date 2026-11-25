@@ -69,10 +69,11 @@ data_identifier = {'optical_path': opticon,
                    'slice_radius': slice_radius,
                    'data_label': data_label
                    }
-fmt = "Analysing dataset for {:s} optical path, dated {:s}"
+_ = Globals()
+
+fmt = "Analysing dataset 'data/iq/{:s}/{:s}"
 print(fmt.format(opticon, iq_date_stamp))
 
-_ = Globals()
 base_debug_level = 'off'
 Globals.set_debug_level(base_debug_level)
 
@@ -85,7 +86,7 @@ fitsio = FitsIo(opticon)
 
 # model_configuration = analysis_type, opticon, iq_date_stamp, None, None, None
 iq_filer = Filer()
-iq_filer.set_configuration('iq', opticon)
+iq_filer.set_configuration('iq', opticon, is_ait_data=False)
 
 image_manager = ImageManager()
 image_manager.make_dictionary(data_identifier, iq_filer)
@@ -94,7 +95,7 @@ summariser = Summariser()
 ipc = Ipc()
 
 run_test = False  # Generate test case with 50 % IPC and an image with one bright pixel.
-print("\nRunning test case = {:s}".format(str(run_test)))
+print("Running test case = {:s}".format(str(run_test)))
 if run_test:
     test = Test()
     test.run(iq_filer)
@@ -113,7 +114,7 @@ process_control = mc_bounds, inter_pixels
 process_phase_data = False
 if process_phase_data:
     # Calculate the impact of sub-pixel shifts on photometry and line centroiding.
-    print("\nProcessing centroid shift impact for dataset {:s}".format(iq_date_stamp))
+    print("Processing centroid shift impact for dataset {:s}".format(iq_date_stamp))
     phase = Phase()                                 # Module for phase (wavelength) shift analysis
     phase.process(data_identifier, process_control, iq_filer, image_manager,
                   config_nos=[0], field_nos=[2], plot_level=2)
@@ -121,12 +122,12 @@ if process_phase_data:
 build_cubes = True
 if build_cubes:
     print()
-    print('\nReconstructing cubes and analysing slice profile data')
+    print('Reconstructing cubes and analysing slice profile data')
     print('-----------------------------------------------------')
     cuber = Cuber()
     # dist_model_configuration = 'distortion', opticon, dist_date_stamp, None, None, None
     dist_filer = Filer()
-    dist_filer.set_configuration('distortion', opticon)
+    dist_filer.set_configuration('distortion', opticon, is_ait_data=False)
     cuber.build(data_identifier, process_control, image_manager, iq_filer, dist_filer,
                 debug=False, plot_to_png=False)
 

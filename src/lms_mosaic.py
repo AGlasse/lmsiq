@@ -40,3 +40,9 @@ class Mosaic:
         for self_hdu, hdu in zip(self.hdu_list, mos.hdu_list):
             self_hdu.data = self_hdu.data + hdu.data
         return self
+
+    def scale(self, factor):
+        for self_hdu in self.hdu_list:
+            self_hdu.data = factor * self_hdu.data
+        return self
+

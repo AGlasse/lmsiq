@@ -56,8 +56,8 @@ class Analyse:
             if dw < dw_min:
                 trace_dw_min = trace
                 dw_min = dw
-        waves = trace_dw_min.get_series('wavelength', ds_dict)
-        mfp_x = trace_dw_min.get_series('mfp_x', ds_dict)
+        waves = trace_dw_min.get_series('wavelength', {})
+        mfp_x = trace_dw_min.get_series('mfp_x', {})
         dw_dx = (waves[1:] - waves[:-1]) / (mfp_x[1:] - mfp_x[:-1])
         ws = waves[1:]
         sort_indices = np.argsort(ws)

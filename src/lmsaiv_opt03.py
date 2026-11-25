@@ -9,6 +9,7 @@ Update:
 import math
 
 import numpy as np
+from lms_globals import Globals
 from lmsaiv_opt_tools import OptTools
 from lmsaiv_plot import Plot
 from lms_filer import Filer
@@ -20,14 +21,17 @@ class Opt03:
         return
 
     @staticmethod
-    def psf(test_name, title, as_built, **kwargs):
+    def psf(test_name, as_built, **kwargs):
         """ Analysis of laser + single pinhole data to characterise the mochromatic point source.
         """
+        print('!! Analysis not yet available !!')
+        return as_built
+
         inc_tags = [test_name, 'nom_dark']
-        darks = Filer.read_mosaic_list(inc_tags)
+        darks = Filer.read_mosaic_list(Filer.test_data_folder, inc_tags)
         do_plot = kwargs.get('do_plot', True)
-        if do_plot:
-            Plot.mosaic(darks[0], title=title)
+        if Globals.is_debug('low'):
+            Plot.mosaic(darks[0], title=darks[0].name)
             Plot.histograms(darks[0])
         OptTools.dark_stats(darks)
 

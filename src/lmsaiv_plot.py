@@ -251,17 +251,23 @@ class Plot:
         return
 
     @staticmethod
-    def histograms(mosaic):
-        n_bins = 200
-        fig, axs = plt.subplots(2, 2, sharex=True, sharey=True, tight_layout=True)
+    def histograms(mosaic, n_bins=200, range=None, make_labels=True):
+
+        fig_size = [8, 8]
+        fig, axs = plt.subplots(2, 2, figsize=fig_size,
+                                sharex=True, sharey=True, tight_layout=True)
         fig.suptitle(mosaic.name)
+        hist_pars = {}
 
         for i, hdu in enumerate(mosaic.hdu_list):
+            det_no = i + 1
             ax_row, ax_col = int(i / 2), i % 2
             vals = hdu.data.flatten()
-            axs[ax_row, ax_col].hist(vals, bins=n_bins)
+            n_vals = np.count_nonzero(np.isnan(vals))
+            bin_pts, _, _ = axs[ax_row, ax_col].hist(vals, bins=n_bins, range=range)
+            n_pts = np.sum(np.array(bin_pts))
         plt.show()
-        return
+        return n_bins, n_pts
 
     @staticmethod
     def slice_gaps(gap_list):

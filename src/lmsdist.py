@@ -32,8 +32,7 @@ def run(*args):
     """ SET MODEL CONFIGURATION HERE """
     is_ait_data = False
 
-    opticon = Globals.nominal                   # 'nominal' or 'extended'
-    use_nominal_wpa_fit = True                  # Use the nominal fit for prism angle = f(wavelength)
+    opticon = Globals.extended                   # 'nominal' or 'extended'
 
     filer = Filer()
     filer.set_configuration(analysis_type, opticon, is_ait_data)
@@ -123,11 +122,14 @@ def run(*args):
         traces = Filer.read_pickle(filer.trace_file)
         model_config = filer.model_configuration
         if Globals.is_debug('low'):
+            plot_limits = {Globals.nominal: ([2.4, 5.6], [5., 8.2]),
+                           Globals.extended: ([4.2, 5.0], [6.4, 7.6])}
+            x_limits, y_limits = plot_limits[opticon]
             plot.series('coverage', traces, model_config,
-                        xlimits=[4.5, 5.0], ylimits=[6.25, 7.75], labels=True)
+                        xlimits=x_limits, ylimits=y_limits, labels=False, plot_perimeters=False)
             plot.series('coverage', traces, model_config)
             plot.series('dispersion', traces, model_config)
-            plot.series('coverage', traces[0:1], model_config, colour_by='slice_wavelength', )
+            plot.series('coverage', traces[0:1], model_config, colour_by='slice')
 
     fit_transforms = True
     if fit_transforms and not is_ait_data:
@@ -205,7 +207,6 @@ def run(*args):
             ext_plot_pas = polyfit.poly_model(plot_waves, *ext_coeffs)
             ext_coeffs_corr = nom_coeffs
             ext_coeffs_corr[0] += nom_ext_pa_corr
-            ext_plot_pas_corr = ext_coeffs[0]
             ext_ea0_pas_corr = polyfit.poly_model(plot_waves, *ext_coeffs_corr)
             fig, ax_list = Plot.set_plot_area(xlabel="wave / um.", ylabel="PA / deg.")  # , aspect='equal')
             fig.suptitle('PA v wavelength.')
@@ -231,9 +232,6 @@ def run(*args):
     if evaluate_transforms and not is_ait_data:
         traces = Filer.read_pickle(filer.trace_file)            # Use the ray trace data
         _, opticon, date_stamp, _, _, _ = filer.model_configuration
-        # affines = filer.read_fits_affine_transform(date_stamp)
-        # spifu_no = 0
-        # inc_tags = ["efp_mfp_{:s}".format(opticon[0:3])]
         wpa_fit, wxo_fit, svd_fit = filer.read_fit_parameters(opticon)
         fmt = None
         if Globals.is_debug('medium'):
@@ -317,7 +315,7 @@ def run(*args):
                     Plot.plot_mfp_points(mfp_plot_points, mfp_decorations, title=title, ref_xy=True, grid=True)
                     debug_once = False
 
-    test_transform_fit = True
+    test_transform_fit = False
     print('testing transform fit polynomials = {:s}'.format(str(test_transform_fit)))
     if test_transform_fit and not is_ait_data:
         test_waves = np.linspace(2.7, 5.4, 28, endpoint=True)

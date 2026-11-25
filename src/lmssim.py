@@ -15,7 +15,6 @@ def run():
     - using LMS PSFs, currently including the (significant) optical design aberrations, which will be updated using
       real wavefront error maps.
     - implementing calibration sources (WCU and sea-level sky) available during AIT in Leiden.
-    Start by defining the observation.
     """
     _ = Globals()
     scope = Scope()
@@ -26,7 +25,7 @@ def run():
     if redownload_metis:
         sim.download_packages(["METIS", "ELT", "Armazones"], release="latest")
     # ============================== Set simulator parameters here ====================================
-    test_name = 'lms_opt_01'        # Name of test to simulate, e.g 'lms_opt_01'
+    test_name = 'lms_opt_02'        # Name of test to simulate, e.g 'lms_opt_01'
     use_scope_sim = False
 
     base_debug_level = 'medium'

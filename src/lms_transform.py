@@ -4,25 +4,23 @@ from astropy.io import fits
 from astropy.io.fits import Card
 import numpy as np
 from lms_globals import Globals
-# from lmsdist import affines
 
 
 class Transform:
 
     kw_comments = {'opticon': 'LMS wavelength coverage (nominal or extended)',
                    'slice_no': 'LMS unique slice number',
+                   'w_min': 'Shortest slice wavelength',
+                   'w_max': 'Longest slice wavelength',
                    'pri_ang': 'Prism rotation angle / deg.',
                    'ech_ang': 'Echelle rotation angle / deg.',
                    'ech_ord': 'Echelle diffraction order',
-                   'w_min': 'Minimum slice wavelength (micron)',
-                   'w_max': 'Maximum slice wavelength (micron)',
                    'n_mats': 'No of matrices (A, B, AI, BI)',
                    'mat_ord': 'Order of transform (4)'
                    }
     affines = None               # Affine transforms common to all transforms
 
     def __init__(self, **kwargs):
-        self.wavelength_bounds = 0., 0.
         self.matrices = {'a': None, 'b': None, 'ai': None, 'bi': None}
         self.lms_configuration = kwargs.get('lms_config', Globals.lms_config_template.copy())
         self.slice_configuration = kwargs.get('slice_config', Globals.slice_config_template.copy())
@@ -109,10 +107,9 @@ class Transform:
         lms_config['mat_ord'] = 4
         cards = []
         for key in lms_config:
-            if key in ['slice_no', 'spifu_no', 'ech_ord']:          # Exclude slice numbers from SVD fits primary
-                continue
             card = Card(key.upper(), lms_config[key], Transform.kw_comments[key])
             cards.append(card)
+        cards.append(Card('w'))
         trace_hdr = fits.Header(cards)
         primary_hdu = fits.PrimaryHDU(header=trace_hdr)
         return primary_hdu

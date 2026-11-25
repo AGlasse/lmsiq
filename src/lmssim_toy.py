@@ -49,19 +49,7 @@ class Toy:
         model = Model()
         print(model)
 
-        if Globals.is_debug('low'):        # Test mapping from EFP_Y to slice number, phase
-            print('Test of Util.slice_to_efp_y and Util.efp_y_to_slice')
-            slice_test_list = {'nom_min': (1, 0.), 'nom_bs': (14, 1.), 'nom_max': (28, 1.),
-                               'ext_min': (12, 0.), 'ext_bs': (13, 0.5), 'ext_max': (14, 1.),
-                               }
-            fmt = "{:>20s},{:>10s},{:>10s},{:>10s},{:>10s},{:>10s},"
-            print(fmt.format('Location', 'slice_no_in', 'phase_in', 'EFP_Y', 'slice_no_out', 'phase_out'))
-            fmt = "{:>20s},{:10d},{:10.2f},{:>10.3f},{:10d},{:10.2f},"
-            for key in slice_test_list:
-                slice_no1_test, phase1_test = slice_test_list[key]
-                efp_y_test = Util.slice_to_efp_y(slice_no1_test, phase1_test)
-                slice_no2_test, phase2_test = Util.efp_y_to_slice_no(efp_y_test)
-                print(fmt.format(key, slice_no1_test, phase1_test, efp_y_test, slice_no2_test, phase2_test))
+        efp_y_ext_bs = Util.slice_to_efp_y(13, 0.5)
 
         # =================================================================================================
         t_start = time.perf_counter()
@@ -86,7 +74,7 @@ class Toy:
                 svd_dict_path = fmt.format(opticon, opticon[0:3], ait_tag)
                 svd_transform_dict = filer.read_pickle(svd_dict_path)
                 w_ech_off = float(sim_config['lms_ech_w_off'])
-                if Globals.is_debug('low'):         # Print out configuration codes
+                if Globals.is_debug('medium'):         # Print out all configuration codes
                     fmt = "{:>10s},{:>14s},{:>14s},{:>14s},{:>24s},"
                     print(fmt.format('Code', 'Ref.Order', 'Ech.Ang', 'Pri.Ang', 'Ref. Wavelength'))
                     fmt = "{:>10s},{:14d},{:14.3f},{:14.3f},{:24.3f},"
@@ -145,7 +133,8 @@ class Toy:
             primary_header['HIERARCH ACHG REF_ECH_ORD'] = ref_ech_ord
 
             # Build mosaic of detector images
-            det_shape = hdu_list[1].data.shape
+            det_shape = Globals.det_format
+            # det_shape = hdu_list[1].data.shape
             _, n_det_cols = det_shape
             image_mosaic, waves_mosaic, tau_ech_mosaic = [], [], []
             for det_no in range(1, 5):
@@ -180,10 +169,6 @@ class Toy:
             dit = float(sim_config['lms_dit'])          # 1.3  # Integration time in seconds.
             n_dit = int(sim_config['lms_ndit'])         # No. of integrations
 
-            # Find EFP bounds
-            efp_xmax = Globals.efp_x_fov_mm
-            xh = efp_xmax / 2.
-
             # Load selected extended background spectrum (units ph/s/m2/as2/um) for wavelength range
             # which overfills mosaic.  This may be the mask structure,
             # f_units_ext_in = 'phot/s/m2/um/arcsec2',
@@ -202,21 +187,19 @@ class Toy:
                                        'pri_ang', 'ech_ang', 'ech_ord',
                                        'w_blaze', 'w_range', 'det_rows', 'f_bgd_max', 'f_psf_max')
                 print(title_txt)
+            affines = filer.read_fits_affine_transform(date_stamp)
             pnh_image = None        # May be no pinholes
 
-            # Loop through each slice/transform.
+            # Loop through each slice/echelle order specified by the transform.
             for opt_transform in opt_transforms:
                 slice_cfg = opt_transform.slice_configuration
                 lms_cfg = opt_transform.lms_configuration
-                # if is_dark:
-                #     continue
 
-                ech_ord = slice_cfg['ech_ord']
                 slice_no = slice_cfg['slice_no']
                 fslice_no, pslice_no = Util.decode_slice_no(slice_no)
-                # spifu_no = slice_cfg['spifu_no']
                 ech_ang = lms_cfg['ech_ang']
                 pri_ang = lms_cfg['pri_ang']
+                ech_ord = slice_cfg['ech_ord']
 
                 # Load PSF dictionary.  The central PSF (calculated for a source centred on a slice) is used
                 # for extended source (slice filling) convolution.  The PSFs for slices offset from the centre
@@ -230,81 +213,52 @@ class Toy:
                 if beta_phase is not None:
                     beta_weight = Model.fit_beta_weights(psf_dict, beta_phase)
 
-                waves, f_ext, f_pnh = spectra[ech_ord]
-                affines = filer.read_fits_affine_transform(date_stamp)
+                wf_sed = spectra[ech_ord]
+                w_sed, f_ext_sed, f_pnh_sed = wf_sed
 
-                n_det_rows_slice = 250  # Approx no. of rows per slice, with comfortable margin...
-
-                w_blaze, tau_blaze = Model.make_tau_blaze(blaze, ech_ord, ech_ang)  # Make echelle blaze profile for this order.
+                wt_blaze = Model.make_tau_blaze(blaze, ech_ord, ech_ang)  # Make echelle blaze profile for this order.
+                w_blaze, tau_blaze = wt_blaze
                 idx_max = np.argmax(tau_blaze)
                 w_blaze_max = w_blaze[idx_max]
 
-                w_min, w_max = slice_cfg['w_min']*u.micron, slice_cfg['w_max']*u.micron
+                # The transform is defined for the reference order.
+                w_min = slice_cfg['w_min']*u.micron
+                w_max = slice_cfg['w_max']*u.micron
                 yc = Util.slice_to_efp_y(fslice_no, 0.5)  # Slice y (beta) coordinate in EFP
 
                 efp_ys = np.array([yc.value]*2)*yc.unit
                 efp_xs = np.array([0.]*2)*yc.unit                  # Slice x (alpha) bounds in EFP, map to dfp_y
-                efp_w = (np.array([w_min.value, w_max.value]) + w_ech_off)*u.micron
+                efp_w = np.array([w_min.value, w_max.value]) *u.micron
                 efp_slice = {'efp_y': efp_ys, 'efp_x': efp_xs, 'efp_w': efp_w}    # Centre of slice for detector
                 mfp_slice, oob = Util.efp_to_mfp(opt_transform, efp_slice)
                 dfp_slice = Util.mfp_to_dfp(affines, mfp_slice)
-                det_row_min = int(dfp_slice['dfp_y'][0] - 100)      # Bracket slices which typically cover 120 rows.
+                n_det_rows_slice = 140  # Approx no. of rows per slice, with comfortable margin...
+                det_row_min = int(dfp_slice['dfp_y'][0] - int(n_det_rows_slice / 2))      # Bracket slices which typically cover 120 rows.
                 det_row_max = det_row_min + n_det_rows_slice
-                strip_shape = n_det_rows_slice, n_det_cols
                 psf_max = 0.0
 
                 for det_no in dfp_slice['det_nos']:
                     det_idx = det_no - 1
-                    ext_ill = np.zeros(strip_shape)
-                    psf_sig = np.zeros(strip_shape)
 
                     if is_dark:
                         print('Dark frame')
                         continue
-
-                    dfp_det_nos = np.full(n_det_cols, det_no)
-                    dfp_pix_xs = np.arange(n_det_cols)              # Detector column indices
-
-                    # ########################################################################################
-                    #  EXTENDED BACKGROUND
-                    n_rows_written = 0
-                    w_illuminated = []
-                    for det_row in range(det_row_min, det_row_max + 1):
-                        strip_row = det_row - det_row_min
-                        dfp_pix_ys = np.full(n_det_cols, det_row)
-                        dfp_row = {'dfp_x': dfp_pix_xs, 'dfp_y': dfp_pix_ys, 'det_nos': dfp_det_nos}
-                        efp_row = Util.dfp_to_efp(opt_transform, affines, dfp_row)
-                        efp_xs = efp_row['efp_x']
-                        idx_illum = np.argwhere(np.abs(efp_xs) < xh.value)
-                        n_ib = len(idx_illum)
-                        if n_ib == 0:                       # Skip unilluminated rows.
-                            continue
-                        # Apply extended spectrum (sky or black body) to illuminated rows.  Add a wavelength
-                        # offset to simulate echelle rotation.
-                        efp_ws = efp_row['efp_w']*u.micron + w_ech_off*u.micron
-                        w_obs = efp_ws[idx_illum][:]
-                        tau_echelle = np.interp(w_obs, w_blaze, tau_blaze)
-                        tau_ech_mosaic[det_idx][det_row, idx_illum] = tau_echelle
-                        f_ext_obs = np.interp(w_obs, waves, f_ext)
-                        ext_ill[strip_row, idx_illum] = f_ext_obs * tau_echelle
-                        waves_mosaic[det_idx][det_row, idx_illum] = w_obs
-                        w_illuminated = w_illuminated + list(w_obs[:])
-                        n_rows_written += 1
-                    # Now convolve background flux map with bright slice psf. (ideally use filled slice psf)
-                    # To start with, we just use PSFs for the boresight slice (slice no. 13)
+                    #------------------ EXTENDED BACKGROUND -------------------------
+                    ext_ill, efp_ws = Toy._get_extended_illumination(det_no, det_row_min, n_det_rows_slice,
+                                                             opt_transform, affines,
+                                                             wf_sed,
+                                                             wt_blaze, w_ech_off)
                     image = image_mosaic[det_idx]
                     image[det_row_min:det_row_max, :] += scipy.signal.convolve2d(ext_ill, psf_ext,
                                                                                  mode='same', boundary='symm')
-
                     # No pinholes selected, so go to the next detector for this slice.
                     is_no_pinholes = fp_mask['id'] in ['open', 'closed'] or lms_pp1 == 'closed'
                     if is_no_pinholes:
                         continue
 
-                    sno_radius = list(psf_dict.keys())[-1]
-                    # ##########################################################################################
-                    #  PINHOLES !!
+                    # ------------------ PINHOLES -------------------------
                     # Add pinhole illumination to the blank images matched to the PSFs for 'off-centre' slices.
+                    sno_radius = list(psf_dict.keys())[-1]
                     psf_illum = {}
                     for slice_no_offset in psf_dict:
                         psf_illum[slice_no_offset] = np.zeros(Globals.det_format)
@@ -317,34 +271,32 @@ class Toy:
                         if not in_range:
                             continue
                         _, psf_pnh = psf_dict[fslice_no_offset]
-                        efp_xy_list = fp_mask['efp_xy_pnh_cen']
+                        efp_xy_list = fp_mask['efp_xy_pnh_cen']     # Load the pinhole locations in the EFP
                         psf_ill_image = psf_illum[fslice_no_offset]
-                        r1, r2 = 3000, 0        # Min max rows to convolve
+                        r1, r2 = 3000, 0        # Initialise min/max rows for convolution
                         for efp_xy in efp_xy_list:
-                            # Build pinhole point source spectrum in the EFP data cube
+                            # Build pinhole point source spectrum in the EFP cube space
                             efp_x = efp_xy[0]
-                            efp_y = Util.slice_to_efp_y(fslice_no, beta_phase)
+                            efp_y = efp_xy[1]       # Util.slice_to_efp_y(fslice_no, beta_phase)
+
                             n_vals, = efp_ws.shape
                             efp_ys = np.full(n_vals, efp_y)
                             efp_xs = np.full(n_vals, efp_x)
 
                             efp_pnh = {'efp_x': efp_xs, 'efp_y': efp_ys, 'efp_w': efp_ws}
-                            f_ps = np.interp(efp_ws, waves, f_pnh)      # Point source flux
+                            f_ps = np.interp(efp_ws, w_sed, f_pnh_sed)      # Point source flux
 
                             dfp_pnh = Util.efp_to_dfp(opt_transform, affines, efp_pnh)
-
-                            # Populate the psf_illum image column by column, with
-                            dfp_x_pnh = dfp_pnh['dfp_x']
-                            dfp_y_pnh = dfp_pnh['dfp_y']
-                            row_min, row_max = int(np.amin(dfp_y_pnh)), int(np.amax(dfp_y_pnh))
+                            dfp_pnh_x = dfp_pnh['dfp_x']
+                            dfp_pnh_y = dfp_pnh['dfp_y']
+                            row_min, row_max = int(np.amin(dfp_pnh_y)), int(np.amax(dfp_pnh_y))
                             r1 = r1 if r1 < row_min else row_min
                             r2 = r2 if r2 > row_max else row_max
-                            dfp_ys = dfp_pnh['dfp_y']
-                            dfp_cols = np.floor(dfp_x_pnh).astype(int)
-                            dfp_rows = np.floor(dfp_y_pnh).astype(int)
-                            phase = dfp_ys - dfp_rows
-                            wt_rows = 1. - np.fabs(phase - 0.5)     # Fraction of flux in row
-                            is_above = phase > 0.5
+                            dfp_cols = np.floor(dfp_pnh_x).astype(int)
+                            dfp_rows = np.floor(dfp_pnh_y).astype(int)
+                            row_phase = dfp_pnh_y - dfp_rows
+                            wt_rows = 1. - 2.* np.fabs(row_phase - 0.5)     # Fraction of flux in row (=1 for phase=0.5, =0 for phase=0.,1.
+                            is_above = row_phase > 0.5
                             f = f_ps.value * beta_weight[fslice_no_offset]
                             for i in range(0, dfp_cols.shape[0]):
                                 dfp_col = dfp_cols[i]
@@ -358,7 +310,7 @@ class Toy:
 
                         r1, r2 = r1 - 5, r2 + 5
                         image[r1:r2, :] += scipy.signal.convolve2d(psf_ill_image[r1:r2, :], psf_pnh,
-                                                                       mode = 'same', boundary = 'symm')
+                                                                   mode = 'same', boundary = 'symm')
                         psf_max_slice = np.amax(psf_ill_image[r1:r2, :])
                         psf_max = psf_max if psf_max > psf_max_slice else psf_max_slice
 
@@ -373,7 +325,6 @@ class Toy:
                     print(txt)
 
             n_exp = int(sim_config['lms_nexp'])
-            n_exp = 1
             for obs_idx in range(0, n_exp):
 
                 # Add dark current and read noise to illumination image (Finger, Rauscher)
@@ -415,3 +366,43 @@ class Toy:
                     mosaic = file_name + '_waves', primary_header, hdu_list
                     filer.write_mosaic(out_folder, mosaic)
         return
+
+    @staticmethod
+    def _get_extended_illumination(det_no, det_row_min, n_det_rows_slice,
+                                   opt_transform, affines,
+                                   wf_sed,
+                                   wt_blaze, w_ech_off):
+        # ########################################################################################
+        # Generate the extended background illuminated slice image
+        w_sed, f_ext_sed, f_pnh_sed = wf_sed
+
+
+        xh = Globals.efp_x_fov_mm / 2.          # Get EFP bounds
+
+        n_rows_written = 0
+        _, n_det_cols = Globals.det_format
+        dfp_det_nos = np.full(n_det_cols, det_no)
+        dfp_pix_xs = np.arange(n_det_cols)  # Detector column indices
+        strip_shape = n_det_rows_slice, n_det_cols
+        det_row_max = det_row_min + n_det_rows_slice
+        ext_ill = np.zeros(strip_shape)
+        for det_row in range(det_row_min, det_row_max + 1):
+            strip_row = det_row - det_row_min
+            dfp_pix_ys = np.full(n_det_cols, det_row)
+            dfp_row = {'dfp_x': dfp_pix_xs, 'dfp_y': dfp_pix_ys, 'det_nos': dfp_det_nos}
+            efp_row = Util.dfp_to_efp(opt_transform, affines, dfp_row)
+            efp_xs = efp_row['efp_x']
+            idx_illum = np.argwhere(np.abs(efp_xs) < xh.value)
+            n_ib = len(idx_illum)
+            if n_ib == 0:                       # Skip unilluminated rows.
+                continue
+            # Apply extended spectrum (sky or black body) to illuminated rows.  Add a wavelength
+            # offset to simulate echelle rotation.
+            efp_ws = efp_row['efp_w']*u.micron + w_ech_off*u.micron
+            w_obs = efp_ws[idx_illum][:]
+            w_blaze, tau_blaze = wt_blaze
+            tau_echelle = np.interp(w_obs, w_blaze, tau_blaze)
+            f_ext_obs = np.interp(w_obs, w_sed, f_ext_sed)
+            ext_ill[strip_row, idx_illum] = f_ext_obs * tau_echelle
+            n_rows_written += 1
+        return ext_ill, efp_ws

@@ -70,7 +70,7 @@ class Globals:
                             'iq': {nominal: iq_nom_config, extended: iq_ext_config}
                             }
     lms_config_template = {'opticon': None, 'pri_ang': None, 'ech_ang': None}
-    slice_config_template = {'slice_no': None, 'ech_ord': None, 'w_min': None, 'w_max': None}   # , 'pslice_no': None
+    slice_config_template = {'slice_no': None, 'ech_ord': None, 'w_min': None, 'w_max': None}
 
     # Transform parameters
     svd_order = 4

@@ -386,7 +386,7 @@ class Plot:
         return colours
 
     @staticmethod
-    def series(plot_type, traces, model_config,
+    def series(plot_type, traces, model_config, plot_perimeters=True,
                colour_by='config', xlimits=None, ylimits=None, labels=False):
         _, opticon, _, _, _, _ = model_config
         titles = {'coverage': ('Wavelength coverage', r'$\theta_{prism}$ + 0.1 $\theta_{echelle}$ + det(y) / metre'),
@@ -450,32 +450,32 @@ class Plot:
                         ax.plot(x[i], y[i], color=rgb[i, :], clip_on=True,
                                 fillstyle='none', marker='.', mew=1., ms=1, ls='None')
                 else:
-                    ax.plot(x, y, color=colour, clip_on=True,          # colour
+                    ax.plot(x, y, color=colour, clip_on=True,
                             fillstyle='none', marker='.', mew=1., ms=1, ls='None')
 
                 # Plot perimeter of dot pattern
-                unique_waves = np.unique(waves)
-                n_waves = len(unique_waves)
-                if xperi is None:
-                    n_peri = 2 * n_waves + 1  # Number of points on perimeter, including return to first
-                    xperi, yperi = np.zeros(n_peri), np.zeros(n_peri)
-                is_slice_lower = slice_no == trace.unique_slice_nos[0]
-                if is_slice_lower:
-                    for i, w in enumerate(unique_waves):
-                        idx = np.argwhere(w == x)
-                        ys = y[idx]
-                        ymin = np.min(ys)
-                        xperi[i], yperi[i] = w, ymin
-                is_slice_upper = slice_no == trace.unique_slice_nos[-1]
-                if is_slice_upper:
-                    for i, w in enumerate(unique_waves):
-                        idx = np.argwhere(w == x)
-                        ys = y[idx]
-                        ymax = np.max(ys)
-                        xperi[n_peri-i-2], yperi[n_peri-i-2] = w, ymax
-                xperi[n_peri-1], yperi[n_peri-1] = xperi[0], yperi[0]
-            # plt.fill(xperi, yperi, color='pink')
-            ax.plot(xperi, yperi, color='black', linestyle='solid', lw=1.0)
+                if plot_perimeters:
+                    unique_waves = np.unique(waves)
+                    n_waves = len(unique_waves)
+                    if xperi is None:
+                        n_peri = 2 * n_waves + 1  # Number of points on perimeter, including return to first
+                        xperi, yperi = np.zeros(n_peri), np.zeros(n_peri)
+                    is_slice_lower = slice_no == trace.unique_slice_nos[0]
+                    if is_slice_lower:
+                        for i, w in enumerate(unique_waves):
+                            idx = np.argwhere(w == x)
+                            ys = y[idx]
+                            ymin = np.min(ys)
+                            xperi[i], yperi[i] = w, ymin
+                    is_slice_upper = slice_no == trace.unique_slice_nos[-1]
+                    if is_slice_upper:
+                        for i, w in enumerate(unique_waves):
+                            idx = np.argwhere(w == x)
+                            ys = y[idx]
+                            ymax = np.max(ys)
+                            xperi[n_peri-i-2], yperi[n_peri-i-2] = w, ymax
+                    xperi[n_peri-1], yperi[n_peri-1] = xperi[0], yperi[0]
+                    ax.plot(xperi, yperi, color='black', linestyle='solid', lw=1.0)
 
             if labels:
                 all_waves = trace.series['wavelength']

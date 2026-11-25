@@ -1,9 +1,12 @@
 from lms_globals import Globals
 from lms_filer import Filer
+from lmsaiv_rad01 import Rad01
+from lmsaiv_rad04 import Rad04
 from lmsaiv_opt01 import Opt01
 from lmsaiv_opt02 import Opt02
 from lmsaiv_opt03 import Opt03
 from lmsaiv_opt04 import Opt04
+from lmsaiv_opt09 import Opt09
 
 
 class OptTests:
@@ -11,13 +14,17 @@ class OptTests:
     optical_test = None
 
     def __init__(self):
-        # Test dictionary, note that the key comprises 'data_source_' + 'analysis' (eg 'lms_opt_01_' + 'fov'.  This
-        # supports the fact that an analysis project (Jupyter notebook) may use data from several tests.
-        optical_test = {'lms_opt_01_fov': (Opt01.fov, 'Field of view and RSRF'),
+        """ Test dictionary, note that the key comprises 'data_source_' + 'analysis_type' (eg 'lms_opt_01_' + 'fov'.
+        This acknowledges the fact that an analysis project (Jupyter notebook) may use data from several tests.
+        """
+        optical_test = {'lms_rad_01_dark': (Rad01.dark, 'Dark current'),
+                        # 'lms_rad_03_inst_bgd': (Rad03.inst_bgd, 'Instrument background')
+                        'lms_rad_04_pix_flat': (Rad04.pix_flat, 'Pixel flat field'),
+                        'lms_opt_01_fov': (Opt01.fov, 'Field of view and RSRF'),
                         'lms_opt_02_dist': (Opt02.dist, 'Distortion transforms and enslitted profiles'),
-                        'lms_opt_03_psf': (Opt03.psf, 'Monochomatic Point and line spread function'),
+                        'lms_opt_03_psf': (Opt03.psf, 'Monochromatic Point and line spread function'),
                         'lms_opt_04_ghost': (Opt04.ghost, 'Deep imaging of any ghosts detected in LMS-OPT-03'),
-                        # 'lms_opt_08': (OptTests.lms_opt_08, 'Out-of-field straylight'),
+                        'lms_opt_09_sky': (Opt09.sky, 'Leiden sky')
                         }
         OptTests.optical_test = optical_test
         return
@@ -30,7 +37,7 @@ class OptTests:
         return text
 
     @staticmethod
-    def run(cap_name, **kwargs):
+    def get_test(cap_name, **kwargs):
         if cap_name not in OptTests.optical_test.keys():
             print()
             print("!!! Analysis project {:s} not found !!!".format(cap_name))
@@ -43,11 +50,5 @@ class OptTests:
             print("- {:s}".format(file))
         print()
 
-        try:            # Import or create new 'as built' object.
-            as_built = Filer.read_pickle(Globals.as_built_file)
-        except FileNotFoundError:
-            as_built = {}
         method, title = OptTests.optical_test[cap_name]
-        as_built = method(title, as_built, **kwargs)
-        Filer.write_pickle(Globals.as_built_file, as_built)
-        return
+        return method, title

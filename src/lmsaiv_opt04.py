@@ -19,7 +19,10 @@ class Opt04:
 
     @staticmethod
     def ghost(title, as_built, **kwargs):
-        test_name = 'lms_opt_03'
+        print('!! Analysis not yet available !!')
+        return as_built
+
+        test_name = 'lms_opt_04'
         opticon = Globals.nominal
 
         ref_step = 'Step1'

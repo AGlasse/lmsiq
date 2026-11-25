@@ -4,17 +4,16 @@
 """
 import math
 import numpy as np
-import synphot.units
 from astropy.io import fits
 from astropy import units as u
-from scipy.optimize import curve_fit, OptimizeWarning
+from scipy.optimize import curve_fit
 
 from lms_obs_map import ObsMap
 from lmsdist_util import Util
 from lms_globals import Globals
 from lms_filer import Filer
 from synphot.models import BlackBody1D
-from synphot import SourceSpectrum, units as s_units
+from synphot import SourceSpectrum
 
 
 class Model:
@@ -265,7 +264,8 @@ class Model:
 
         for transform in transforms:
             slice_cfg = transform.slice_configuration
-            w_slice_min, w_slice_max = slice_cfg['w_min'] * u.micron, slice_cfg['w_max'] * u.micron
+            w_min, w_max = slice_cfg['w_min'], slice_cfg['w_max']
+            w_slice_min, w_slice_max = w_min * u.micron, w_max * u.micron
             ech_ord = slice_cfg['ech_ord']
             if ech_ord not in w_lims.keys():
                 w_lims[ech_ord] = [10.0, 0.0] * u.micron
@@ -377,7 +377,7 @@ class Model:
         # Use the boresight field position (field_no = 1) for now...
         (fn_min, fn_max) = (1, 2) if opticon == Globals.nominal else (1, 4)
         for field_no in range(fn_min, fn_max):
-            field_idx = field_no - 1
+            # field_idx = field_no - 1
             field_str = "_field{:03d}".format(field_no)
             iq_folder = 'lms_' + data_set + config_str + field_str + defoc_str
 
@@ -392,7 +392,7 @@ class Model:
                 iq_slice_str = "_spat{:02d}".format(slice_no) + "_spec{:d}_detdesi".format(spec_no)
                 iq_filename = iq_folder + iq_slice_str + '.fits'
                 iq_path = iq_folder + '/' + iq_filename
-                file_path = filer.psf_folder + iq_path
+                file_path = filer.psf_folder[:-1] + '_sim/' + iq_path
                 hdu_list = filer.read_zemax_fits(file_path)
                 hdr, psf = hdu_list[0].header, hdu_list[0].data
                 if downsample:
@@ -422,17 +422,17 @@ class Model:
             _, psf = psf_dict[slice_offset]
             x_list.append(slice_offset + 0.5)
             y_list.append(np.sum(psf))
+        # Sum of psf for target centred on slice 0 (beta_phase = 0.5)
         xs = np.array(x_list)
         ys = np.array(y_list)
-        p0_guess = [np.amax(ys), 0., 1.]
-        is_error = False
+        p0_guess = [np.amax(ys), 0., 0.5]
         try:
             gopt, gcov = curve_fit(Globals.gauss, xs, ys, p0=p0_guess)
         except:
             is_error = True
         beta_weight = {}
         for slice_offset in psf_dict:
-            x = slice_offset + beta_phase
+            x = slice_offset + 1. - beta_phase           # eg a target at 0.5 -
             beta_weight[slice_offset] = Globals.gauss(x, *gopt) / gopt[0]
         return beta_weight
 

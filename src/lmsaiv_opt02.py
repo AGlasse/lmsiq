@@ -58,8 +58,14 @@ class Opt02:
             flag_text += ' traces'
         print('{:s}'.format(flag_text))
         print()
+        tgt_map = 'slice_map_' + opticon[0:3]
+        slice_map = None
+        for key in as_built:
+            if tgt_map in key:
+                slice_map = as_built[key]
+        if slice_map is None:
+            print('!! Slice map {:s} not found !!'.format(tgt_map))
 
-        slice_map = as_built["slice_map_{:s}".format(opticon)]
         if Globals.is_debug('medium'):
             Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
         slice_row_dict = Opt02._build_slice_row_dict(slice_map)         # Dictionary of per slice row bounds

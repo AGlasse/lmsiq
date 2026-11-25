@@ -61,7 +61,7 @@ class ObsMap:
             is_lw_laser = sim_config['wcu_laser_tune'] == 'true'
             is_laser = is_tunable_laser or is_sw_laser or is_lw_laser
             is_bb_on = sim_config['wcu_bb_ap_mask'] != 'closed'
-            is_sky = sim_config['wcu_per_arm'] != 'out'
+            is_sky = sim_config['wcu_per_arm'] == 'out'
 
             cfg_tag = ''
             if is_dark:

@@ -43,32 +43,6 @@ class OptTools:
         return moscopy
 
     @staticmethod
-    def dark_stats(mosaics):
-        for mosaic in mosaics:
-            dit = mosaic.primary_hdr['HIERARCH ESO DET DIT']
-            ndit = mosaic.primary_hdr['HIERARCH ESO DET NDIT']
-            t_int = dit * ndit
-
-            print()
-            print("File = {:s}".format(mosaic.name))
-            fmt = "Signal distribution statistics, ndit= {:d} x dit= {:3.1f} sec, integration time = {:6.1f}"
-            print(fmt.format(ndit, dit, t_int))
-            fmt = "{:>8s},{:>10s},{:>10s},{:>10s},{:>10s}"
-            print(fmt.format('Detector', 'median', 'stdev', 'median', 'Rd_Noise'))
-            print(fmt.format('No.', 'DN', 'DN', 'el/sec.', 'el.'))
-            fmt = "{:8d},{:10.3f},{:10.3f},{:10.3f},{:10.3f}"
-
-            for i, hdu in enumerate(mosaic.hdu_list):
-                el_adu = float(hdu.header['HIERARCH ESO DET3 CHIP GAIN'])
-                median = np.median(hdu.data)
-                stdev = np.std(hdu.data)
-                median_current = median * el_adu / dit
-                rd_noise = stdev * el_adu / math.sqrt(2. / ndit)
-                text = fmt.format(i + 1, median, stdev, median_current, rd_noise)
-                print(text)
-        return
-
-    @staticmethod
     def transform_detector_image(mosaic, det_no, xy_pix=(0, 0), angle=0.0):
         det_idx = det_no - 1
         cosa = math.cos(math.radians(angle))

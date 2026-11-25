@@ -6,6 +6,7 @@ Decorators for use in all LMS projects.  Currently just includes @debug
 
 Update:
 """
+import math
 import astropy.units as u
 import numpy as np
 from astropy.convolution import Box1DKernel
@@ -25,29 +26,19 @@ class Opt01:
 
     @staticmethod
     def fov(title, as_built, **kwargs):
-        """ Field of view calculation using flood illuminated continuum spectral images.  Populates the slice bounds
-        map in the AsBuilt object
+        """ Field of view calculation using flood illuminated continuum spectral images.
+        Populates the slice bounds map in the AsBuilt object
         """
-        Opt01._analyse_darks()
-        Opt01._find_fov(as_built)
+        as_built = Opt01.calculate_fov(as_built)
         print('Done')
         return as_built
 
     @staticmethod
-    def _analyse_darks():
-        inc_tags = ['lms_opt_01', '_dark']
-        darks = Filer.read_mosaic_list(Filer.test_data_folder, inc_tags)
-        OptTools.dark_stats(darks)
-        if Globals.is_debug('low'):
-            title = 'Dark'
-            Plot.mosaic(darks[0], title=title)
-            Plot.histograms(darks[0])
-        return
-
-    @staticmethod
-    def _find_fov(as_built):
-        config_tag = {Globals.nominal: [['2', '3'], ['5', '6'], ['8', '9']],
-                      Globals.extended: [['11', '12', '13']]}
+    def calculate_fov(as_built):
+        """ This code is intended to be pasted directly into a notebook.
+        """
+        config_tag = {Globals.nominal: [['2', '3'], ['9', '10'], ['12', '13']],
+                      Globals.extended: [['5', '6', '7']]}
         for opticon in config_tag:
             coadd_title = ''
             for step_list in config_tag[opticon]:
@@ -77,7 +68,8 @@ class Opt01:
                 Plot.mosaic(slice_map, title='Slice Map', cmap='hsv', mask=(0.0, 'black'))
                 Opt01._calculate_fov(slice_map)
                 Opt01._find_rrf(flood, slice_map)
-                as_built['slice_map_' + opticon[0:3] + step_tag] = slice_map
+                slice_map_key = 'slice_map_' + opticon[0:3] + '_' + step_tag
+                as_built[slice_map.name] = slice_map
         return as_built
 
     @staticmethod
@@ -261,7 +253,13 @@ class Opt01:
         """ Create slice map, which is a fits HDU detector mosaic image where each pixel takes the value of
         its slice number N, such that N = slice_no + 100 x pslice_no
         """
-        slice_map = mosaic.copy(clear_data=True, copy_name='slice_map')
+        opticon = mosaic.primary_hdr['HIERARCH AIT OPTICON']
+        ech_order = mosaic.primary_hdr['HIERARCH ACHG REF_ECH_ORD']
+        ech_ang = mosaic.primary_hdr['HIERARCH AIT ECH_ANG']
+        ea_sign = 'n' if ech_ang < 0. else 'p'
+        ea_tag = "{:s}{:05d}".format(ea_sign, int(math.fabs(1000.*ech_ang)))
+        map_name = "slice_map_{:3s}_eo{:d}_ea{:s}".format(opticon[0:3], ech_order, ea_tag)
+        slice_map = mosaic.copy(clear_data=True, copy_name=map_name)
         for hdu in slice_map.hdu_list:
             det_no = int(hdu.header['ID'])
             det_no_idxs = slice_coords['det_nos'] == det_no
@@ -288,7 +286,6 @@ class Opt01:
 
     @staticmethod
     def _calculate_fov(slice_map):
-        # _, pri_hdu, hdu_list = slice_map
         opticon = slice_map.primary_hdr['HIERARCH AIT OPTICON']
         n_rows, n_cols = Globals.det_format
         n_illum = 0

@@ -539,7 +539,7 @@ class Util:
     def slice_to_efp_y(fslice_no, phase):
         """ Return the EFP y coordinate of the field slice centre (in mm).
         """
-        bs_slice_no, bs_phase = 15, 0.
+        bs_slice_no, bs_phase = 15, 0.          # Boresight definition
         efp_slice_width = Globals.beta_slice.to(u.arcsec) / Globals.efp_arcsec_mm
         slice_no_float = fslice_no + phase
         s_offset = slice_no_float - (bs_slice_no + bs_phase)
